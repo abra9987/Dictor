@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Microphone access. Two keys; one for each distribution mode the
+      app might land in:
+
+        com.apple.security.device.audio-input
+          The Hardened Runtime key. macOS Tahoe 26 checks THIS one
+          when deciding whether a Developer-ID-signed app (the
+          distribution model we use) can appear in System Settings →
+          Privacy & Security → Microphone. Without it the app never
+          gets a TCC entry and the prompt silently never fires.
+
+        com.apple.security.device.microphone
+          The App Sandbox flavour. Harmless on Hardened Runtime
+          builds, kept as belt-and-braces for older macOS versions
+          that historically accepted the sandbox key as a fallback.
+
+      Anything new in this file expands the TCC surface and has to
+      be justified before being added.
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+</dict>
+</plist>
