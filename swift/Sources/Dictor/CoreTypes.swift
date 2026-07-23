@@ -98,6 +98,8 @@ enum MenuBarState {
     case recording
     case busy
     case error
+    /// Диктовка выключена тумблером поповера: линия с разрывом, 40%.
+    case paused
 }
 
 enum RecordingHUDMode: Equatable {
