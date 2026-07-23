@@ -100,12 +100,15 @@ enum MenuBarState {
     case error
 }
 
-enum RecordingHUDMode {
+enum RecordingHUDMode: Equatable {
     case recording
     case transcribing
+    /// Подтверждение вставки: галочка + «Вставлено · N слов»,
+    /// держится SD.Anim.insertedHoldSeconds и растворяется.
+    case inserted
     /// Brief flash shown when a dictation fails (transcription error,
-    /// paste failure). Renders a static yellow capsule so the user
-    /// gets visual feedback even when the menu-bar icon is hidden.
+    /// paste failure). Renders a static coral flat-line capsule so the
+    /// user gets visual feedback even when the menu-bar icon is hidden.
     case error
 }
 
@@ -527,6 +530,8 @@ let RECENT_TRANSCRIPT_LIMIT_DISPLAY: [RecentTranscriptLimit: String] = [
 ]
 
 enum RecordingHUDAccentColor: String, CaseIterable {
+    case coral
+    case graphite
     case red
     case orange
     case pink
@@ -538,6 +543,8 @@ enum RecordingHUDAccentColor: String, CaseIterable {
 
     var displayName: String {
         switch self {
+        case .coral: return "Coral"
+        case .graphite: return "Graphite"
         case .red: return "Red"
         case .orange: return "Orange"
         case .pink: return "Pink"
@@ -551,6 +558,8 @@ enum RecordingHUDAccentColor: String, CaseIterable {
 
     var nsColor: NSColor {
         switch self {
+        case .coral: return SD.C.voiceDark
+        case .graphite: return NSColor(hex: 0xA3A09A)
         case .red: return .systemRed
         case .orange: return .systemOrange
         case .pink: return .systemPink
@@ -578,15 +587,29 @@ enum RecordingHUDSize: String, CaseIterable {
 
     var visualScale: CGFloat {
         switch self {
-        case .compact: return 1.15
-        case .standard: return 1.5
-        case .large: return 1.85
+        case .compact: return 1.0
+        case .standard: return 1.3
+        case .large: return 1.55
+        }
+    }
+
+    /// Высота пилюли по дизайну 1c: 26 / 36 / 44 pt. Ширина — под
+    /// контент самого длинного состояния (волна + таймер + подсказка);
+    /// панель добавляет поля под тень.
+    var capsuleHeight: CGFloat {
+        switch self {
+        case .compact: return 26
+        case .standard: return 36
+        case .large: return 44
         }
     }
 
     var expandedSize: NSSize {
-        NSSize(width: RECORDING_HUD_BASE_SIZE.width * visualScale,
-               height: RECORDING_HUD_BASE_SIZE.height * visualScale)
+        switch self {
+        case .compact: return NSSize(width: 128, height: 42)
+        case .standard: return NSSize(width: 248, height: 56)
+        case .large: return NSSize(width: 292, height: 66)
+        }
     }
 }
 

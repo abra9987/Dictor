@@ -1436,6 +1436,8 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
     private func localizedColorName(_ color: RecordingHUDAccentColor) -> String {
         guard language == .russian else { return color.displayName }
         switch color {
+        case .coral: return "Коралловый"
+        case .graphite: return "Графитовый"
         case .red: return "Красный"
         case .orange: return "Оранжевый"
         case .pink: return "Розовый"

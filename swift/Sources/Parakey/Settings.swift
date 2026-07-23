@@ -375,7 +375,7 @@ final class Settings: @unchecked Sendable {
         get {
             guard let raw = defaults.string(forKey: Self.keyRecordingHUDRecordingColor),
                   let color = RecordingHUDAccentColor(rawValue: raw) else {
-                return .red
+                return .coral
             }
             return color
         }
@@ -389,7 +389,7 @@ final class Settings: @unchecked Sendable {
         get {
             guard let raw = defaults.string(forKey: Self.keyRecordingHUDTranscribingColor),
                   let color = RecordingHUDAccentColor(rawValue: raw) else {
-                return .blue
+                return .graphite
             }
             return color
         }
