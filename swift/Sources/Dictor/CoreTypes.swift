@@ -674,10 +674,14 @@ struct TranscriptHistoryEntry: Codable, Equatable {
     let text: String
     let transcriptionDurationSeconds: Double?
     let asrTiming: ASRTimingBreakdown?
+    /// Момент диктовки. Optional: записи до редизайна Dictor его не
+    /// имеют и в истории группируются как «Ранее».
+    let createdAt: Date?
 
     init(text: String,
          transcriptionDurationSeconds: Double? = nil,
-         asrTiming: ASRTimingBreakdown? = nil) {
+         asrTiming: ASRTimingBreakdown? = nil,
+         createdAt: Date? = nil) {
         self.text = text
         if let duration = transcriptionDurationSeconds,
            duration.isFinite,
@@ -687,6 +691,7 @@ struct TranscriptHistoryEntry: Codable, Equatable {
             self.transcriptionDurationSeconds = nil
         }
         self.asrTiming = asrTiming
+        self.createdAt = createdAt
     }
 }
 

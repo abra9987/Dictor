@@ -1655,6 +1655,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var recordingStartedAtUptime: TimeInterval?
     private var quickPanel: DictorQuickPanel?
     private var isDictationPaused = false
+    private var historySearchQuery = ""
+    private weak var historySearchField: NSSearchField?
     private var menuBarGlyphPhase: CGFloat = 0
     private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
     private var insertedHUDWorkItem: DispatchWorkItem?
@@ -4182,7 +4184,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let entry = TranscriptHistoryEntry(
             text: text,
             transcriptionDurationSeconds: transcriptionDurationSeconds,
-            asrTiming: asrTiming
+            asrTiming: asrTiming,
+            createdAt: Date()
         )
         let next = limitedTranscriptHistoryArchive([entry] + history)
         guard next != history else { return }
@@ -4290,8 +4293,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let screen = screenForRecordingHUD()
         let visible = screen.visibleFrame
         let width: CGFloat = min(620, visible.width - 48)
-        let displayedHistory = visibleHistory
-        let rowHeight: CGFloat = displayedHistory.isEmpty ? 58 : CGFloat(min(displayedHistory.count, 7)) * 64
+        let displayedHistory = filteredHistoryForOverlay()
+        let dayHeaders = Set(displayedHistory.prefix(7).map { historyDayHeader(for: $0.1.createdAt) }).count
+        let rowHeight: CGFloat = displayedHistory.isEmpty
+            ? 58
+            : CGFloat(min(displayedHistory.count, 7)) * 64 + CGFloat(dayHeaders) * 24
         let height: CGFloat = min(500, 42 + rowHeight)
         let y = visible.midY - (height / 2)
         return NSRect(x: visible.midX - (width / 2),
@@ -4339,6 +4345,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             target: self,
             action: #selector(showStatisticsFromHistoryOverlayClicked(_:))
         ))
+        let search = NSSearchField()
+        search.placeholderString = historyT("Искать в истории…", "Search history…")
+        search.font = .systemFont(ofSize: 12)
+        search.target = self
+        search.action = #selector(historySearchChanged(_:))
+        search.stringValue = historySearchQuery
+        search.sendsSearchStringImmediately = true
+        search.translatesAutoresizingMaskIntoConstraints = false
+        search.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        historySearchField = search
+        actions.addArrangedSubview(search)
         actions.addArrangedSubview(NSView())
         actions.addArrangedSubview(HistoryToolbarButton(
             symbolName: "gearshape",
@@ -4350,16 +4367,29 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stack.addArrangedSubview(actions)
         actions.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        let displayedHistory = visibleHistory
+        let displayedHistory = filteredHistoryForOverlay()
         if displayedHistory.isEmpty {
-            let empty = HistoryItemLabel("No dictations yet")
+            let empty = HistoryItemLabel(historySearchQuery.isEmpty
+                ? historyT("Пока тихо — первая диктовка появится здесь.",
+                             "Quiet so far — your first dictation will show up here.")
+                : historyT("Ничего не нашлось.", "No matches."))
             empty.font = .systemFont(ofSize: 13)
             empty.textColor = .secondaryLabelColor
             empty.alignment = .center
             stack.addArrangedSubview(empty)
             empty.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         } else {
-            for (index, entry) in displayedHistory.prefix(7).enumerated() {
+            var lastHeader: String?
+            for (index, entry) in displayedHistory.prefix(7) {
+                let header = historyDayHeader(for: entry.createdAt)
+                if header != lastHeader {
+                    lastHeader = header
+                    let label = HistoryItemLabel(header.uppercased())
+                    label.font = .systemFont(ofSize: 10.5, weight: .semibold)
+                    label.textColor = .tertiaryLabelColor
+                    stack.addArrangedSubview(label)
+                    label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                }
                 let row = historyOverlayRow(index: index, entry: entry)
                 historyOverlayRows.append(row)
                 stack.addArrangedSubview(row)
@@ -4368,6 +4398,43 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         return root
+    }
+
+    /// Видимая история с сохранением исходных индексов (для удаления)
+    /// и фильтром поиска.
+    private func filteredHistoryForOverlay() -> [(Int, TranscriptHistoryEntry)] {
+        let query = historySearchQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let indexed = Array(visibleHistory.enumerated())
+        guard !query.isEmpty else { return indexed }
+        return indexed.filter { $0.1.text.lowercased().contains(query) }
+    }
+
+    private func historyT(_ russian: String, _ english: String) -> String {
+        localizedText(russian, english, language: settings.interfaceLanguage)
+    }
+
+    private func historyDayHeader(for date: Date?) -> String {
+        guard let date else { return historyT("Ранее", "Earlier") }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return historyT("Сегодня", "Today") }
+        if calendar.isDateInYesterday(date) { return historyT("Вчера", "Yesterday") }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: settings.interfaceLanguage == .russian ? "ru_RU" : "en_US")
+        formatter.dateFormat = "d MMMM"
+        return formatter.string(from: date)
+    }
+
+    @objc private func historySearchChanged(_ sender: NSSearchField) {
+        historySearchQuery = sender.stringValue
+        guard let panel = historyOverlayWindow, panel.isVisible else { return }
+        panel.contentView = makeHistoryOverlayContent()
+        panel.setFrame(historyOverlayFrame(), display: true)
+        if let field = historySearchField {
+            panel.makeFirstResponder(field)
+            field.currentEditor()?.moveToEndOfLine(nil)
+        }
     }
 
     private func historyOverlayRow(index: Int, entry: TranscriptHistoryEntry) -> HistoryTranscriptItemView {
