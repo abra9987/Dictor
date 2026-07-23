@@ -87,6 +87,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private let settings = Settings.shared
     private var permissionClickCount: [Permission: Int] = [:]
     private var settingsDraft: ControlPanelSettingsDraft?
+    private var settingsTab = "general"
     private var hotkeyRecorder: HotkeyRecorderController?
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
@@ -268,7 +269,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.addArrangedSubview(compactHeaderView())
         root.addArrangedSubview(compactServiceCard())
         root.addArrangedSubview(compactPermissionsCard())
-        root.addArrangedSubview(compactUpdateCard())
         root.addArrangedSubview(compactPrivacyFooter())
 
         let background = NSVisualEffectView()
@@ -302,7 +302,121 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.translatesAutoresizingMaskIntoConstraints = false
 
         root.addArrangedSubview(settingsHeaderView())
+        root.addArrangedSubview(settingsTabBar())
         root.addArrangedSubview(separator())
+        switch settingsTab {
+        case "hotkeys":
+            addHotkeyTabRows(to: root, draft: draft)
+        case "look":
+            addLookTabRows(to: root, draft: draft)
+            root.addArrangedSubview(settingsActionsRow(draft: draft))
+        case "privacy":
+            root.addArrangedSubview(privacyInfoView())
+        default:
+            addGeneralTabRows(to: root, draft: draft)
+        }
+
+        let background = NSVisualEffectView()
+        background.material = .underWindowBackground
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.addSubview(root)
+
+        NSLayoutConstraint.activate([
+            root.leadingAnchor.constraint(equalTo: background.leadingAnchor),
+            root.trailingAnchor.constraint(equalTo: background.trailingAnchor),
+            root.topAnchor.constraint(equalTo: background.topAnchor),
+            root.bottomAnchor.constraint(lessThanOrEqualTo: background.bottomAnchor),
+        ])
+
+        let innerWidthInset = -(root.edgeInsets.left + root.edgeInsets.right)
+        for view in root.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: root.widthAnchor,
+                                        constant: innerWidthInset).isActive = true
+        }
+        return background
+    }
+
+    // MARK: - Вкладки настроек (дизайн 2c, адаптировано)
+
+    private func settingsTabBar() -> NSView {
+        let bar = NSStackView()
+        bar.orientation = .horizontal
+        bar.spacing = 2
+        let tabs = [("general", t("Основное", "General")),
+                    ("hotkeys", t("Хоткеи", "Hotkeys")),
+                    ("look", t("Внешний вид", "Appearance")),
+                    ("privacy", t("Приватность", "Privacy"))]
+        for (id, title) in tabs {
+            let button = NSButton(title: title, target: self,
+                                  action: #selector(settingsTabClicked(_:)))
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 12, weight: settingsTab == id ? .semibold : .regular)
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 7
+            if settingsTab == id {
+                button.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+                button.contentTintColor = .labelColor
+            } else {
+                button.contentTintColor = .secondaryLabelColor
+            }
+            button.identifier = NSUserInterfaceItemIdentifier(id)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            bar.addArrangedSubview(button)
+        }
+        return bar
+    }
+
+    @objc private func settingsTabClicked(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        settingsTab = id
+        refresh(force: true)
+    }
+
+    private func addGeneralTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
+        root.addArrangedSubview(popupRow(
+            title: t("Язык распознавания", "Dictation language"),
+            detail: t("Авто определяет язык по речи.", "Auto detects the language from speech."),
+            selectedValue: settings.dictationLanguage.rawValue,
+            options: [(t("Авто", "Auto"), DictationLanguage.auto.rawValue),
+                      ("Русский", DictationLanguage.russian.rawValue),
+                      ("English", DictationLanguage.english.rawValue)]
+                + DictationLanguage.allCases
+                    .filter { ![.auto, .russian, .english].contains($0) }
+                    .map { (DICTATION_LANGUAGE_DISPLAY[$0] ?? $0.rawValue, $0.rawValue) },
+            action: #selector(selectDictationLanguageFromPanel(_:)),
+            toolTip: t("Язык, который ожидает модель распознавания.",
+                       "The language the speech model should expect.")
+        ))
+        root.addArrangedSubview(primaryCompletionBehaviorRow(draft))
+        root.addArrangedSubview(enterDelayRow(draft))
+        root.addArrangedSubview(popupRow(
+            title: t("Звуки", "Sounds"),
+            detail: t("Короткие сигналы начала, конца и ошибки диктовки.",
+                      "Short cues for start, finish and errors."),
+            selectedValue: settings.playFeedbackSounds ? "on" : "off",
+            options: [(t("Вкл", "On"), "on"), (t("Выкл", "Off"), "off")],
+            action: #selector(selectFeedbackSoundsFromPanel(_:)),
+            toolTip: t("Звуковая обратная связь диктовки.", "Dictation sound feedback.")
+        ))
+        root.addArrangedSubview(settingsActionsRow(draft: draft))
+    }
+
+    @objc private func selectDictationLanguageFromPanel(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let language = DictationLanguage(rawValue: raw) else { return }
+        settings.dictationLanguage = language
+        refresh(force: true)
+    }
+
+    @objc private func selectFeedbackSoundsFromPanel(_ sender: NSPopUpButton) {
+        let raw = sender.selectedItem?.representedObject as? String
+        settings.playFeedbackSounds = raw == "on"
+        refresh(force: true)
+    }
+
+    private func addHotkeyTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
         root.addArrangedSubview(hotkeyRow(
             title: t("Диктовка", "Dictation"),
             shortcut: draft.dictationHotkey,
@@ -320,7 +434,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             toolTip: t("Открыть или закрыть последние транскрипции.",
                        "Open or close recent transcriptions.")
         ))
-        root.addArrangedSubview(separator())
+        root.addArrangedSubview(settingsActionsRow(draft: draft))
+    }
+
+    private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
         root.addArrangedSubview(popupRow(
             title: t("Размер капсулы", "Capsule size"),
             detail: t("Размер плавающего индикатора записи.",
@@ -360,28 +477,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             toolTip: t("Выбрать фон плавающего индикатора диктовки.",
                        "Choose the floating dictation indicator background.")
         ))
-        root.addArrangedSubview(settingsActionsRow(draft: draft))
-        root.addArrangedSubview(privacyInfoView())
-
-        let background = NSVisualEffectView()
-        background.material = .underWindowBackground
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.addSubview(root)
-
-        NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            root.topAnchor.constraint(equalTo: background.topAnchor),
-            root.bottomAnchor.constraint(lessThanOrEqualTo: background.bottomAnchor),
-        ])
-
-        let innerWidthInset = -(root.edgeInsets.left + root.edgeInsets.right)
-        for view in root.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: root.widthAnchor,
-                                        constant: innerWidthInset).isActive = true
-        }
-        return background
     }
 
     private func compactHeaderView() -> NSView {

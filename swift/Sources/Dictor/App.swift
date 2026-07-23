@@ -5173,15 +5173,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sub.addItem(.separator())
 
-        let checkUpdates = NSMenuItem(title: isCheckingForUpdates ? "Checking for Updates…" : "Check for Updates…",
-                                      action: #selector(checkForUpdatesClicked(_:)),
-                                      keyEquivalent: "")
-        checkUpdates.target = self
-        checkUpdates.isEnabled = !isCheckingForUpdates && !isTerminating
-        sub.addItem(checkUpdates)
-
-        sub.addItem(.separator())
-
         let about = NSMenuItem(title: "About Dictor",
                                action: #selector(showAboutClicked(_:)),
                                keyEquivalent: "")
@@ -5875,14 +5866,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sounds.target = self
         sounds.state = settings.playFeedbackSounds ? .on : .off
         sub.addItem(sounds)
-
-        let automaticUpdates = NSMenuItem(title: "Automatically check for updates",
-                                          action: #selector(toggleCheckForUpdates(_:)),
-                                          keyEquivalent: "")
-        automaticUpdates.target = self
-        automaticUpdates.state = settings.checkForUpdates ? .on : .off
-        automaticUpdates.toolTip = "Periodically checks GitHub for a newer release and only notifies you."
-        sub.addItem(automaticUpdates)
 
         let launchAtLogin = NSMenuItem(title: "Launch at Login",
                                        action: #selector(toggleLaunchAtLogin(_:)),
@@ -7446,6 +7429,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - Update flow
 
     private func startUpdateCheckLoop() {
+        // Dictor — самостоятельный форк: апстрим-эндпоинтов обновлений
+        // больше нет, цикл проверки не запускается никогда.
+        return
         guard updateCheckLoopTask == nil else { return }
         updateCheckLoopTask = Task.detached { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(UPDATE_CHECK_FIRST_DELAY_SECONDS * 1_000_000_000))
