@@ -152,13 +152,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 310),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered,
                               defer: false)
         window.title = "Dictor"
-        window.contentMinSize = NSSize(width: 520, height: 310)
-        window.contentMaxSize = NSSize(width: 520, height: 310)
+        window.contentMinSize = NSSize(width: 620, height: 560)
+        window.contentMaxSize = NSSize(width: 620, height: 560)
         window.isReleasedWhenClosed = false
         window.delegate = self
         self.window = window
@@ -187,9 +187,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let fingerprint = renderFingerprint()
         guard force || fingerprint != lastRenderFingerprint else { return }
         lastRenderFingerprint = fingerprint
-        resizeCompactPanel(window)
-        window.title = t("Dictor — панель управления", "Dictor — Control Panel")
-        window.contentView = makeContentView()
+        window.title = t("Настройки Dictor", "Dictor Settings")
+        window.contentView = makeSettingsContentView()
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
             settingsWindow.contentView = makeSettingsContentView()
@@ -271,10 +270,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.addArrangedSubview(compactPermissionsCard())
         root.addArrangedSubview(compactPrivacyFooter())
 
-        let background = NSVisualEffectView()
-        background.material = .underWindowBackground
-        background.blendingMode = .behindWindow
-        background.state = .active
+        let background = PaperBackgroundView()
         background.addSubview(root)
 
         NSLayoutConstraint.activate([
@@ -316,10 +312,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             addGeneralTabRows(to: root, draft: draft)
         }
 
-        let background = NSVisualEffectView()
-        background.material = .underWindowBackground
-        background.blendingMode = .behindWindow
-        background.state = .active
+        let background = PaperBackgroundView()
         background.addSubview(root)
 
         NSLayoutConstraint.activate([
@@ -375,6 +368,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addGeneralTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
+        root.addArrangedSubview(compactServiceCard())
+        let missingPermissions = Permission.allCases.filter { !Permissions.isGranted($0) }
+        if !missingPermissions.isEmpty {
+            root.addArrangedSubview(compactPermissionsCard())
+        }
         root.addArrangedSubview(popupRow(
             title: t("Язык распознавания", "Dictation language"),
             detail: t("Авто определяет язык по речи.", "Auto detects the language from speech."),

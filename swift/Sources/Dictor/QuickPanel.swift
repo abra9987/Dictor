@@ -121,15 +121,11 @@ final class DictorQuickPanel: NSPanel {
     // MARK: - Сборка контента
 
     private func rebuildContent() {
-        let container = NSVisualEffectView()
-        container.material = .popover
-        container.state = .active
-        container.blendingMode = .behindWindow
+        let container = PaperBackgroundView()
+        container.cornerRadius = 12
         container.wantsLayer = true
         container.layer?.cornerRadius = 12
         container.layer?.masksToBounds = true
-        container.layer?.borderWidth = 0.5
-        container.layer?.borderColor = NSColor.black.withAlphaComponent(0.15).cgColor
 
         contentStack.subviews.forEach { $0.removeFromSuperview() }
         let stack = NSStackView()

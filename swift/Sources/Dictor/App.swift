@@ -1914,7 +1914,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-        concealMenuBarIcon()
+        revealMenuBarIcon()
         setMenuBarState(.loading)
         startCorrectionSyncIfConfigured()
         rebuildMenu()
@@ -2715,6 +2715,12 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem.length = 0
         statusItem.button?.isHidden = true
         statusItem.button?.toolTip = nil
+    }
+
+    private func revealMenuBarIcon() {
+        statusItem.length = NSStatusItem.squareLength
+        statusItem.button?.isHidden = false
+        statusItem.button?.toolTip = "Dictor"
     }
 
     private func tintedCopy(of source: NSImage, with color: NSColor) -> NSImage {
@@ -4309,16 +4315,12 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func makeHistoryOverlayContent() -> NSView {
         historyOverlayRows.removeAll(keepingCapacity: true)
         let frame = NSRect(origin: .zero, size: historyOverlayFrame().size)
-        let root = NSVisualEffectView(frame: frame)
-        root.material = .underWindowBackground
-        root.blendingMode = .behindWindow
-        root.state = .active
+        let root = PaperBackgroundView(frame: frame)
+        root.cornerRadius = 16
         root.wantsLayer = true
-        root.layer?.cornerRadius = 22
+        root.layer?.cornerRadius = 16
         root.layer?.cornerCurve = .continuous
         root.layer?.masksToBounds = true
-        root.layer?.borderWidth = 1
-        root.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.16).cgColor
 
         let stack = NSStackView()
         stack.orientation = .vertical
