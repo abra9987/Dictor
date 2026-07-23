@@ -180,3 +180,42 @@ func dictatedWordsLabel(_ count: Int, language: InterfaceLanguage) -> String {
     }
     return "\(count) \(noun)"
 }
+
+// MARK: - Поверхность «бумага»
+
+/// Непрозрачный фон окон по дизайну: paper #F5F4F1 / #1E1D1B.
+/// Обычный draw()-вью, чтобы цвет следовал за сменой темы без слоёв.
+final class PaperBackgroundView: NSView {
+    var cornerRadius: CGFloat = 0 {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds,
+                                xRadius: cornerRadius,
+                                yRadius: cornerRadius)
+        SD.C.paper.setFill()
+        path.fill()
+        if cornerRadius > 0 {
+            SD.C.hairline.setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+extension SD {
+    /// Заголовок окна 22/700 c тонким трекингом — «Заголовок окна» из
+    /// типографической шкалы дизайна.
+    static func windowTitleLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = NSFont.systemFont(ofSize: 22, weight: .bold)
+        label.textColor = SD.C.ink
+        return label
+    }
+}
