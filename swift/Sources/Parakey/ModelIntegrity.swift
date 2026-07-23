@@ -582,7 +582,7 @@ func recordingHUDPhaseSpeed(mode: RecordingHUDMode, level: Float) -> CGFloat {
             + (voiceLevel * RECORDING_HUD_RECORDING_LEVEL_PHASE_SPEED)
     case .transcribing:
         return RECORDING_HUD_TRANSCRIBING_PHASE_SPEED
-    case .error:
+    case .inserted, .error:
         return 0
     }
 }

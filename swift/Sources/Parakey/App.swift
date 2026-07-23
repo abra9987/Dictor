@@ -68,34 +68,30 @@ final class CorrectionShareCleanupDelegate: NSObject, @preconcurrency NSSharingS
 }
 
 final class RecordingHUDView: NSView {
+    // Публичный API сохранён ради exportRecordingHUDAnimationFrames и
+    // существующей интеграции; отрисовка полностью новая («линия голоса»).
     var visualScale: CGFloat = RecordingHUDSize.standard.visualScale {
-        didSet {
-            if oldValue != visualScale { needsDisplay = true }
-        }
+        didSet { if oldValue != visualScale { needsDisplay = true } }
     }
 
-    var recordingColor: NSColor = .systemRed {
-        didSet {
-            if !oldValue.isEqual(recordingColor) { needsDisplay = true }
-        }
+    var hudSize: RecordingHUDSize = .standard {
+        didSet { if oldValue != hudSize { needsDisplay = true } }
     }
 
-    var transcribingColor: NSColor = NSColor(calibratedRed: 0.0, green: 0.44, blue: 1.0, alpha: 1) {
-        didSet {
-            if !oldValue.isEqual(transcribingColor) { needsDisplay = true }
-        }
+    var recordingColor: NSColor = SD.C.voiceDark {
+        didSet { if !oldValue.isEqual(recordingColor) { needsDisplay = true } }
+    }
+
+    var transcribingColor: NSColor = NSColor(hex: 0xA3A09A) {
+        didSet { if !oldValue.isEqual(transcribingColor) { needsDisplay = true } }
     }
 
     var backgroundStyle: RecordingHUDBackgroundStyle = .system {
-        didSet {
-            if oldValue != backgroundStyle { needsDisplay = true }
-        }
+        didSet { if oldValue != backgroundStyle { needsDisplay = true } }
     }
 
     var showsCapsuleStroke = true {
-        didSet {
-            if oldValue != showsCapsuleStroke { needsDisplay = true }
-        }
+        didSet { if oldValue != showsCapsuleStroke { needsDisplay = true } }
     }
 
     var transcribingElapsedOverride: CGFloat? {
@@ -103,15 +99,14 @@ final class RecordingHUDView: NSView {
     }
 
     var revealProgress: CGFloat = 1 {
-        didSet {
-            if oldValue != revealProgress { needsDisplay = true }
-        }
+        didSet { if oldValue != revealProgress { needsDisplay = true } }
     }
 
     var mode: RecordingHUDMode = .recording {
         didSet {
             if oldValue != mode {
                 modeChangedAt = ProcessInfo.processInfo.systemUptime
+                if mode == .transcribing { frozenLevels = levelHistory }
                 needsDisplay = true
             }
         }
@@ -120,255 +115,399 @@ final class RecordingHUDView: NSView {
 
     var level: Float = 0 {
         didSet {
+            if mode == .recording {
+                levelHistory.append(CGFloat(max(0, min(1, level))))
+                if levelHistory.count > 96 { levelHistory.removeFirst(levelHistory.count - 96) }
+            }
             if oldValue != level { needsDisplay = true }
         }
     }
 
     var phase: CGFloat = 0 {
-        didSet {
-            if oldValue != phase { needsDisplay = true }
-        }
+        didSet { if oldValue != phase { needsDisplay = true } }
+    }
+
+    /// Секунды записи для mono-таймера. Обновляет таймер уровня.
+    var recordingElapsed: TimeInterval = 0 {
+        didSet { if Int(oldValue) != Int(recordingElapsed) { needsDisplay = true } }
+    }
+
+    var insertedWordCount: Int = 0 {
+        didSet { if oldValue != insertedWordCount { needsDisplay = true } }
+    }
+
+    var errorMessage: String? {
+        didSet { if oldValue != errorMessage { needsDisplay = true } }
+    }
+
+    var interfaceLanguage: InterfaceLanguage = .russian {
+        didSet { if oldValue != interfaceLanguage { needsDisplay = true } }
+    }
+
+    /// Кольцевой буфер RMS-уровней; волна скроллится влево. Тишина
+    /// рисует бары высотой 2pt — линия не исчезает никогда.
+    private var levelHistory: [CGFloat] = []
+    private var frozenLevels: [CGFloat] = []
+
+    func resetWave() {
+        levelHistory.removeAll(keepingCapacity: true)
+        frozenLevels.removeAll(keepingCapacity: true)
+        recordingElapsed = 0
+        needsDisplay = true
     }
 
     override var isFlipped: Bool { true }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        drawFloatingWaveformOnly()
+    private var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 
-    private func drawFloatingWaveformOnly() {
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        drawCapsule()
+    }
+
+    // MARK: - Метрики раскладки
+
+    private var capsuleHeight: CGFloat { hudSize.capsuleHeight }
+
+    private var waveSize: NSSize {
+        switch hudSize {
+        case .compact: return NSSize(width: 24, height: 12)
+        case .standard: return NSSize(width: 34, height: 18)
+        case .large: return NSSize(width: 40, height: 20)
+        }
+    }
+
+    private var timerFontSize: CGFloat {
+        switch hudSize {
+        case .compact: return 10
+        case .standard: return 12
+        case .large: return 13
+        }
+    }
+
+    private var labelFontSize: CGFloat {
+        switch hudSize {
+        case .compact: return 10.5
+        case .standard: return 12
+        case .large: return 13
+        }
+    }
+
+    private var captionFontSize: CGFloat {
+        switch hudSize {
+        case .compact: return 10
+        case .standard: return 11
+        case .large: return 11.5
+        }
+    }
+
+    private var showsEscHint: Bool { hudSize != .compact }
+
+    // MARK: - Отрисовка
+
+    private func drawCapsule() {
         let reveal = max(0, min(1, revealProgress))
         guard reveal > 0.001 else { return }
 
-        let clamped = CGFloat(max(0, min(1, level)))
-        let audio = pow(clamped, 0.82)
-        let settlePeak: CGFloat = 0.68
-        let settleOvershoot: CGFloat = 0.10
-        let grow: CGFloat
-        if reveal <= settlePeak {
-            grow = (1 + settleOvershoot) * smootherstep(0, settlePeak, reveal)
+        // Появление: scale 0.85→1 + opacity (spring имитируется
+        // overshoot-кривой); Reduce Motion — чистый crossfade.
+        let capsuleAlpha = smootherstep(0, 0.5, reveal)
+        let contentAlpha = smootherstep(0.3, 0.9, reveal)
+        let scale: CGFloat
+        if reduceMotion {
+            scale = 1
         } else {
-            grow = (1 + settleOvershoot)
-                - (settleOvershoot * smootherstep(settlePeak, 1, reveal))
+            let settle = smootherstep(0, 1, reveal)
+            let overshoot = sin(settle * .pi) * 0.045
+            scale = 0.85 + (0.15 * settle) + overshoot
         }
-        let capsuleAlpha = smootherstep(0, 0.34, reveal)
-        let contentAlpha = smootherstep(0.16, 0.78, reveal)
-        let visualScale = self.visualScale
-        let startDiameter: CGFloat = 6 * visualScale
-        let finalRect = bounds.insetBy(dx: 4 * visualScale, dy: 4 * visualScale)
-        let breathingReady = smootherstep(0.82, 1, reveal)
-        let idleBreath = 0.0032 + (0.0018 * sin(phase * 0.31))
-        let voiceBreath = audio * (0.014 + (0.008 * ((sin(phase * 0.87) + 1) / 2)))
-        let liveScale = 1 + ((idleBreath + voiceBreath) * breathingReady)
-        let capsuleWidth = (startDiameter + ((finalRect.width - startDiameter) * grow)) * liveScale
-        let capsuleHeight = (startDiameter + ((finalRect.height - startDiameter) * grow)) * liveScale
-        let capsuleRect = NSRect(x: bounds.midX - (capsuleWidth / 2),
-                                 y: bounds.midY - (capsuleHeight / 2),
-                                 width: capsuleWidth,
-                                 height: capsuleHeight)
+
+        let content = contentLayout()
+        let width = min(bounds.width - 8, content.totalWidth) * scale
+        let height = capsuleHeight * scale
+        let capsuleRect = NSRect(x: bounds.midX - width / 2,
+                                 y: bounds.midY - height / 2,
+                                 width: width,
+                                 height: height)
         let capsule = NSBezierPath(roundedRect: capsuleRect,
-                                   xRadius: capsuleRect.height / 2,
-                                   yRadius: capsuleRect.height / 2)
-        let palette = backgroundPalette(alpha: capsuleAlpha)
-        palette.fill.setFill()
-        capsule.fill()
-        let accent: NSColor
-        switch mode {
-        case .transcribing: accent = transcribingColor
-        case .error:        accent = .systemYellow
-        case .recording:    accent = recordingColor
+                                   xRadius: height / 2,
+                                   yRadius: height / 2)
+
+        NSGraphicsContext.saveGraphicsState()
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.setShadow(offset: CGSize(width: 0, height: -SD.Metrics.capsuleShadowOffsetY),
+                              blur: SD.Metrics.capsuleShadowRadius,
+                              color: NSColor.black
+                                  .withAlphaComponent(SD.Metrics.capsuleShadowAlpha * capsuleAlpha)
+                                  .cgColor)
         }
-        let vividAccent = accent
+        capsuleFill().withAlphaComponent(capsuleFillAlpha() * capsuleAlpha).setFill()
+        capsule.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
         if showsCapsuleStroke {
-            palette.stroke.setStroke()
-            capsule.lineWidth = 1 * visualScale
+            NSColor.white.withAlphaComponent(0.08 * capsuleAlpha).setStroke()
+            capsule.lineWidth = 1
             capsule.stroke()
         }
 
         guard contentAlpha > 0.001 else { return }
-
         NSGraphicsContext.saveGraphicsState()
-        guard let context = NSGraphicsContext.current?.cgContext else {
-            NSGraphicsContext.restoreGraphicsState()
-            return
-        }
-        capsule.addClip()
-        context.setAlpha(contentAlpha)
         defer { NSGraphicsContext.restoreGraphicsState() }
+        capsule.addClip()
+        NSGraphicsContext.current?.cgContext.setAlpha(contentAlpha)
+
+        drawContent(content, in: capsuleRect)
 
         if mode == .transcribing {
-            drawTranscribingWave(in: capsuleRect, alpha: 1)
-            return
-        }
-
-        if mode == .error {
-            drawErrorIndicator(in: capsuleRect)
-            return
-        }
-
-        let barCount = 8
-        let barWidth: CGFloat = 2.05 * visualScale
-        let barGap: CGFloat = 2.55 * visualScale
-        let minHeight: CGFloat = 3.0 * visualScale
-        let maxHeight = min(capsuleRect.height * 0.58, 13.2 * visualScale)
-        let totalWidth = CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barGap
-        let startX = bounds.midX - (totalWidth / 2)
-        let centerY = bounds.midY
-        let centerIndex = CGFloat(barCount - 1) / 2
-        let centerDenominator = max(centerIndex, 1)
-
-        for index in 0..<barCount {
-            let i = CGFloat(index)
-            let normalized = (i - centerIndex) / centerDenominator
-            let envelope = pow(max(0, cos(normalized * .pi / 2)), 0.62)
-            let traveling = (sin((phase * 1.02) - (normalized * 2.85)) + 1) / 2
-            let counter = (sin((phase * 1.57) + (i * 1.17)) + 1) / 2
-            let slowVariance = (sin((phase * 0.23) + (i * 2.11)) + 1) / 2
-            let perBarGain = 0.72 + (0.28 * slowVariance)
-            let idleMotion = 0.14 + (0.075 * traveling) + (0.055 * counter * envelope)
-            let centerBias = 0.22 + (0.78 * envelope)
-            let voiceMotion = audio
-                * centerBias
-                * (0.18 + (0.42 * traveling) + (0.14 * counter))
-                * perBarGain
-            let activity = min(0.88, idleMotion + voiceMotion)
-            let height = minHeight + ((maxHeight - minHeight) * activity)
-            let x = startX + CGFloat(index) * (barWidth + barGap)
-            let rect = NSRect(x: x,
-                              y: centerY - (height / 2),
-                              width: barWidth,
-                              height: height)
-            let path = NSBezierPath(roundedRect: rect,
-                                    xRadius: barWidth / 2,
-                                    yRadius: barWidth / 2)
-
-            let glowRect = rect.insetBy(dx: -1.1 * visualScale,
-                                        dy: -1.1 * visualScale)
-            vividAccent.withAlphaComponent(0.07 + (0.10 * activity)).setFill()
-            NSBezierPath(roundedRect: glowRect,
-                         xRadius: glowRect.width / 2,
-                         yRadius: glowRect.width / 2).fill()
-            vividAccent.withAlphaComponent(0.74 + (0.26 * activity)).setFill()
-            path.fill()
+            drawTranscribingProgress(in: capsuleRect, alpha: contentAlpha)
         }
     }
 
-    private func drawTranscribingWave(in capsuleRect: NSRect, alpha: CGFloat) {
-        guard alpha > 0.001 else { return }
-        let recordingAccent = recordingColor
-        let transcribingAccent = transcribingColor
-        let barCount = 8
-        let visualScale = self.visualScale
-        let barWidth: CGFloat = 2.05 * visualScale
-        let barGap: CGFloat = 2.55 * visualScale
-        let minHeight: CGFloat = 3.2 * visualScale
-        let maxHeight = min(capsuleRect.height * 0.60, 14.6 * visualScale)
-        let totalWidth = CGFloat(barCount) * barWidth + CGFloat(barCount - 1) * barGap
-        let startX = capsuleRect.midX - (totalWidth / 2)
-        let centerY = capsuleRect.midY
-        let centerIndex = CGFloat(barCount - 1) / 2
-        let centerDenominator = max(centerIndex, 1)
+    private struct ContentLayout {
+        var wave: Bool = false
+        var check: Bool = false
+        var primaryText: NSAttributedString?
+        var secondaryText: NSAttributedString?
+        var totalWidth: CGFloat = 0
+    }
+
+    private func t(_ russian: String, _ english: String) -> String {
+        localizedText(russian, english, language: interfaceLanguage)
+    }
+
+    private func contentLayout() -> ContentLayout {
+        var layout = ContentLayout()
+        let padding: CGFloat = hudSize == .compact ? 10 : 14
+        let gap: CGFloat = hudSize == .compact ? 8 : 10
+        var width = padding
+
+        switch mode {
+        case .recording:
+            layout.wave = true
+            width += waveSize.width + gap
+            layout.primaryText = attributed(timerText(),
+                                            font: SD.timerFont(size: timerFontSize),
+                                            color: SD.C.capsuleText)
+            width += ceil(layout.primaryText?.size().width ?? 0)
+            if showsEscHint {
+                layout.secondaryText = attributed(t("Esc — отменить", "Esc to cancel"),
+                                                  font: SD.captionFont(size: captionFontSize),
+                                                  color: SD.C.capsuleSecondaryText)
+                width += gap + 1 + gap + ceil(layout.secondaryText?.size().width ?? 0)
+            }
+        case .transcribing:
+            layout.wave = true
+            width += waveSize.width + gap
+            layout.primaryText = attributed(t("Распознаю…", "Transcribing…"),
+                                            font: SD.labelFont(size: labelFontSize),
+                                            color: SD.C.capsuleText)
+            width += ceil(layout.primaryText?.size().width ?? 0)
+        case .inserted:
+            layout.check = true
+            width += checkDiameter + 8
+            let words = dictatedWordsLabel(insertedWordCount, language: interfaceLanguage)
+            layout.primaryText = attributed(t("Вставлено · \(words)", "Inserted · \(words)"),
+                                            font: SD.labelFont(size: labelFontSize),
+                                            color: SD.C.capsuleText)
+            width += ceil(layout.primaryText?.size().width ?? 0)
+        case .error:
+            layout.wave = true
+            width += waveSize.width + gap
+            let message = errorMessage ?? t("Не получилось распознать", "Dictation failed")
+            layout.primaryText = attributed(message,
+                                            font: SD.labelFont(size: labelFontSize),
+                                            color: accentColor())
+            width += ceil(layout.primaryText?.size().width ?? 0)
+        }
+        width += padding
+        layout.totalWidth = width
+        return layout
+    }
+
+    private var checkDiameter: CGFloat { hudSize == .compact ? 13 : 16 }
+
+    private func drawContent(_ layout: ContentLayout, in capsuleRect: NSRect) {
+        let padding: CGFloat = hudSize == .compact ? 10 : 14
+        let gap: CGFloat = hudSize == .compact ? 8 : 10
+        var x = capsuleRect.minX + padding
+
+        if layout.wave {
+            let waveRect = NSRect(x: x,
+                                  y: capsuleRect.midY - waveSize.height / 2,
+                                  width: waveSize.width,
+                                  height: waveSize.height)
+            drawWave(in: waveRect)
+            x += waveSize.width + gap
+        }
+
+        if layout.check {
+            let rect = NSRect(x: x,
+                              y: capsuleRect.midY - checkDiameter / 2,
+                              width: checkDiameter,
+                              height: checkDiameter)
+            drawCheckmark(in: rect)
+            x += checkDiameter + 8
+        }
+
+        if let primary = layout.primaryText {
+            let size = primary.size()
+            primary.draw(at: NSPoint(x: x, y: capsuleRect.midY - size.height / 2))
+            x += ceil(size.width)
+        }
+
+        if let secondary = layout.secondaryText {
+            x += gap
+            let divider = NSRect(x: x,
+                                 y: capsuleRect.midY - 7,
+                                 width: 1,
+                                 height: 14)
+            SD.C.capsuleDivider.setFill()
+            divider.fill()
+            x += 1 + gap
+            let size = secondary.size()
+            secondary.draw(at: NSPoint(x: x, y: capsuleRect.midY - size.height / 2))
+        }
+    }
+
+    // Бар-волна из истории RMS. recording — живая, error — плоская
+    // линия («звук ушёл»), transcribing — замороженный кадр с
+    // мерцанием слева направо (каскад 90 мс на бар).
+    private func drawWave(in rect: NSRect) {
+        let barWidth = SD.Metrics.waveBarWidth
+        let barGap = SD.Metrics.waveBarGap
+        let barCount = max(1, Int(rect.width / (barWidth + barGap)))
+
+        let source: [CGFloat]
+        let color: NSColor
+        switch mode {
+        case .transcribing:
+            source = frozenLevels
+            color = transcribingColor
+        case .error:
+            source = []
+            color = accentColor()
+        default:
+            source = levelHistory
+            color = accentColor()
+        }
+
         let age = transcribingElapsedOverride
             ?? CGFloat(max(0, ProcessInfo.processInfo.systemUptime - modeChangedAt))
-        let resolveDuration = CGFloat(RECORDING_HUD_TRANSCRIBING_RESOLVE_SECONDS)
-        let resolveProgress = min(1, age / resolveDuration)
-        let loopPhase = max(0, age - resolveDuration)
+
+        if reduceMotion, mode == .recording {
+            // Reduce Motion: статичная линия + индикатор-точка.
+            drawFlatLine(in: rect, color: color, barCount: barCount,
+                         barWidth: barWidth, barGap: barGap)
+            let dot = NSRect(x: rect.maxX - 4, y: rect.midY - 2, width: 4, height: 4)
+            color.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return
+        }
 
         for index in 0..<barCount {
-            let i = CGFloat(index)
-            let normalized = (i - centerIndex) / centerDenominator
-            let envelope = pow(max(0, cos(normalized * .pi / 2)), 0.62)
-            let barProgress = CGFloat(index) / CGFloat(max(1, barCount - 1))
-            let conversion = smoothstep(barProgress - 0.34, barProgress + 0.08, resolveProgress)
-            let front = max(0, 1 - abs(resolveProgress - barProgress) / 0.18) * (1 - smoothstep(0.82, 1, resolveProgress))
-            let reverseHead = 1 - (loopPhase * 3.8).truncatingRemainder(dividingBy: 1)
-            let reversePulse = max(0, 1 - abs(reverseHead - barProgress) / 0.24)
-            let loopWave = (sin((loopPhase * 6.2) + (i * 0.56)) + 1) / 2
-            let loopCounter = (sin((loopPhase * 2.8) + (i * 1.27)) + 1) / 2
-            let resolveLift = front * (0.48 + (0.30 * envelope))
-            let blueLoop = conversion * ((0.14 * loopWave) + (0.08 * loopCounter * envelope) + (0.34 * reversePulse))
-            let redHold = (1 - conversion) * (0.16 + (0.12 * envelope))
-            let activity = min(0.94,
-                               0.15
-                               + (0.24 * envelope)
-                               + redHold
-                               + blueLoop
-                               + resolveLift)
-            let height = minHeight + ((maxHeight - minHeight) * activity)
-            let x = startX + CGFloat(index) * (barWidth + barGap)
-            let rect = NSRect(x: x,
-                              y: centerY - (height / 2),
-                              width: barWidth,
-                              height: height)
-            let path = NSBezierPath(roundedRect: rect,
-                                    xRadius: barWidth / 2,
-                                    yRadius: barWidth / 2)
-
-            let glowRect = rect.insetBy(dx: -1.35 * visualScale,
-                                        dy: -1.45 * visualScale)
-            let fillColor = recordingAccent.blended(withFraction: conversion, of: transcribingAccent) ?? transcribingAccent
-            let glowAlpha = (0.055 + (0.12 * front) + (0.10 * reversePulse) + (0.045 * conversion)) * alpha
-            fillColor.withAlphaComponent(glowAlpha).setFill()
-            NSBezierPath(roundedRect: glowRect,
-                         xRadius: glowRect.width / 2,
-                         yRadius: glowRect.width / 2).fill()
-            fillColor.withAlphaComponent((0.58 + (0.26 * front) + (0.20 * reversePulse) + (0.14 * conversion)) * alpha).setFill()
-            path.fill()
+            let sourceIndex = source.count - barCount + index
+            let value = sourceIndex >= 0 && sourceIndex < source.count ? source[sourceIndex] : 0
+            let shaped = pow(max(0, min(1, value)), 0.82)
+            let height = max(SD.Metrics.waveSilenceHeight, shaped * rect.height)
+            let barRect = NSRect(x: rect.minX + CGFloat(index) * (barWidth + barGap),
+                                 y: rect.midY - height / 2,
+                                 width: barWidth,
+                                 height: height)
+            var alpha: CGFloat = 1
+            if mode == .transcribing, !reduceMotion {
+                // Мерцание: opacity 0.25↔1 бежит слева направо.
+                let cycle = CGFloat(SD.Anim.shimmerCycleSeconds)
+                let cascade = CGFloat(SD.Anim.shimmerCascadePerBar)
+                let t = (age - CGFloat(index) * cascade)
+                    .truncatingRemainder(dividingBy: cycle) / cycle
+                alpha = 0.25 + 0.75 * (0.5 + 0.5 * sin(t * 2 * .pi - .pi / 2))
+            }
+            color.withAlphaComponent(alpha).setFill()
+            NSBezierPath(roundedRect: barRect,
+                         xRadius: barWidth / 2,
+                         yRadius: barWidth / 2).fill()
         }
     }
 
-    /// Static exclamation mark drawn inside the yellow error capsule.
-    private func drawErrorIndicator(in capsuleRect: NSRect) {
-        let visualScale = self.visualScale
-        let accent = NSColor.systemYellow
-        let stemWidth: CGFloat = 2.4 * visualScale
-        let stemHeight: CGFloat = min(capsuleRect.height * 0.38, 9 * visualScale)
-        let dotDiameter: CGFloat = 2.4 * visualScale
-        let gap: CGFloat = 2.0 * visualScale
-        let totalHeight = stemHeight + gap + dotDiameter
-        let topY = capsuleRect.midY + (totalHeight / 2)
-
-        let stemRect = NSRect(x: capsuleRect.midX - (stemWidth / 2),
-                              y: topY - stemHeight,
-                              width: stemWidth,
-                              height: stemHeight)
-        accent.withAlphaComponent(0.88).setFill()
-        NSBezierPath(roundedRect: stemRect,
-                     xRadius: stemWidth / 2,
-                     yRadius: stemWidth / 2).fill()
-
-        let dotRect = NSRect(x: capsuleRect.midX - (dotDiameter / 2),
-                             y: topY - totalHeight,
-                             width: dotDiameter,
-                             height: dotDiameter)
-        NSBezierPath(ovalIn: dotRect).fill()
+    private func drawFlatLine(in rect: NSRect, color: NSColor, barCount: Int,
+                              barWidth: CGFloat, barGap: CGFloat) {
+        color.setFill()
+        for index in 0..<barCount {
+            let barRect = NSRect(x: rect.minX + CGFloat(index) * (barWidth + barGap),
+                                 y: rect.midY - SD.Metrics.waveSilenceHeight / 2,
+                                 width: barWidth,
+                                 height: SD.Metrics.waveSilenceHeight)
+            NSBezierPath(roundedRect: barRect,
+                         xRadius: barWidth / 2,
+                         yRadius: barWidth / 2).fill()
+        }
     }
 
-    private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
-        guard edge0 != edge1 else { return value >= edge1 ? 1 : 0 }
-        let t = max(0, min(1, (value - edge0) / (edge1 - edge0)))
-        return t * t * (3 - (2 * t))
+    /// 2pt-прогресс у нижней кромки капсулы при распознавании.
+    /// Реального прогресса у ASR нет — ease-out к 92%, добегает при скрытии.
+    private func drawTranscribingProgress(in capsuleRect: NSRect, alpha: CGFloat) {
+        let age = transcribingElapsedOverride
+            ?? CGFloat(max(0, ProcessInfo.processInfo.systemUptime - modeChangedAt))
+        let progress = min(0.92, 1 - exp(-age / 0.9))
+        let rect = NSRect(x: capsuleRect.minX,
+                          y: capsuleRect.maxY - 2,
+                          width: capsuleRect.width * progress,
+                          height: 2)
+        accentColor().withAlphaComponent(alpha).setFill()
+        rect.fill()
+    }
+
+    private func drawCheckmark(in rect: NSRect) {
+        accentColor().setFill()
+        NSBezierPath(ovalIn: rect).fill()
+        let path = NSBezierPath()
+        path.lineWidth = max(1.5, rect.width * 0.11)
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.move(to: NSPoint(x: rect.minX + rect.width * 0.28,
+                              y: rect.minY + rect.height * 0.52))
+        path.line(to: NSPoint(x: rect.minX + rect.width * 0.44,
+                              y: rect.minY + rect.height * 0.68))
+        path.line(to: NSPoint(x: rect.minX + rect.width * 0.73,
+                              y: rect.minY + rect.height * 0.34))
+        NSColor(hex: 0x1C1B19).setStroke()
+        path.stroke()
+    }
+
+    // MARK: - Вспомогательное
+
+    private func timerText() -> String {
+        let total = max(0, Int(recordingElapsed))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    private func attributed(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+    }
+
+    private func accentColor() -> NSColor {
+        // На тёмной капсуле светлый коралл читается лучше тёмного.
+        if recordingColor.isEqual(SD.C.voiceLight) || recordingColor.isEqual(SD.C.voiceDark) {
+            return shouldUseLightBackground() ? SD.C.voiceLight : SD.C.voiceDark
+        }
+        return recordingColor
+    }
+
+    private func capsuleFill() -> NSColor {
+        shouldUseLightBackground() ? SD.C.capsuleLight : SD.C.capsuleDark
+    }
+
+    private func capsuleFillAlpha() -> CGFloat {
+        shouldUseLightBackground() ? 0.96 : 0.94
     }
 
     private func smootherstep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
         guard edge0 != edge1 else { return value >= edge1 ? 1 : 0 }
         let t = max(0, min(1, (value - edge0) / (edge1 - edge0)))
         return t * t * t * (t * ((t * 6) - 15) + 10)
-    }
-
-    private func backgroundPalette(alpha: CGFloat) -> (fill: NSColor, stroke: NSColor) {
-        let light = shouldUseLightBackground()
-        if light {
-            return (
-                NSColor(calibratedWhite: 1.0, alpha: 0.84 * alpha),
-                NSColor(calibratedWhite: 0.0, alpha: 0.14 * alpha)
-            )
-        }
-        return (
-            NSColor(calibratedWhite: 0.0, alpha: 0.96 * alpha),
-            NSColor(calibratedWhite: 0.22, alpha: 0.26 * alpha)
-        )
     }
 
     private func shouldUseLightBackground() -> Bool {
@@ -378,12 +517,15 @@ final class RecordingHUDView: NSView {
         case .dark:
             return false
         case .system:
-            let appearance = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
-            return appearance == .aqua
+            // Дизайн: капсула остаётся тёмной и в светлой системной теме
+            // («Как в системе» = тёмная в light). Светлую даёт только
+            // явный выбор пользователя.
+            return false
         }
     }
 
 }
+
 
 let RECORDING_HUD_EXPORT_ARGUMENT = "--export-hud-animation"
 
@@ -1510,6 +1652,10 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var templateImage: NSImage?
     private var recordingImage: NSImage?
     private var errorImage: NSImage?
+    private var recordingStartedAtUptime: TimeInterval?
+    private var menuBarGlyphPhase: CGFloat = 0
+    private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
+    private var insertedHUDWorkItem: DispatchWorkItem?
     private let audio = AudioCapture()
     private let hotkey = HotkeyListener()
     private let asr = TranscriptionWorker()
@@ -2541,25 +2687,19 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func configureStatusItemImage() {
         guard let button = statusItem.button else { return }
-        // The PNG lives in Contents/Resources/ of our .app bundle
-        // (the canonical macOS layout — same place release.sh /
-        // dev-run.sh copy it). NSImage(named:) on the main bundle
-        // finds it under that path automatically; Bundle.module is
-        // deliberately not used here so codesign --deep doesn't have
-        // to grapple with a SwiftPM resource bundle.
-        let image = NSImage(named: "parakey-menubar")
-        image?.isTemplate = true
-        image?.size = NSSize(width: 18, height: 18)
+        // Глиф «линия голоса» рисуется кодом (VoiceLineGlyph) — PNG из
+        // Resources больше не нужен. Idle/busy — template (система сама
+        // красит под светлую/тёмную панель), error — линия + коралловая
+        // точка. Recording анимируется в recordingLevelTimerFired.
+        let image = VoiceLineGlyph.image(bars: VoiceLineGlyph.idleBars)
         templateImage = image
-        recordingImage = image.map { tintedCopy(of: $0, with: settings.recordingHUDRecordingColor.nsColor) }
-        errorImage = image.map { tintedCopy(of: $0, with: .systemYellow) }
+        recordingImage = VoiceLineGlyph.image(
+            bars: VoiceLineGlyph.recordingBars(level: 0, phase: 0)
+        )
+        errorImage = VoiceLineGlyph.errorImage()
         button.image = image
         button.imagePosition = .imageOnly
-        if image == nil {
-            button.title = "Parakey"
-            log("statusItem: parakey-menubar.png not in Bundle.main — text fallback")
-        }
-        button.toolTip = "Parakey"
+        button.toolTip = "SuperDictate"
     }
 
     private func concealMenuBarIcon() {
@@ -2605,10 +2745,9 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.image = recordingImage ?? templateImage
             button.contentTintColor = nil
         case .busy:
-            // Transcribe is typically <200 ms, briefer than a perceptible
-            // colour change. Leave at default; the menu's first row says
-            // "Transcribing" if the user pops it open.
-            button.image = templateImage
+            // Ровные полубары — «замерли, распознаём». Transcribe обычно
+            // короткий, поэтому без анимации.
+            button.image = VoiceLineGlyph.image(bars: VoiceLineGlyph.busyBars)
             button.contentTintColor = nil
         case .error:
             button.image = errorImage ?? templateImage
@@ -2634,6 +2773,10 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recordingHUDTargetQueryInFlight = false
         recordingHUDWaitingForInitialTarget = settings.showRecordingWaveform
         recordingHUDTargetStabilizer.reset(initialApplicationPID: initialContext?.applicationPID)
+        recordingStartedAtUptime = ProcessInfo.processInfo.systemUptime
+        menuBarGlyphPhase = 0
+        lastMenuBarGlyphUpdateAt = 0
+        recordingHUDView?.resetWave()
         setMenuBarState(.recording)
         let timer = Timer(timeInterval: 1.0 / 24.0,
                           target: self,
@@ -2692,6 +2835,19 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let attack: Float = rawLevel > recordingVisualLevel ? 0.65 : 0.28
         recordingVisualLevel += (rawLevel - recordingVisualLevel) * attack
         let now = ProcessInfo.processInfo.systemUptime
+        if let startedAt = recordingStartedAtUptime {
+            recordingHUDView?.recordingElapsed = now - startedAt
+        }
+        // Живой глиф в меню-баре: бары от реального RMS, 8 fps.
+        if now - lastMenuBarGlyphUpdateAt >= 0.12 {
+            lastMenuBarGlyphUpdateAt = now
+            menuBarGlyphPhase += 0.9
+            let bars = VoiceLineGlyph.recordingBars(level: CGFloat(recordingVisualLevel),
+                                                    phase: menuBarGlyphPhase)
+            let image = VoiceLineGlyph.image(bars: bars)
+            recordingImage = image
+            statusItem.button?.image = image
+        }
         refreshRecordingHUDInsertionTargetIfNeeded(at: now)
         if settings.showRecordingWaveform {
             guard !recordingHUDWaitingForInitialTarget else { return }
@@ -2878,9 +3034,34 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func configureRecordingHUDView(_ view: RecordingHUDView) {
         view.visualScale = settings.recordingHUDSize.visualScale
+        view.hudSize = settings.recordingHUDSize
         view.recordingColor = settings.recordingHUDRecordingColor.nsColor
         view.transcribingColor = settings.recordingHUDTranscribingColor.nsColor
         view.backgroundStyle = settings.recordingHUDBackgroundStyle
+        view.interfaceLanguage = settings.interfaceLanguage
+    }
+
+    /// Капсула-подтверждение: галочка + «Вставлено · N слов», hold
+    /// 0.9 с, затем растворение. Показывается только если HUD включён.
+    private func showInsertedHUD(wordCount: Int) {
+        guard settings.showRecordingWaveform else { return }
+        insertedHUDWorkItem?.cancel()
+        recordingHUDTranscribingStartedAt = nil
+        recordingHUDView?.insertedWordCount = wordCount
+        if recordingHUDPanel?.isVisible == true {
+            updateRecordingHUD(mode: .inserted, level: 0)
+        } else {
+            showRecordingHUD(mode: .inserted, level: 0)
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.insertedHUDWorkItem = nil
+            guard !self.isRecording, !self.isBusy else { return }
+            self.hideRecordingHUD()
+        }
+        insertedHUDWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + SD.Anim.insertedHoldSeconds,
+                                      execute: work)
     }
 
     private func animateRecordingHUDIn(_ panel: NSPanel) {
@@ -3483,6 +3664,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task { @MainActor in
             let taskStartedAt = ProcessInfo.processInfo.systemUptime
             var dictationFailed = false
+            var insertedWordsForHUD: Int?
             do {
                 let completed = try await transcriptionTask.value
                 let transcription = completed.transcription
@@ -3538,6 +3720,9 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         let insertionCompletedAt = ProcessInfo.processInfo.systemUptime
                         var enterDelaySeconds: Double?
                         if inserted {
+                            insertedWordsForHUD = cleaned
+                                .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+                                .count
                             if shouldPressEnterAfterInsertion {
                                 let enterDelayStartedAt = ProcessInfo.processInfo.systemUptime
                                 let enterDelayNanoseconds = UInt64(settings.enterDelayMilliseconds) * 1_000_000
@@ -3591,7 +3776,11 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 dictationFailed = true
             }
             isBusy = false
-            finishBusyHUD()
+            if let words = insertedWordsForHUD, !dictationFailed, !isTerminating {
+                showInsertedHUD(wordCount: words)
+            } else {
+                finishBusyHUD()
+            }
             if dictationFailed && !isTerminating {
                 signalDictationFailure()
             } else {
