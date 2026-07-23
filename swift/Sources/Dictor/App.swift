@@ -1653,6 +1653,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var recordingImage: NSImage?
     private var errorImage: NSImage?
     private var recordingStartedAtUptime: TimeInterval?
+    private var quickPanel: DictorQuickPanel?
+    private var isDictationPaused = false
     private var menuBarGlyphPhase: CGFloat = 0
     private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
     private var insertedHUDWorkItem: DispatchWorkItem?
@@ -1905,6 +1907,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         configureStatusItemImage()
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
         concealMenuBarIcon()
         setMenuBarState(.loading)
         startCorrectionSyncIfConfigured()
@@ -2752,6 +2759,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .error:
             button.image = errorImage ?? templateImage
             button.contentTintColor = nil
+        case .paused:
+            button.image = VoiceLineGlyph.image(bars: VoiceLineGlyph.pausedBars)
+            button.contentTintColor = .tertiaryLabelColor
         }
     }
 
@@ -3537,6 +3547,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // MARK: - Recording loop
 
     private func handlePress() {
+        guard !isDictationPaused else { return }
         guard isReady, !isRecording, !isBusy, !isTerminating else {
             // Audible cue when the previous transcription is still in
             // flight — without it the press vanishes silently and the
@@ -4914,7 +4925,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func rebuildMenu() {
         publishAgentState()
-        statusItem.menu = buildMenu()
+        if quickPanel?.isVisible == true {
+            quickPanel?.apply(state: quickPanelState())
+        }
     }
 
     private func publishAgentState(status explicitStatus: String? = nil,
@@ -7883,3 +7896,133 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
+
+
+// MARK: - Quick panel (поповер меню-бара)
+
+extension DictorApp: QuickPanelDelegate {
+
+    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            // Сервисное меню: модель, словарь, диагностика — до переезда
+            // всего в новую панель настроек.
+            statusItem.menu = buildMenu()
+            sender.performClick(nil)
+            statusItem.menu = nil
+            return
+        }
+        let panel = quickPanel ?? {
+            let created = DictorQuickPanel(state: quickPanelState())
+            created.quickDelegate = self
+            quickPanel = created
+            return created
+        }()
+        panel.toggle(relativeTo: sender, state: quickPanelState())
+    }
+
+    func quickPanelState() -> QuickPanelState {
+        let language = settings.interfaceLanguage
+        let title: String
+        let subtitle: String
+        if isDictationPaused {
+            title = localizedText("Диктовка на паузе", "Dictation paused", language: language)
+            subtitle = localizedText("Включите тумблер, чтобы вернуть хоткей",
+                                     "Turn the switch on to restore the hotkey",
+                                     language: language)
+        } else if isRecording {
+            title = localizedText("Записываю", "Recording", language: language)
+            subtitle = localizedText("Говорите — всё остаётся на этом Mac",
+                                     "Speak — everything stays on this Mac",
+                                     language: language)
+        } else if isReady {
+            let hotkeyName = localizedHotkeyName(hotkey.hotkey, language: language)
+            title = localizedText("Слушаю \(hotkeyName)", "Listening for \(hotkeyName)",
+                                  language: language)
+            subtitle = localizedText("Всё распознаётся на этом Mac",
+                                     "Everything is transcribed on this Mac",
+                                     language: language)
+        } else {
+            title = startupStatusTitle
+            subtitle = localizedText("Служба ещё запускается", "The service is still starting",
+                                     language: language)
+        }
+
+        let rawPreference = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
+        let devices = availableAudioInputDevices()
+        let microphoneName = audioInputDevice(matching: rawPreference, in: devices)?.name
+            ?? localizedText("Системный по умолчанию", "System default", language: language)
+
+        let calendar = Calendar.current
+        let todayKey = dictationUsageDayKey(for: Date(), calendar: calendar)
+        let today = settings.dailyDictationUsage.first(where: { $0.day == todayKey })
+        let week = lastSevenCompletedDictationUsage(settings.dailyDictationUsage,
+                                                    referenceDate: Date(),
+                                                    calendar: calendar)
+        let maxCharacters = max(1, week.days.map { $0.usage.characterCount }.max() ?? 1)
+        var weekBars = week.days.map { CGFloat($0.usage.characterCount) / CGFloat(maxCharacters) }
+        weekBars.append(CGFloat(today?.characterCount ?? 0) / CGFloat(maxCharacters))
+
+        return QuickPanelState(
+            statusTitle: title,
+            statusSubtitle: subtitle,
+            enabled: !isDictationPaused,
+            isRecording: isRecording,
+            language: settings.dictationLanguage,
+            microphoneName: microphoneName,
+            devices: devices,
+            recent: Array(settings.recentTranscriptEntries.prefix(3)),
+            todayCharacters: today?.characterCount ?? 0,
+            todayAudioSeconds: today?.audioSeconds ?? 0,
+            weekBars: weekBars,
+            interfaceLanguage: language
+        )
+    }
+
+    func quickPanelDidToggleEnabled(_ enabled: Bool) {
+        isDictationPaused = !enabled
+        if isDictationPaused {
+            setMenuBarState(.paused)
+            log("dictation paused from quick panel")
+        } else {
+            setMenuBarState(isReady ? .idle : .loading)
+            log("dictation resumed from quick panel")
+        }
+        rebuildMenu()
+    }
+
+    func quickPanelDidSelectLanguage(_ language: DictationLanguage) {
+        settings.dictationLanguage = language
+        log("dictation language selected from quick panel: \(language.rawValue)")
+        rebuildMenu()
+    }
+
+    func quickPanelDidSelectInputDevice(uid: String) {
+        guard !isRecording, !isBusy, !isTerminating else { return }
+        settings.inputDevice = uid
+        log("input device selected from quick panel: \(uid.isEmpty ? "system default" : uid)")
+        restartAudioForInputDeviceChange()
+        rebuildMenu()
+    }
+
+    func quickPanelDidCopyRecent(text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    func quickPanelDidPasteRecent(text: String) {
+        _ = TextInserter.insert(pastedText(from: text, suffix: settings.pasteSuffix))
+    }
+
+    func quickPanelOpenSettings() {
+        openControlPanelFromAgent()
+    }
+
+    func quickPanelOpenHistory() {
+        showHistoryOverlay()
+    }
+
+    func quickPanelQuit() {
+        NSApp.terminate(self)
+    }
+}

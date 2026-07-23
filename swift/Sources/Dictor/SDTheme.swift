@@ -98,6 +98,8 @@ enum VoiceLineGlyph {
     static let idleBars: [CGFloat] = [0.12, 0.12, 0.4, 0.12, 0.12]
     static let busyBars: [CGFloat] = [0.5, 0.5, 0.5, 0.5, 0.5]
     static let flatBars: [CGFloat] = [0.12, 0.12, 0.12, 0.12, 0.12]
+    /// Пауза: линия с разрывом в центре.
+    static let pausedBars: [CGFloat] = [0.12, 0.12, 0, 0.12, 0.12]
 
     /// Живые бары записи: амплитуда от реального RMS + бегущая фаза,
     /// детерминированно от (level, phase) — обновление ~8 fps.
