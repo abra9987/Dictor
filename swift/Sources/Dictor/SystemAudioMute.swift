@@ -71,7 +71,7 @@ enum SystemAudio {
     // thread (this serial queue or, for the launch-time sync calls,
     // the main thread), which satisfies NSAppleScript's
     // not-thread-safe contract.
-    private static let queue = DispatchQueue(label: "ParakeySystemAudio", qos: .userInitiated)
+    private static let queue = DispatchQueue(label: "DictorSystemAudio", qos: .userInitiated)
 
     /// nil = the query itself failed, as opposed to a definitive
     /// muted/unmuted answer.

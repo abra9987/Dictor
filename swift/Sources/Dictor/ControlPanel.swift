@@ -76,7 +76,7 @@ enum ControlPanelUpdateState: Equatable, Sendable {
 }
 
 @MainActor
-final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
     private var refreshTimer: Timer?
@@ -93,15 +93,15 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        if SuperDictateControlPanelRegistry.activateExistingPanelIfPresent() {
+        if DictorControlPanelRegistry.activateExistingPanelIfPresent() {
             NSApp.terminate(nil)
             return
         }
-        SuperDictateControlPanelRegistry.claimCurrentPanel()
+        DictorControlPanelRegistry.claimCurrentPanel()
         showWindow()
         startRefreshTimer()
         checkForUpdates()
-        if settings.agentEnabled && !SuperDictateAgentService.isAgentRunning() {
+        if settings.agentEnabled && !DictorAgentService.isAgentRunning() {
             beginServiceOperation(.starting)
         }
     }
@@ -120,7 +120,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         refreshTimer = nil
         updateTask?.cancel()
         updateTask = nil
-        SuperDictateControlPanelRegistry.clearCurrentPanel()
+        DictorControlPanelRegistry.clearCurrentPanel()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -155,7 +155,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered,
                               defer: false)
-        window.title = "SuperDictate"
+        window.title = "Dictor"
         window.contentMinSize = NSSize(width: 520, height: 310)
         window.contentMaxSize = NSSize(width: 520, height: 310)
         window.isReleasedWhenClosed = false
@@ -187,10 +187,10 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         guard force || fingerprint != lastRenderFingerprint else { return }
         lastRenderFingerprint = fingerprint
         resizeCompactPanel(window)
-        window.title = t("SuperDictate — панель управления", "SuperDictate — Control Panel")
+        window.title = t("Dictor — панель управления", "Dictor — Control Panel")
         window.contentView = makeContentView()
         if let settingsWindow, settingsWindow.isVisible {
-            settingsWindow.title = t("Настройки SuperDictate", "SuperDictate Settings")
+            settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
             settingsWindow.contentView = makeSettingsContentView()
         }
     }
@@ -226,7 +226,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         return [language.rawValue,
                 serviceOperation?.rawValue ?? "idle",
                 updateStateFingerprint(),
-                SuperDictateAgentService.isAgentRunning() ? "running" : "stopped",
+                DictorAgentService.isAgentRunning() ? "running" : "stopped",
                 stateToken,
                 permissions,
                 settings.configuredHotkey.name,
@@ -394,7 +394,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 1
-        text.addArrangedSubview(panelLabel("SuperDictate", size: 20, weight: .semibold))
+        text.addArrangedSubview(panelLabel("Dictor", size: 20, weight: .semibold))
         text.addArrangedSubview(panelLabel(
             t("Локальная диктовка · работает в фоне", "Local dictation · runs in the background"),
             size: 11.5,
@@ -403,7 +403,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
 
         let version = panelLabel("v\(currentBundleVersion())", size: 11, color: .tertiaryLabelColor)
         version.setContentHuggingPriority(.required, for: .horizontal)
-        version.toolTip = t("Установленная версия SuperDictate", "Installed SuperDictate version")
+        version.toolTip = t("Установленная версия Dictor", "Installed Dictor version")
 
         let languageControl = NSSegmentedControl(labels: ["RU", "EN"],
                                                  trackingMode: .selectOne,
@@ -454,7 +454,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
     }
 
     private func compactServiceCard() -> NSView {
-        let running = SuperDictateAgentService.isAgentRunning()
+        let running = DictorAgentService.isAgentRunning()
         let state = AgentRuntimeStateStore.read()
         let presentation = servicePresentation(running: running, state: state)
         let card = compactCard()
@@ -596,8 +596,8 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                 size: 11,
                 color: .secondaryLabelColor
             )
-            ready.toolTip = t("SuperDictate получил все три необходимых разрешения macOS.",
-                              "SuperDictate has all three required macOS permissions.")
+            ready.toolTip = t("Dictor получил все три необходимых разрешения macOS.",
+                              "Dictor has all three required macOS permissions.")
             content.addArrangedSubview(ready)
         } else {
             for permission in missing {
@@ -684,7 +684,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                     nil, nil, false, nil)
         case .upToDate:
             return ("checkmark.circle.fill", .systemGreen,
-                    t("SuperDictate актуален", "SuperDictate is up to date"),
+                    t("Dictor актуален", "Dictor is up to date"),
                     t("Установлена последняя версия v\(currentBundleVersion())",
                       "Latest version v\(currentBundleVersion()) is installed"),
                     t("Проверить", "Check"), #selector(updateButtonClicked(_:)), true,
@@ -695,8 +695,8 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                     t("Скачается, проверится и установится автоматически",
                       "Downloads, verifies, and installs automatically"),
                     t("Обновить", "Update"), #selector(updateButtonClicked(_:)), serviceOperation == nil,
-                    t("Обновить SuperDictate до v\(release.version) одной кнопкой",
-                      "Update SuperDictate to v\(release.version) with one click"))
+                    t("Обновить Dictor до v\(release.version) одной кнопкой",
+                      "Update Dictor to v\(release.version) with one click"))
         case .preparing(let version, let phase):
             return ("arrow.down.circle", .systemBlue,
                     t("Обновляю до v\(version)", "Updating to v\(version)"),
@@ -821,7 +821,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         case .httpStatus(let code):
             return "GitHub вернул ошибку HTTP \(code). Повторите попытку позже."
         case .unexpectedResponse:
-            return "GitHub вернул ответ, который SuperDictate не смог проверить."
+            return "GitHub вернул ответ, который Dictor не смог проверить."
         }
     }
 
@@ -837,7 +837,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         updateTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let manifest = try await SuperDictateUpdateInstaller.fetchManifest(
+                let manifest = try await DictorUpdateInstaller.fetchManifest(
                     expectedVersion: version
                 )
                 guard !Task.isCancelled else { return }
@@ -847,7 +847,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                                   "Downloading the archive and verifying SHA-256…")
                 )
                 self.refresh(force: true)
-                let prepared = try await SuperDictateUpdateInstaller.prepare(manifest: manifest)
+                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest)
                 guard !Task.isCancelled else {
                     try? FileManager.default.removeItem(at: prepared.workDirectory)
                     return
@@ -861,7 +861,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                 try self.launchPreparedUpdate(prepared)
             } catch {
                 self.updateTask = nil
-                let message = (error as? SuperDictateUpdateInstallerError)?
+                let message = (error as? DictorUpdateInstallerError)?
                     .message(language: self.language) ?? error.localizedDescription
                 self.updateState = .failed(message)
                 self.lastRenderFingerprint = ""
@@ -870,12 +870,12 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
         }
     }
 
-    private func launchPreparedUpdate(_ prepared: PreparedSuperDictateUpdate) throws {
+    private func launchPreparedUpdate(_ prepared: PreparedDictorUpdate) throws {
         let statePath = try createPrivateUpdateProgressStateFile()
         let helperLog = try openPrivateUpdateHelperLog()
         let appURL = Bundle.main.bundleURL
         let backupURL = appURL.deletingLastPathComponent()
-            .appendingPathComponent(".SuperDictate-update-backup-\(UUID().uuidString).app",
+            .appendingPathComponent(".Dictor-update-backup-\(UUID().uuidString).app",
                                     isDirectory: true)
         let script = superDictateDirectUpdateHelperScript(
             pid: getpid(),
@@ -1479,11 +1479,11 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
                 do {
                     switch operation {
                     case .starting:
-                        try SuperDictateAgentService.installAndStart()
+                        try DictorAgentService.installAndStart()
                     case .restarting, .applyingSettings:
-                        try SuperDictateAgentService.restart()
+                        try DictorAgentService.restart()
                     case .stopping:
-                        SuperDictateAgentService.stop()
+                        DictorAgentService.stop()
                     }
                     return nil
                 } catch {
@@ -1575,7 +1575,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
             backing: .buffered,
             defer: false
         )
-        settingsWindow.title = t("Настройки SuperDictate", "SuperDictate Settings")
+        settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
         settingsWindow.contentMinSize = NSSize(width: 680, height: 590)
         settingsWindow.contentMaxSize = NSSize(width: 680, height: 590)
         settingsWindow.isReleasedWhenClosed = false
@@ -1616,7 +1616,7 @@ final class SuperDictateControlPanelApp: NSObject, NSApplicationDelegate, NSWind
             )
             return
         }
-        if SuperDictateAgentService.isAgentRunning(), state?.isReady != true {
+        if DictorAgentService.isAgentRunning(), state?.isReady != true {
             showError(
                 title: t("Служба ещё запускается", "Service Is Still Starting"),
                 detail: t("Дождитесь статуса «Работает» и попробуйте изменить сочетание ещё раз.",

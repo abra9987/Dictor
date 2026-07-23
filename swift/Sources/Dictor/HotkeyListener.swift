@@ -54,7 +54,7 @@ func hotkeyPreferenceUpdateResult(
     guard persisted == recordable else {
         return .rolledBack(
             previous: previous,
-            message: "Parakey could not save that hotkey, so it kept \(previous.name)."
+            message: "Dictor could not save that hotkey, so it kept \(previous.name)."
         )
     }
 
@@ -163,7 +163,7 @@ final class HotkeyRecorderController: NSObject, NSWindowDelegate {
                               action: nil)
         super.init()
 
-        panel.title = "SuperDictate"
+        panel.title = "Dictor"
         panel.isReleasedWhenClosed = false
         panel.level = .floating
         panel.delegate = self

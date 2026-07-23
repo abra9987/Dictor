@@ -1,7 +1,7 @@
 import AppKit
 
 // Дизайн-токены редизайна («линия голоса»). Источник: Claude Design,
-// SuperDictate Redesign.dc.html, секция 3a (SDTheme.swift) и 1a (палитра).
+// Dictor Redesign.dc.html, секция 3a (SDTheme.swift) и 1a (палитра).
 // Светлая/тёмная пары резолвятся через NSColor(name:dynamicProvider:),
 // чтобы капсула и глиф следовали системной теме без ручных пересчётов.
 

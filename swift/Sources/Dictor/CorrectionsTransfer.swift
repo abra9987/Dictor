@@ -27,7 +27,7 @@ enum TranscriptCorrectionsDocumentError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedSchema(let version):
-            return "This corrections file uses schema version \(version), which this version of Parakey cannot read."
+            return "This corrections file uses schema version \(version), which this version of Dictor cannot read."
         }
     }
 }
@@ -41,7 +41,7 @@ enum TranscriptCorrectionsTransferError: LocalizedError {
         case .fileTooLarge(let bytes, let limit):
             let actual = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
             let maximum = ByteCountFormatter.string(fromByteCount: Int64(limit), countStyle: .file)
-            return "This corrections file is \(actual), which is larger than Parakey's \(maximum) import limit."
+            return "This corrections file is \(actual), which is larger than Dictor's \(maximum) import limit."
         case .notRegularFile:
             return "The selected corrections path is not a regular file."
         }
@@ -207,7 +207,7 @@ enum TranscriptCorrectionsSyncPathError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .isSymbolicLink:
-            return "The text correction sync file is a symbolic link. Parakey refuses to sync through symlinks. Reconnect Parakey to a regular file."
+            return "The text correction sync file is a symbolic link. Dictor refuses to sync through symlinks. Reconnect Dictor to a regular file."
         }
     }
 }

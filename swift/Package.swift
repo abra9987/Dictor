@@ -1,6 +1,6 @@
 // swift-tools-version: 6.0
 //
-// SuperDictate — a Swift push-to-talk dictation app
+// Dictor — a Swift push-to-talk dictation app
 // for macOS Apple Silicon. Native AppKit / AVFoundation, FluidAudio
 // driving Parakeet TDT v3 on the Apple Neural Engine. macOS 14
 // (Sonoma) minimum. The Hardened Runtime microphone entitlement
@@ -13,12 +13,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Parakey",
+    name: "Dictor",
     platforms: [
         .macOS("14.0"),
     ],
     products: [
-        .executable(name: "Parakey", targets: ["Parakey"]),
+        .executable(name: "Dictor", targets: ["Dictor"]),
     ],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git",
@@ -26,7 +26,7 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "Parakey",
+            name: "Dictor",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ]

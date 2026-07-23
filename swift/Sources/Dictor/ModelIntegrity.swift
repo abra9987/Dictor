@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 // MARK: - Model registry hardening
 //
 // FluidAudio reads REGISTRY_URL and MODEL_REGISTRY_URL from the process
-// environment to override the speech-model download base URL. Parakey
+// environment to override the speech-model download base URL. Dictor
 // does not document either as a feature, so a value here means either
 // (a) a developer is debugging a mirror — uncommon — or (b) a process
 // or LaunchAgent has injected one to redirect first-launch model
@@ -43,13 +43,13 @@ func refuseHostileRegistryEnvironmentAndExit() {
     log("refusing to start: registry override env var(s) set: \(names)")
     let alert = NSAlert()
     alert.alertStyle = .critical
-    alert.messageText = "Parakey refused to start"
+    alert.messageText = "Dictor refused to start"
     alert.informativeText = """
-        These environment variable(s) are set in Parakey's process: \(names).
+        These environment variable(s) are set in Dictor's process: \(names).
 
-        FluidAudio uses them to override the speech-model download URL. Parakey does not support this and treats it as a sign that the launch environment has been tampered with.
+        FluidAudio uses them to override the speech-model download URL. Dictor does not support this and treats it as a sign that the launch environment has been tampered with.
 
-        Check ~/Library/LaunchAgents/, your shell rc files, and any parent process. Once the variables are gone, launch Parakey again.
+        Check ~/Library/LaunchAgents/, your shell rc files, and any parent process. Once the variables are gone, launch Dictor again.
         """
     alert.addButton(withTitle: "Quit")
     alert.runModal()
@@ -59,11 +59,11 @@ func refuseHostileRegistryEnvironmentAndExit() {
 // MARK: - Speech model integrity
 //
 // FluidAudio owns the Hugging Face download mechanics, but it does not
-// pin the downloaded CoreML bundle contents. Parakey downloads first,
+// pin the downloaded CoreML bundle contents. Dictor downloads first,
 // verifies the files that will be loaded by CoreML, and only then asks
 // FluidAudio to compile/load the models. The manifest is intentionally
 // tied to one upstream repo commit; a legitimate upstream model change
-// should arrive as an explicit Parakey update with refreshed hashes.
+// should arrive as an explicit Dictor update with refreshed hashes.
 
 struct ModelFileDigest: Equatable {
     let relativePath: String
@@ -384,7 +384,7 @@ func speechModelDiskSpaceFailureDetail(profile: SpeechModelProfile,
         return nil
     }
     return """
-    Parakey needs \(profile.downloadSizeText) of free disk space to download \(profile.shortName), plus room for CoreML to prepare it.
+    Dictor needs \(profile.downloadSizeText) of free disk space to download \(profile.shortName), plus room for CoreML to prepare it.
 
     Available: \(formattedByteCount(UInt64(availableBytes)))
     Needed: \(formattedByteCount(UInt64(requiredBytes)))
@@ -418,7 +418,7 @@ func assertSufficientDiskSpaceForSpeechModelDownload(profile: SpeechModelProfile
                                                         requiredBytes: requiredBytes) else {
         return
     }
-    throw NSError(domain: "Parakey",
+    throw NSError(domain: "Dictor",
                   code: -8,
                   userInfo: [NSLocalizedDescriptionKey: detail])
 }
@@ -426,7 +426,7 @@ func assertSufficientDiskSpaceForSpeechModelDownload(profile: SpeechModelProfile
 func removeSpeechModelCacheDirectory(_ cacheDir: URL) async throws -> Bool {
     guard isSafeSpeechModelCacheDirectory(cacheDir) else {
         throw NSError(
-            domain: "Parakey",
+            domain: "Dictor",
             code: -3,
             userInfo: [
                 NSLocalizedDescriptionKey: "Refusing to remove unexpected speech model cache path: \(cacheDir.path)"
@@ -441,7 +441,7 @@ func removeSpeechModelCacheDirectory(_ cacheDir: URL) async throws -> Bool {
         }
         guard isExistingSpeechModelCacheDirectorySafeForRemoval(cacheDir) else {
             throw NSError(
-                domain: "Parakey",
+                domain: "Dictor",
                 code: -4,
                 userInfo: [
                     NSLocalizedDescriptionKey: "Refusing to remove unsafe speech model cache path: \(cacheDir.path)"
@@ -507,7 +507,7 @@ func correctionImportCountText(sourceName: String, originalCount: Int, keptCount
     guard originalCount > keptCount else {
         return "\(sourceName) contains \(keptCount) corrections."
     }
-    return "\(sourceName) contains \(originalCount) entries; only the first \(keptCount) valid corrections (Parakey keeps at most \(MAX_TRANSCRIPT_CORRECTIONS)) will be imported."
+    return "\(sourceName) contains \(originalCount) entries; only the first \(keptCount) valid corrections (Dictor keeps at most \(MAX_TRANSCRIPT_CORRECTIONS)) will be imported."
 }
 
 /// Appended to the import dialog when choosing Merge would push the
@@ -518,7 +518,7 @@ func correctionImportMergeCapWarningText(existingCount: Int,
                                          cap: Int = MAX_TRANSCRIPT_CORRECTIONS) -> String? {
     let mergedCount = existingCount + newCount
     guard mergedCount > cap else { return nil }
-    return "Merging would produce \(mergedCount) corrections; Parakey keeps at most \(cap), so \(mergedCount - cap) would be dropped."
+    return "Merging would produce \(mergedCount) corrections; Dictor keeps at most \(cap), so \(mergedCount - cap) would be dropped."
 }
 
 func utf8ClippedPrefix(_ text: String, maxBytes: Int) -> String {

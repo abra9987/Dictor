@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 // MARK: - Settings
 //
 // Thin wrapper around the app's standard NSUserDefaults domain, so
-// settings persist at `~/Library/Preferences/com.local.superdictate.plist`.
+// settings persist at `~/Library/Preferences/com.raul.dictor.plist`.
 // One property per user-visible setting; defaults are returned inline
 // by each getter when the key is missing, rather than via a central
 // `register()` call.
@@ -539,7 +539,7 @@ final class Settings: @unchecked Sendable {
     /// "Remind me later" pause state, persisted so a relaunch inside
     /// the 24 h window does not re-prompt ~30 s after launch. Both
     /// halves are validated independently and corrupt stored values
-    /// degrade to nil; ParakeyApp treats a missing half as "no pause"
+    /// degrade to nil; DictorApp treats a missing half as "no pause"
     /// and clears the leftover at startup.
     var updateReminderPausedVersion: String? {
         get {
