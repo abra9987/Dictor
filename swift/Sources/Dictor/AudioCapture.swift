@@ -182,7 +182,7 @@ enum PendingDictationRecovery {
 
 final class PendingDictationJournal: @unchecked Sendable {
     let url: URL
-    private let queue = DispatchQueue(label: "SuperDictate.PendingDictationJournal",
+    private let queue = DispatchQueue(label: "Dictor.PendingDictationJournal",
                                       qos: .utility)
     private var fileDescriptor: Int32
     private var didLogWriteFailure = false
@@ -347,7 +347,7 @@ final class AudioCapture: @unchecked Sendable {
             sampleRate: SAMPLE_RATE,
             channels: 1,
             interleaved: false
-        ) else { throw NSError(domain: "Parakey", code: -1) }
+        ) else { throw NSError(domain: "Dictor", code: -1) }
 
         let sourceFormat = converterSourceFormat(for: inputFormat)
         let mixToMono = inputFormat.channelCount > 1 && sourceFormat.channelCount == 1

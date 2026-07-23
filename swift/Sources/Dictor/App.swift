@@ -17,7 +17,7 @@ import UniformTypeIdentifiers
 // Single class that owns the lifecycle and the AppKit menu-bar UI.
 // All UI state lives here; subsystems (HotkeyListener, AudioCapture,
 // TranscriptionWorker, UpdateCheck, …) hold their own state but
-// call back into `ParakeyApp` for anything that touches the menu.
+// call back into `DictorApp` for anything that touches the menu.
 
 enum DictationReleaseShortcut: Equatable {
     case standard
@@ -635,7 +635,7 @@ func exportRecordingHUDAnimationFrames(to directory: URL) throws {
                                                 bytesPerRow: 0,
                                                 bitsPerPixel: 0),
                   let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
-                throw NSError(domain: "SuperDictateHUDExport", code: 1,
+                throw NSError(domain: "DictorHUDExport", code: 1,
                               userInfo: [NSLocalizedDescriptionKey: "Could not create an RGBA frame."])
             }
             bitmap.size = pointSize
@@ -648,7 +648,7 @@ func exportRecordingHUDAnimationFrames(to directory: URL) throws {
             NSGraphicsContext.restoreGraphicsState()
 
             guard let png = bitmap.representation(using: .png, properties: [:]) else {
-                throw NSError(domain: "SuperDictateHUDExport", code: 2,
+                throw NSError(domain: "DictorHUDExport", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: "Could not encode a PNG frame."])
             }
             let name = String(format: "frame-%05d.png", frameIndex)
@@ -761,7 +761,7 @@ final class UpdateProgressAppDelegate: NSObject, NSApplicationDelegate, NSWindow
                               styleMask: [.titled, .closable],
                               backing: .buffered,
                               defer: false)
-        window.title = t("Обновление SuperDictate", "Updating SuperDictate")
+        window.title = t("Обновление Dictor", "Updating Dictor")
         window.isReleasedWhenClosed = false
         window.delegate = self
         self.window = window
@@ -773,13 +773,13 @@ final class UpdateProgressAppDelegate: NSObject, NSApplicationDelegate, NSWindow
         root.edgeInsets = NSEdgeInsets(top: 18, left: 20, bottom: 16, right: 20)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = updateProgressLabel(t("Обновление SuperDictate до v\(launch.targetVersion)",
-                                          "Updating SuperDictate to v\(launch.targetVersion)"),
+        let title = updateProgressLabel(t("Обновление Dictor до v\(launch.targetVersion)",
+                                          "Updating Dictor to v\(launch.targetVersion)"),
                                         font: .systemFont(ofSize: 18, weight: .semibold))
         messageLabel = updateProgressLabel(t("Запускаю обновление…", "Starting update…"),
                                            font: .systemFont(ofSize: 13, weight: .medium))
-        detailLabel = updateProgressLabel(t("SuperDictate автоматически откроется после установки.",
-                                             "SuperDictate will reopen automatically when the update finishes."),
+        detailLabel = updateProgressLabel(t("Dictor автоматически откроется после установки.",
+                                             "Dictor will reopen automatically when the update finishes."),
                                           font: .systemFont(ofSize: 12),
                                           color: .secondaryLabelColor)
         detailLabel.preferredMaxLayoutWidth = 390
@@ -892,12 +892,12 @@ final class UpdateProgressAppDelegate: NSObject, NSApplicationDelegate, NSWindow
             detailLabel.stringValue = t("Старая версия закрыта, новая устанавливается. Приложение откроется автоматически.",
                                         "The old version has closed while the new one is installed. It will reopen automatically.")
         case "relaunching":
-            detailLabel.stringValue = t("Запускаю новую версию SuperDictate.",
-                                        "Opening the new version of SuperDictate.")
+            detailLabel.stringValue = t("Запускаю новую версию Dictor.",
+                                        "Opening the new version of Dictor.")
             scheduleClose(after: 0.5)
         default:
-            detailLabel.stringValue = t("SuperDictate автоматически откроется после установки.",
-                                        "SuperDictate will reopen automatically when the update finishes.")
+            detailLabel.stringValue = t("Dictor автоматически откроется после установки.",
+                                        "Dictor will reopen automatically when the update finishes.")
         }
     }
 
@@ -1635,7 +1635,7 @@ final class DictationSpeechTimeChartView: NSView {
 }
 
 @MainActor
-final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private struct CachedInsertionTarget {
         let target: FocusedInsertionTargetFrame
         let windowFrame: NSRect?
@@ -1793,7 +1793,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// `correctionSyncScanInFlight` (main-actor) guarantees scans
     /// never overlap; results hop back to the main actor, where the
     /// existing merge/apply logic runs unchanged.
-    private static let correctionSyncScanQueue = DispatchQueue(label: "ParakeyCorrectionSyncScan",
+    private static let correctionSyncScanQueue = DispatchQueue(label: "DictorCorrectionSyncScan",
                                                                qos: .utility)
     private var correctionSyncScanInFlight = false
     /// Scan request that arrived while a scan was in flight; re-issued
@@ -1940,7 +1940,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func openControlPanelFromAgent() {
-        if SuperDictateControlPanelRegistry.activateExistingPanelIfPresent() {
+        if DictorControlPanelRegistry.activateExistingPanelIfPresent() {
             log("control panel activated from agent")
             return
         }
@@ -2050,7 +2050,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             recordStartupFailure(
                 stage: .hotkeyListener,
                 error: NSError(
-                    domain: "SuperDictate",
+                    domain: "Dictor",
                     code: -6,
                     userInfo: [NSLocalizedDescriptionKey: "The hotkey listener could not resume after shortcut capture."]
                 ),
@@ -2130,7 +2130,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let normalizedTempRoot = tempRoot.hasSuffix("/") ? tempRoot : "\(tempRoot)/"
 
         guard url.lastPathComponent == CORRECTIONS_FILE_NAME,
-              folder.lastPathComponent.hasPrefix("Parakey-"),
+              folder.lastPathComponent.hasPrefix("Dictor-"),
               folder.path.hasPrefix(normalizedTempRoot)
         else {
             log("correction share cleanup skipped (\(reason)): unexpected temp file")
@@ -2699,7 +2699,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         errorImage = VoiceLineGlyph.errorImage()
         button.image = image
         button.imagePosition = .imageOnly
-        button.toolTip = "SuperDictate"
+        button.toolTip = "Dictor"
     }
 
     private func concealMenuBarIcon() {
@@ -4066,7 +4066,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         proc.arguments = [
             "-c",
             systemAudioMuteWatchdogScript(),
-            "parakey-audio-watchdog",
+            "dictor-audio-watchdog",
             "\(getpid())",
             systemAudioMuteMarkerURL().path,
         ]
@@ -4829,8 +4829,8 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func confirmStopDictation() -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Stop SuperDictate?"
-        alert.informativeText = "The \(hotkey.hotkey.name) dictation shortcut will stop until you open SuperDictate again. Use Close to hide windows while keeping dictation running."
+        alert.messageText = "Stop Dictor?"
+        alert.informativeText = "The \(hotkey.hotkey.name) dictation shortcut will stop until you open Dictor again. Use Close to hide windows while keeping dictation running."
         alert.addButton(withTitle: "Keep Running")
         alert.addButton(withTitle: "Stop Dictation")
         return alert.runModal() == .alertSecondButtonReturn
@@ -4862,9 +4862,9 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showAppForModal()
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "SuperDictate Reopened After an Unexpected Exit"
+        alert.messageText = "Dictor Reopened After an Unexpected Exit"
         alert.informativeText = """
-            Parakey appears to have exited last time without a normal shutdown. Nothing was sent anywhere.
+            Dictor appears to have exited last time without a normal shutdown. Nothing was sent anywhere.
 
             You can copy a privacy-safe diagnostics report or open the local log if you want to file an issue.
             """
@@ -4886,7 +4886,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.title = "Save Diagnostics"
         panel.message = "Save a privacy-safe diagnostics report for a GitHub issue."
         panel.prompt = "Save"
-        panel.nameFieldStringValue = "Parakey Diagnostics.txt"
+        panel.nameFieldStringValue = "Dictor Diagnostics.txt"
         panel.allowedContentTypes = [.plainText]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -5045,7 +5045,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // in the menu that gets such an indicator — every other row
         // sits flush against the left edge. The wrapper produces the
         // identical behaviour with no auto-glyph.
-        let quit = NSMenuItem(title: "Quit SuperDictate",
+        let quit = NSMenuItem(title: "Quit Dictor",
                               action: #selector(quitClicked(_:)),
                               keyEquivalent: "q")
         quit.target = self
@@ -5102,7 +5102,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sub.addItem(.separator())
 
-        let about = NSMenuItem(title: "About SuperDictate",
+        let about = NSMenuItem(title: "About Dictor",
                                action: #selector(showAboutClicked(_:)),
                                keyEquivalent: "")
         about.target = self
@@ -5194,16 +5194,16 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if isCoreRuntimeReady {
             return "Starting hotkey listener…"
         }
-        return "SuperDictate is not ready"
+        return "Dictor is not ready"
     }
 
     private func diagnosticsText() -> String {
         let generated = ISO8601DateFormatter().string(from: Date())
         let bundlePath = Bundle.main.bundlePath
         let installKind: String
-        if bundlePath == "/Applications/SuperDictate.app" {
+        if bundlePath == "/Applications/Dictor.app" {
             installKind = "Applications app"
-        } else if bundlePath == "/tmp/SuperDictate-dev.app" {
+        } else if bundlePath == "/tmp/Dictor-dev.app" {
             installKind = "signed dev app"
         } else {
             installKind = "other"
@@ -5366,7 +5366,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                               styleMask: [.titled, .closable],
                               backing: .buffered,
                               defer: false)
-        window.title = "Set Up SuperDictate"
+        window.title = "Set Up Dictor"
         window.isReleasedWhenClosed = false
         window.delegate = self
         setupChecklistWindow = window
@@ -5429,8 +5429,8 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         root.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 18, right: 22)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = setupLabel("Set Up SuperDictate", font: .systemFont(ofSize: 22, weight: .semibold))
-        let subtitle = setupLabel("Finish these checks before dictating. SuperDictate keeps this setup local to your Mac.",
+        let title = setupLabel("Set Up Dictor", font: .systemFont(ofSize: 22, weight: .semibold))
+        let subtitle = setupLabel("Finish these checks before dictating. Dictor keeps this setup local to your Mac.",
                                   font: .systemFont(ofSize: 13),
                                   color: .secondaryLabelColor)
         subtitle.preferredMaxLayoutWidth = 476
@@ -5448,7 +5448,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         root.addArrangedSubview(makeHotkeySetupRow())
 
         if !setupChecklistIsComplete {
-            let tip = setupLabel("Tip: If clicking 'Grant' doesn't open a prompt or show SuperDictate in System Settings, click 'Try Again' — SuperDictate will reset its macOS privacy permission entry and re-request, which clears stuck macOS state.",
+            let tip = setupLabel("Tip: If clicking 'Grant' doesn't open a prompt or show Dictor in System Settings, click 'Try Again' — Dictor will reset its macOS privacy permission entry and re-request, which clears stuck macOS state.",
                                  font: .systemFont(ofSize: 11),
                                  color: .secondaryLabelColor)
             tip.preferredMaxLayoutWidth = 476
@@ -5507,7 +5507,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func setupChecklistSummary() -> String {
         setupChecklistIsComplete
-            ? "Setup is complete. Use SuperDictate from the Dock or shortcuts."
+            ? "Setup is complete. Use Dictor from the Dock or shortcuts."
             : "You can close this window; the menu will keep tracking setup."
     }
 
@@ -5568,9 +5568,9 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .microphone:
             return "Captures your voice while dictating. Click 'Grant', then click 'OK' in the macOS prompt."
         case .accessibility:
-            return "Pastes the transcript at your cursor. Click 'Grant' to open System Settings → Privacy & Security → Accessibility, then enable the toggle next to 'SuperDictate'."
+            return "Pastes the transcript at your cursor. Click 'Grant' to open System Settings → Privacy & Security → Accessibility, then enable the toggle next to 'Dictor'."
         case .inputMonitoring:
-            return "Lets SuperDictate detect the dictation hotkey. Click 'Grant' to open System Settings → Privacy & Security → Input Monitoring, then enable the toggle next to 'SuperDictate'."
+            return "Lets Dictor detect the dictation hotkey. Click 'Grant' to open System Settings → Privacy & Security → Input Monitoring, then enable the toggle next to 'Dictor'."
         }
     }
 
@@ -5705,7 +5705,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // it before tccutil finished would race the scrub it
             // depends on.
             log("  resetting TCC for \(p.rawValue) before retry")
-            TCC.reset(p, bundleID: Bundle.main.bundleIdentifier ?? "com.local.superdictate") { [weak self] in
+            TCC.reset(p, bundleID: Bundle.main.bundleIdentifier ?? "com.raul.dictor") { [weak self] in
                 guard let self, !self.isTerminating else { return }
                 Permissions.request(p)
                 self.startPermissionReadinessMonitor(reason: "permission grant")
@@ -5813,13 +5813,13 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             launchAtLogin.state = .on
         case .requiresApproval:
             launchAtLogin.state = .mixed
-            launchAtLogin.toolTip = "Approve SuperDictate in System Settings → General → Login Items."
+            launchAtLogin.toolTip = "Approve Dictor in System Settings → General → Login Items."
         default:
             launchAtLogin.state = .off
         }
         sub.addItem(launchAtLogin)
 
-        let dock = NSMenuItem(title: "Show SuperDictate in Dock",
+        let dock = NSMenuItem(title: "Show Dictor in Dock",
                               action: #selector(toggleDock(_:)),
                               keyEquivalent: "")
         dock.target = self
@@ -6323,7 +6323,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showAppForModal()
         let panel = NSOpenPanel()
         panel.title = "Import Text Corrections"
-        panel.message = "Choose a Parakey corrections file to import."
+        panel.message = "Choose a Dictor corrections file to import."
         panel.prompt = "Import"
         panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
         panel.allowsMultipleSelection = false
@@ -6358,7 +6358,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             cleanupPendingSharedCorrections(reason: "new share")
 
             let folder = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Parakey-\(UUID().uuidString)", isDirectory: true)
+                .appendingPathComponent("Dictor-\(UUID().uuidString)", isDirectory: true)
             let url = folder.appendingPathComponent(CORRECTIONS_FILE_NAME)
             try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
             pendingSharedCorrectionsURL = url
@@ -6386,9 +6386,9 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let alert = NSAlert()
         alert.messageText = "Set Up Text Correction Sync"
         alert.informativeText = """
-            Parakey can keep corrections in one local file. Put that file in iCloud Drive, Dropbox, Syncthing, or another synced folder to keep multiple Macs aligned without a Parakey account.
+            Dictor can keep corrections in one local file. Put that file in iCloud Drive, Dropbox, Syncthing, or another synced folder to keep multiple Macs aligned without a Dictor account.
 
-            Parakey only reads and writes the file you choose.
+            Dictor only reads and writes the file you choose.
             """
         alert.addButton(withTitle: "Create Sync File")
         alert.addButton(withTitle: "Use Existing File")
@@ -6414,7 +6414,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Stop Syncing Text Corrections?"
-        alert.informativeText = "Parakey will keep the corrections already on this Mac. The sync file will not be deleted."
+        alert.informativeText = "Dictor will keep the corrections already on this Mac. The sync file will not be deleted."
         alert.addButton(withTitle: "Stop Syncing")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -6470,7 +6470,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showAppForModal()
         let panel = NSSavePanel()
         panel.title = "Create Text Correction Sync File"
-        panel.message = "Choose where Parakey should keep the sync file. A folder synced by iCloud Drive or another provider works best."
+        panel.message = "Choose where Dictor should keep the sync file. A folder synced by iCloud Drive or another provider works best."
         panel.prompt = "Create"
         panel.nameFieldStringValue = CORRECTIONS_FILE_NAME
         panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
@@ -6491,7 +6491,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showAppForModal()
         let panel = NSOpenPanel()
         panel.title = "Choose Text Correction Sync File"
-        panel.message = "Choose an existing Parakey corrections file."
+        panel.message = "Choose an existing Dictor corrections file."
         panel.prompt = "Use File"
         panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
         panel.allowsMultipleSelection = false
@@ -6772,7 +6772,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .fingerprintUnavailable:
             if presentErrors {
                 showCorrectionTransferError(title: "Sync Failed",
-                                            message: "Parakey could not find the selected sync file.")
+                                            message: "Dictor could not find the selected sync file.")
             }
         case .unchanged:
             break
@@ -6889,7 +6889,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showCorrectionTransferError(
             title: "Text Correction Sync Conflict",
             message: """
-            The sync file changed before this Mac wrote its latest text correction edits. Parakey kept the corrections on this Mac and stopped syncing so it would not overwrite the file.
+            The sync file changed before this Mac wrote its latest text correction edits. Dictor kept the corrections on this Mac and stopped syncing so it would not overwrite the file.
 
             Reconnect the sync file after importing or resolving the conflicting correction\(conflictingSources.count == 1 ? "" : "s"):
             \(examples)\(remainingText)
@@ -6910,7 +6910,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             showCorrectionTransferError(
                 title: "Text Correction Sync Stopped",
                 message: """
-                Parakey stopped syncing because the selected corrections file is no longer safe to use.
+                Dictor stopped syncing because the selected corrections file is no longer safe to use.
 
                 \(error.localizedDescription)
                 """
@@ -6937,7 +6937,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showAppForModal()
         let alert = NSAlert()
         alert.messageText = existing == nil ? "Add Text Correction" : "Edit Text Correction"
-        alert.informativeText = "Add the incorrect text Parakey typed, then the text it should paste instead."
+        alert.informativeText = "Add the incorrect text Dictor typed, then the text it should paste instead."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
 
@@ -7128,7 +7128,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.recordStartupFailure(
                     stage: .hotkeyListener,
                     error: NSError(
-                        domain: "Parakey",
+                        domain: "Dictor",
                         code: -5,
                         userInfo: [
                             NSLocalizedDescriptionKey: "The hotkey listener could not restart after recording a hotkey."
@@ -7334,7 +7334,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func showAboutClicked(_ sender: NSMenuItem) {
         showAppForModal()
         let alert = NSAlert()
-        alert.messageText = "SuperDictate \(currentBundleVersion())"
+        alert.messageText = "Dictor \(currentBundleVersion())"
         alert.informativeText = """
             Lightweight push-to-talk dictation for Apple Silicon Macs.
 
@@ -7346,14 +7346,14 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Network: model download, optional update check and install.
             Permissions: microphone audio, paste-at-cursor, push-to-talk hotkey.
 
-            Open source, based on Parakey by Richard Courtman.
-            github.com/shlgd/SuperDictate · MIT licensed
+            Open source, based on Dictor by Richard Courtman.
+            github.com/shlgd/Dictor · MIT licensed
             """
         // Use our app icon instead of NSAlert's default exclamation
-        // mark. .icns lives in Contents/Resources/Parakey.icns;
+        // mark. .icns lives in Contents/Resources/Dictor.icns;
         // NSImage(named:) on Bundle.main resolves it by filename
         // sans extension.
-        if let icon = NSImage(named: "Parakey") {
+        if let icon = NSImage(named: "Dictor") {
             alert.icon = icon
         }
         alert.addButton(withTitle: "OK")
@@ -7474,7 +7474,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showReleaseNotes(for release: GitHubRelease) {
         showAppForModal()
         let alert = NSAlert()
-        alert.messageText = "Parakey v\(release.version)"
+        alert.messageText = "Dictor v\(release.version)"
         var body = release.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if body.isEmpty { body = "(No release notes available for this version.)" }
         else if body.count > 1500 { body = String(body.prefix(1500)) + "\n\n…" }
@@ -7566,7 +7566,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showUpdateAvailableAlert(for release: GitHubRelease, currentVersion: String) {
         showAppForModal()
         let alert = NSAlert()
-        alert.messageText = "Parakey v\(release.version) is available"
+        alert.messageText = "Dictor v\(release.version) is available"
         alert.informativeText = "You're running v\(currentVersion). Nothing is installed unless you choose Update Now."
         alert.addButton(withTitle: "Update Now")
         alert.addButton(withTitle: "What's New")
@@ -7633,7 +7633,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showUpToDateAlert(currentVersion: String) {
         showAppForModal()
         let alert = NSAlert()
-        alert.messageText = "Parakey is up to date"
+        alert.messageText = "Dictor is up to date"
         alert.informativeText = "You're running v\(currentVersion)."
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -7667,7 +7667,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         To update, run this command in Terminal:
 
-        curl -fsSL https://raw.githubusercontent.com/shlgd/SuperDictate/main/install.sh | bash
+        curl -fsSL https://raw.githubusercontent.com/shlgd/Dictor/main/install.sh | bash
         """
         alert.addButton(withTitle: "Open Release Page")
         alert.addButton(withTitle: "Close")
@@ -7689,7 +7689,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         You can update from Terminal:
 
-        curl -fsSL https://raw.githubusercontent.com/shlgd/SuperDictate/main/install.sh | bash
+        curl -fsSL https://raw.githubusercontent.com/shlgd/Dictor/main/install.sh | bash
         """
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -7700,7 +7700,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// waitUntilExit() here would stall every keystroke system-wide
     /// (and a >1 s stall makes macOS disable the tap), so the check
     /// runs on a background queue and reports back to the main actor.
-    private static let brewPreflightQueue = DispatchQueue(label: "ParakeyBrewPreflight",
+    private static let brewPreflightQueue = DispatchQueue(label: "DictorBrewPreflight",
                                                           qos: .userInitiated)
 
     private func isBrewInstall(brewPath: String,
@@ -7782,14 +7782,14 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             statePath = try createPrivateUpdateProgressStateFile()
         } catch {
             log("update: creating progress state failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Parakey couldn't prepare the update progress window.")
+            showUpdateCouldNotStart(detail: "Dictor couldn't prepare the update progress window.")
             return
         }
 
         // Detached shell helper refreshes Homebrew, downloads the cask,
         // waits for THIS process to exit, upgrades/reinstalls the app,
         // verifies the installed bundle version, then re-opens
-        // /Applications/SuperDictate.app. We can't run the install step
+        // /Applications/Dictor.app. We can't run the install step
         // in-process because it replaces the bundle we're executing from.
         let script = updateHelperScript(pid: getpid(),
                                         brewPath: brewPath,
@@ -7806,7 +7806,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch {
             try? FileManager.default.removeItem(atPath: statePath)
             log("update: writing helper failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Parakey couldn't write the update helper script.")
+            showUpdateCouldNotStart(detail: "Dictor couldn't write the update helper script.")
             return
         }
         let helperLog: PrivateOutputFile
@@ -7816,7 +7816,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try? FileManager.default.removeItem(atPath: helperPath)
             try? FileManager.default.removeItem(atPath: statePath)
             log("update: opening helper log failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Parakey couldn't open the update helper log.")
+            showUpdateCouldNotStart(detail: "Dictor couldn't open the update helper log.")
             return
         }
 
@@ -7830,7 +7830,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try? FileManager.default.removeItem(atPath: statePath)
             helperLog.handle.closeFile()
             log("update: launching progress app failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Parakey couldn't open the update progress window.")
+            showUpdateCouldNotStart(detail: "Dictor couldn't open the update progress window.")
             return
         }
 
@@ -7846,9 +7846,9 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             try? FileManager.default.removeItem(atPath: helperPath)
             helperLog.handle.closeFile()
             try? writePrivateUpdateProgressState(phase: "failed",
-                                                 message: "Parakey couldn't launch the update helper.",
+                                                 message: "Dictor couldn't launch the update helper.",
                                                  to: statePath)
-            showUpdateCouldNotStart(detail: "Parakey couldn't launch the update helper.")
+            showUpdateCouldNotStart(detail: "Dictor couldn't launch the update helper.")
             return
         }
         log("update helper spawned \(privacySafeLogPath(helperPath)), progress app \(privacySafeLogPath(progressAppPath)), logging to \(privacySafeLogPath(helperLog.path)); quitting for upgrade")
@@ -7870,7 +7870,7 @@ final class ParakeyApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         guard last != current else { return }
         log("upgrade detected: \(last) → \(current); checking for stale TCC state")
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.local.superdictate"
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.raul.dictor"
         for p in Permission.allCases {
             if Permissions.isGranted(p) { continue }
             // Fire-and-forget on TCC's serial queue: these resets are

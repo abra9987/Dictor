@@ -15,19 +15,19 @@ import UniformTypeIdentifiers
 // MARK: - Logger
 //
 // All output goes to stderr (line-buffered, so we don't lose lines
-// across an abrupt exit) and to ~/Library/Logs/SuperDictate.log.
+// across an abrupt exit) and to ~/Library/Logs/Dictor.log.
 
 final class Logger: @unchecked Sendable {
     static let shared = Logger()
     private let url: URL
-    private let q = DispatchQueue(label: "ParakeyLogger")
+    private let q = DispatchQueue(label: "DictorLogger")
 
     var fileURL: URL { url }
 
     init() {
         let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs", isDirectory: true)
-        url = logs.appendingPathComponent("SuperDictate.log")
+        url = logs.appendingPathComponent("Dictor.log")
     }
 
     func log(_ msg: String) {
@@ -98,7 +98,7 @@ enum AgentRuntimeStateStore {
     }
 }
 
-enum SuperDictateControlPanelRegistry {
+enum DictorControlPanelRegistry {
     static var url: URL {
         (try? superDictateApplicationSupportDirectory()
             .appendingPathComponent(CONTROL_PANEL_PID_FILE_NAME)) ??
@@ -163,7 +163,7 @@ struct ProcessRunResult {
     let output: String
 }
 
-enum SuperDictateAgentService {
+enum DictorAgentService {
     static var launchAgentURL: URL {
         let directory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
@@ -175,7 +175,7 @@ enum SuperDictateAgentService {
 
     static func agentExecutablePath() -> String {
         Bundle.main.executablePath ??
-        "\(INSTALLED_APP_BUNDLE_PATH)/Contents/MacOS/SuperDictate"
+        "\(INSTALLED_APP_BUNDLE_PATH)/Contents/MacOS/Dictor"
     }
 
     static func installAndStart() throws {
@@ -184,7 +184,7 @@ enum SuperDictateAgentService {
         _ = runLaunchctl(["enable", launchService])
         let kick = runLaunchctl(["kickstart", "-k", launchService])
         if kick.status != 0 && !isAgentRunning() {
-            throw NSError(domain: "SuperDictateAgentService",
+            throw NSError(domain: "DictorAgentService",
                           code: Int(kick.status),
                           userInfo: [NSLocalizedDescriptionKey: kick.output])
         }
@@ -230,7 +230,7 @@ enum SuperDictateAgentService {
                                                 attributes: [.posixPermissions: 0o700])
 
         let logPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs/SuperDictate-agent.launchd.log").path
+            .appendingPathComponent("Logs/Dictor-agent.launchd.log").path
         let plist: [String: Any] = [
             "Label": AGENT_LABEL,
             "ProgramArguments": [agentExecutablePath(), AGENT_ARGUMENT],
@@ -307,7 +307,7 @@ func privacySafeLogPath(_ url: URL) -> String {
 
 func privacySafeBundlePath(_ path: String) -> String {
     switch path {
-    case "/Applications/SuperDictate.app", "/tmp/SuperDictate-dev.app":
+    case "/Applications/Dictor.app", "/tmp/Dictor-dev.app":
         return path
     default:
         return privacySafeLogPath(path)

@@ -20,7 +20,7 @@ import UniformTypeIdentifiers
 // Actors are reentrant at suspension points: while
 // `await asr.transcribe(...)` is suspended, a second transcribe()
 // call would enter the actor and start concurrent inference. The
-// real guard is ParakeyApp.isBusy, which ensures the app never
+// real guard is DictorApp.isBusy, which ensures the app never
 // issues a second transcribe while one is in flight. The `inFlight`
 // flag below is a cheap defensive backstop should that invariant
 // ever break: it refuses (and, in DEBUG, asserts on) a re-entrant
@@ -114,11 +114,11 @@ actor TranscriptionWorker {
                                language: Language? = nil,
                                requestedAt: TimeInterval) async throws -> TranscriptionWorkerResult {
         let workerEnteredAt = ProcessInfo.processInfo.systemUptime
-        guard let engine else { throw NSError(domain: "Parakey", code: -2) }
+        guard let engine else { throw NSError(domain: "Dictor", code: -2) }
         guard !inFlight else {
-            log("ASR: transcribe re-entered while another transcription is in flight — refusing (ParakeyApp.isBusy should make this impossible)")
+            log("ASR: transcribe re-entered while another transcription is in flight — refusing (DictorApp.isBusy should make this impossible)")
             assertionFailure("TranscriptionWorker.transcribe re-entered across a suspension point")
-            throw NSError(domain: "Parakey", code: -3)
+            throw NSError(domain: "Dictor", code: -3)
         }
         inFlight = true
         defer { inFlight = false }

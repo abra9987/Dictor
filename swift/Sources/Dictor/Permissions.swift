@@ -182,7 +182,7 @@ func speechModelFailureDetail(errorDescription: String) -> String {
         return """
         \(errorDescription)
 
-        Parakey needs a one-time download of the local speech model. Check your network connection and retry; audio is not uploaded.
+        Dictor needs a one-time download of the local speech model. Check your network connection and retry; audio is not uploaded.
         """
     }
     return """
@@ -279,7 +279,7 @@ func audioInputFailureDetail(errorDescription: String) -> String {
     return """
     \(errorDescription)
 
-    Parakey rebuilt the audio engine and retried microphone startup, but CoreAudio is still refusing to start the input unit. If this began after sleep/wake or an audio-device change, restart CoreAudio with sudo killall coreaudiod or reboot the Mac, then retry audio startup.
+    Dictor rebuilt the audio engine and retried microphone startup, but CoreAudio is still refusing to start the input unit. If this began after sleep/wake or an audio-device change, restart CoreAudio with sudo killall coreaudiod or reboot the Mac, then retry audio startup.
     """
 }
 

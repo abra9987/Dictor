@@ -23,7 +23,7 @@ enum SelfTestFailure: Error, CustomStringConvertible {
     }
 }
 
-enum ParakeySelfTest {
+enum DictorSelfTest {
     static func run(arguments: [String]) -> Int32? {
         guard arguments.count >= 2, arguments[0] == "--self-test" else { return nil }
         guard arguments.count == 2 else { return fail("usage") }
@@ -258,8 +258,8 @@ enum ParakeySelfTest {
 
     private static func testPrivateLogAppend() throws {
         try expect(
-            privacySafeLogPath("/Users/example/Documents/Parakey Diagnostics.txt"),
-            equals: "Parakey Diagnostics.txt",
+            privacySafeLogPath("/Users/example/Documents/Dictor Diagnostics.txt"),
+            equals: "Dictor Diagnostics.txt",
             "log path labels should omit parent directories"
         )
         try expect(
@@ -268,23 +268,23 @@ enum ParakeySelfTest {
             "log path labels should fall back when no filename is available"
         )
         try expect(
-            privacySafeBundlePath("/Applications/SuperDictate.app"),
-            equals: "/Applications/SuperDictate.app",
+            privacySafeBundlePath("/Applications/Dictor.app"),
+            equals: "/Applications/Dictor.app",
             "bundle path labels should keep the canonical install path"
         )
         try expect(
-            privacySafeBundlePath("/Users/example/Downloads/SuperDictate.app"),
-            equals: "SuperDictate.app",
+            privacySafeBundlePath("/Users/example/Downloads/Dictor.app"),
+            equals: "Dictor.app",
             "bundle path labels should omit parent directories for nonstandard installs"
         )
 
         let fm = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-log-test-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dictor-log-test-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: root) }
 
-        let logFile = root.appendingPathComponent("SuperDictate.log")
+        let logFile = root.appendingPathComponent("Dictor.log")
         try appendPrivateLogData(Data("one\n".utf8), to: logFile)
         try appendPrivateLogData(Data("two\n".utf8), to: logFile)
 
@@ -351,8 +351,8 @@ enum ParakeySelfTest {
                 appVersion: "9.8.7",
                 appBuild: "123",
                 macOS: "Version 26.0",
-                bundleID: "com.local.superdictate",
-                bundlePath: "/Applications/SuperDictate.app",
+                bundleID: "com.raul.dictor",
+                bundlePath: "/Applications/Dictor.app",
                 installKind: "Applications app",
                 status: "Hold Right Option to dictate",
                 startup: "Runtime ready",
@@ -372,7 +372,7 @@ enum ParakeySelfTest {
                 ],
                 updateLines: ["Pending update: none"],
                 microphoneLines: ["Selected: System default", "Available inputs: none reported"],
-                logPath: "~/Library/Logs/SuperDictate.log",
+                logPath: "~/Library/Logs/Dictor.log",
                 recentLogLines: ["[10:00:00] release: 1.23 s captured, transcribing"]
             )
         )
@@ -392,11 +392,11 @@ enum ParakeySelfTest {
 
         let fm = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-diagnostics-test-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dictor-diagnostics-test-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: root) }
 
-        let logFile = root.appendingPathComponent("SuperDictate.log")
+        let logFile = root.appendingPathComponent("Dictor.log")
         for line in 1...6 {
             try appendPrivateLogData(Data("[10:00:0\(line)] line \(line)\n".utf8), to: logFile)
         }
@@ -582,7 +582,7 @@ enum ParakeySelfTest {
             ),
             equals: .rolledBack(
                 previous: f5,
-                message: "Parakey could not save that hotkey, so it kept F5."
+                message: "Dictor could not save that hotkey, so it kept F5."
             ),
             "hotkey preference update should roll back when persisted settings disagree"
         )
@@ -983,7 +983,7 @@ enum ParakeySelfTest {
         )
 
         let pasteboardProbe = MainActor.assumeIsolated {
-            let pasteboardName = NSPasteboard.Name("com.local.superdictate.self-test.\(UUID().uuidString)")
+            let pasteboardName = NSPasteboard.Name("com.raul.dictor.self-test.\(UUID().uuidString)")
             let pasteboard = NSPasteboard(name: pasteboardName)
             let wrote = ClipboardPasteInserter.write("pasteboard probe", to: pasteboard)
             let snapshot = PasteboardSnapshot.capture(from: pasteboard)
@@ -1500,13 +1500,13 @@ enum ParakeySelfTest {
         let applied = TranscriptCorrector.apply(
             to: "parakeet tdt and parakeetish and PARakeet",
             corrections: [
-                TranscriptCorrection(source: "parakeet", replacement: "Parakey"),
+                TranscriptCorrection(source: "parakeet", replacement: "Dictor"),
                 TranscriptCorrection(source: "parakeet tdt", replacement: "Parakeet TDT")
             ]
         )
         try expect(
             applied.text,
-            equals: "Parakeet TDT and parakeetish and Parakey",
+            equals: "Parakeet TDT and parakeetish and Dictor",
             "corrections should prefer longer phrases and respect word boundaries"
         )
         try expect(
@@ -1551,7 +1551,7 @@ enum ParakeySelfTest {
         let transferTmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
         let transferFileManager = FileManager.default
         let oversized = transferTmpDir
-            .appendingPathComponent("parakey-corrections-oversized-\(UUID().uuidString).json")
+            .appendingPathComponent("dictor-corrections-oversized-\(UUID().uuidString).json")
         try Data(repeating: 0x20, count: TranscriptCorrectionsTransfer.maxFileBytes + 1)
             .write(to: oversized)
         defer { try? transferFileManager.removeItem(at: oversized) }
@@ -1567,7 +1567,7 @@ enum ParakeySelfTest {
                    "correction transfer should reject oversized files before decoding")
 
         let nonFile = transferTmpDir
-            .appendingPathComponent("parakey-corrections-directory-\(UUID().uuidString)")
+            .appendingPathComponent("dictor-corrections-directory-\(UUID().uuidString)")
         try transferFileManager.createDirectory(at: nonFile, withIntermediateDirectories: false)
         defer { try? transferFileManager.removeItem(at: nonFile) }
         var nonFileRejected = false
@@ -1582,14 +1582,14 @@ enum ParakeySelfTest {
                    "correction transfer should reject non-file paths")
 
         let readTarget = transferTmpDir
-            .appendingPathComponent("parakey-corrections-read-target-\(UUID().uuidString).json")
+            .appendingPathComponent("dictor-corrections-read-target-\(UUID().uuidString).json")
         try TranscriptCorrectionsTransfer.write(
             [TranscriptCorrection(source: "source", replacement: "replacement")],
             to: readTarget
         )
         defer { try? transferFileManager.removeItem(at: readTarget) }
         let readLink = transferTmpDir
-            .appendingPathComponent("parakey-corrections-read-link-\(UUID().uuidString).json")
+            .appendingPathComponent("dictor-corrections-read-link-\(UUID().uuidString).json")
         try transferFileManager.createSymbolicLink(at: readLink, withDestinationURL: readTarget)
         defer { try? transferFileManager.removeItem(at: readLink) }
         var symlinkReadRejected = false
@@ -1604,11 +1604,11 @@ enum ParakeySelfTest {
                    "correction transfer should reject reads through leaf symlinks")
 
         let writeTarget = transferTmpDir
-            .appendingPathComponent("parakey-corrections-write-target-\(UUID().uuidString).json")
+            .appendingPathComponent("dictor-corrections-write-target-\(UUID().uuidString).json")
         try Data("target\n".utf8).write(to: writeTarget)
         defer { try? transferFileManager.removeItem(at: writeTarget) }
         let writeLink = transferTmpDir
-            .appendingPathComponent("parakey-corrections-write-link-\(UUID().uuidString).json")
+            .appendingPathComponent("dictor-corrections-write-link-\(UUID().uuidString).json")
         try transferFileManager.createSymbolicLink(at: writeLink, withDestinationURL: writeTarget)
         defer { try? transferFileManager.removeItem(at: writeLink) }
         var symlinkWriteRejected = false
@@ -1680,19 +1680,19 @@ enum ParakeySelfTest {
             "sync merge should report same-source edits that changed differently on both sides"
         )
 
-        let normalizedSyncPath = normalizedCorrectionSyncFilePath(" /tmp/superdictate/../SuperDictate Corrections.superdictate-corrections\n")
+        let normalizedSyncPath = normalizedCorrectionSyncFilePath(" /tmp/dictor/../Dictor Corrections.dictor-corrections\n")
         try expect(
             normalizedSyncPath,
-            equals: "/tmp/SuperDictate Corrections.superdictate-corrections",
+            equals: "/tmp/Dictor Corrections.dictor-corrections",
             "correction sync path normalization should trim and standardize absolute paths"
         )
         try expect(
-            normalizedCorrectionSyncFilePath("relative/path.superdictate-corrections"),
+            normalizedCorrectionSyncFilePath("relative/path.dictor-corrections"),
             equals: nil,
             "correction sync path normalization should reject relative paths"
         )
         try expect(
-            normalizedCorrectionSyncFilePath("/tmp/\u{0}superdictate.superdictate-corrections"),
+            normalizedCorrectionSyncFilePath("/tmp/\u{0}dictor.dictor-corrections"),
             equals: nil,
             "correction sync path normalization should reject NUL bytes"
         )
@@ -1707,18 +1707,18 @@ enum ParakeySelfTest {
         // the periodic auto-write to overwrite an unrelated file.
         let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory())
         let fm = FileManager.default
-        let nonexistent = tmpDir.appendingPathComponent("parakey-sync-test-missing-\(UUID().uuidString).json")
+        let nonexistent = tmpDir.appendingPathComponent("dictor-sync-test-missing-\(UUID().uuidString).json")
         try validateCorrectionSyncPath(nonexistent) // missing files are allowed (first-time write)
 
-        let regular = tmpDir.appendingPathComponent("parakey-sync-test-regular-\(UUID().uuidString).json")
+        let regular = tmpDir.appendingPathComponent("dictor-sync-test-regular-\(UUID().uuidString).json")
         try Data("{}".utf8).write(to: regular)
         defer { try? fm.removeItem(at: regular) }
         try validateCorrectionSyncPath(regular)
 
-        let target = tmpDir.appendingPathComponent("parakey-sync-test-target-\(UUID().uuidString).json")
+        let target = tmpDir.appendingPathComponent("dictor-sync-test-target-\(UUID().uuidString).json")
         try Data("{}".utf8).write(to: target)
         defer { try? fm.removeItem(at: target) }
-        let link = tmpDir.appendingPathComponent("parakey-sync-test-link-\(UUID().uuidString).json")
+        let link = tmpDir.appendingPathComponent("dictor-sync-test-link-\(UUID().uuidString).json")
         try fm.createSymbolicLink(at: link, withDestinationURL: target)
         defer { try? fm.removeItem(at: link) }
         var rejected = false
@@ -1735,7 +1735,7 @@ enum ParakeySelfTest {
             "unsafe sync paths should stop configured correction sync"
         )
         try expect(
-            shouldStopCorrectionSync(afterPathValidationError: NSError(domain: "ParakeyTest", code: 1)),
+            shouldStopCorrectionSync(afterPathValidationError: NSError(domain: "DictorTest", code: 1)),
             equals: false,
             "unrelated sync errors should not clear the configured correction sync path"
         )
@@ -1745,8 +1745,8 @@ enum ParakeySelfTest {
             "correction sync fingerprinting should not follow leaf symlinks"
         )
 
-        let sameSizeA = tmpDir.appendingPathComponent("parakey-sync-fingerprint-a-\(UUID().uuidString).json")
-        let sameSizeB = tmpDir.appendingPathComponent("parakey-sync-fingerprint-b-\(UUID().uuidString).json")
+        let sameSizeA = tmpDir.appendingPathComponent("dictor-sync-fingerprint-a-\(UUID().uuidString).json")
+        let sameSizeB = tmpDir.appendingPathComponent("dictor-sync-fingerprint-b-\(UUID().uuidString).json")
         try Data("aaaa".utf8).write(to: sameSizeA)
         try Data("bbbb".utf8).write(to: sameSizeB)
         defer {
@@ -1846,7 +1846,7 @@ enum ParakeySelfTest {
         // the file in the write-to-fingerprint window is still detected
         // by the next scan.
         let fingerprintWriteTarget = tmpDir
-            .appendingPathComponent("parakey-sync-written-fingerprint-\(UUID().uuidString).json")
+            .appendingPathComponent("dictor-sync-written-fingerprint-\(UUID().uuidString).json")
         let fingerprintWrittenData = try TranscriptCorrectionsTransfer.write(
             [TranscriptCorrection(source: "fingerprint", replacement: "match")],
             to: fingerprintWriteTarget
@@ -1900,14 +1900,14 @@ enum ParakeySelfTest {
         // Import dialog copy: state the original count when entries
         // will be dropped, and warn before a cap-overflowing merge.
         try expect(
-            correctionImportCountText(sourceName: "file.superdictate-corrections",
+            correctionImportCountText(sourceName: "file.dictor-corrections",
                                       originalCount: 3,
                                       keptCount: 3),
-            equals: "file.superdictate-corrections contains 3 corrections.",
+            equals: "file.dictor-corrections contains 3 corrections.",
             "import count text should stay simple when nothing is dropped"
         )
         let truncatedImportText = correctionImportCountText(
-            sourceName: "big.superdictate-corrections",
+            sourceName: "big.dictor-corrections",
             originalCount: MAX_TRANSCRIPT_CORRECTIONS + 88,
             keptCount: MAX_TRANSCRIPT_CORRECTIONS
         )
@@ -2229,7 +2229,7 @@ enum ParakeySelfTest {
 
         let fm = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-model-integrity-\(UUID().uuidString)",
+            .appendingPathComponent("dictor-model-integrity-\(UUID().uuidString)",
                                     isDirectory: true)
         let modelDir = root.appendingPathComponent("Toy.mlmodelc", isDirectory: true)
         try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
@@ -2344,7 +2344,7 @@ enum ParakeySelfTest {
     private static func testSpeechModelCachePathSafety() throws {
         let fm = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-cache-safety-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dictor-cache-safety-\(UUID().uuidString)", isDirectory: true)
         let support = root.appendingPathComponent("FluidAudio", isDirectory: true)
         let cache = support.appendingPathComponent("Models/parakeet-v3", isDirectory: true)
         try fm.createDirectory(at: cache, withIntermediateDirectories: true)
@@ -2442,17 +2442,17 @@ enum ParakeySelfTest {
         let checksum = String(repeating: "a", count: 64)
         let validData = Data("{\"version\":\"9.8.7\",\"sha256\":\"\(checksum)\"}".utf8)
         try expect(
-            try SuperDictateUpdateInstaller.parseManifest(validData,
+            try DictorUpdateInstaller.parseManifest(validData,
                                                            expectedVersion: "9.8.7"),
-            equals: SuperDictateUpdateManifest(version: "9.8.7", sha256: checksum),
+            equals: DictorUpdateManifest(version: "9.8.7", sha256: checksum),
             "direct update manifest should parse a canonical version and SHA-256"
         )
 
         do {
-            _ = try SuperDictateUpdateInstaller.parseManifest(validData,
+            _ = try DictorUpdateInstaller.parseManifest(validData,
                                                                expectedVersion: "9.8.8")
             throw SelfTestFailure.failed("direct update manifest should reject version disagreement")
-        } catch let error as SuperDictateUpdateInstallerError {
+        } catch let error as DictorUpdateInstallerError {
             try expect(error,
                        equals: .manifestVersionMismatch(expected: "9.8.8", actual: "9.8.7"),
                        "direct update manifest should describe version disagreement")
@@ -2460,10 +2460,10 @@ enum ParakeySelfTest {
 
         let invalidChecksum = Data(#"{"version":"9.8.7","sha256":"not-a-checksum"}"#.utf8)
         do {
-            _ = try SuperDictateUpdateInstaller.parseManifest(invalidChecksum,
+            _ = try DictorUpdateInstaller.parseManifest(invalidChecksum,
                                                                expectedVersion: "9.8.7")
             throw SelfTestFailure.failed("direct update manifest should reject malformed checksums")
-        } catch let error as SuperDictateUpdateInstallerError {
+        } catch let error as DictorUpdateInstallerError {
             try expect(error, equals: .invalidManifest,
                        "direct update manifest should reject malformed checksums")
         }
@@ -2479,7 +2479,7 @@ enum ParakeySelfTest {
                                        httpVersion: nil,
                                        headerFields: nil)!
         let releaseData = Data(
-            #"{"tag_name":"v9.8.7","body":"Notes","html_url":"https://github.com/shlgd/SuperDictate/releases/tag/v9.8.7"}"#.utf8
+            #"{"tag_name":"v9.8.7","body":"Notes","html_url":"https://github.com/shlgd/Dictor/releases/tag/v9.8.7"}"#.utf8
         )
 
         try expect(
@@ -2487,7 +2487,7 @@ enum ParakeySelfTest {
             equals: .success(GitHubRelease(tagName: "v9.8.7",
                                            version: "9.8.7",
                                            body: "Notes",
-                                           htmlURL: "https://github.com/shlgd/SuperDictate/releases/tag/v9.8.7")),
+                                           htmlURL: "https://github.com/shlgd/Dictor/releases/tag/v9.8.7")),
             "update parsing should decode typed GitHub release payloads"
         )
         try expect(
@@ -2506,7 +2506,7 @@ enum ParakeySelfTest {
         )
         let oversizedReleaseData = Data(
             """
-            {"tag_name":"v9.8.7","body":"\(String(repeating: "x", count: UpdateCheck.maxReleaseResponseBytes))","html_url":"https://github.com/shlgd/SuperDictate/releases/tag/v9.8.7"}
+            {"tag_name":"v9.8.7","body":"\(String(repeating: "x", count: UpdateCheck.maxReleaseResponseBytes))","html_url":"https://github.com/shlgd/Dictor/releases/tag/v9.8.7"}
             """.utf8
         )
         try expect(
@@ -2577,7 +2577,7 @@ enum ParakeySelfTest {
         )
         try expect(
             UpdateCheck.parseLatest(
-                data: Data(#"{"tag_name":"v9.8.7","html_url":"https://github.com/shlgd/SuperDictate/releases/tag/v9.8.8"}"#.utf8),
+                data: Data(#"{"tag_name":"v9.8.7","html_url":"https://github.com/shlgd/Dictor/releases/tag/v9.8.8"}"#.utf8),
                 response: ok
             ),
             equals: .success(GitHubRelease(tagName: "v9.8.7",
@@ -2629,19 +2629,19 @@ enum ParakeySelfTest {
             "stored app version normalization should reject oversized numeric components"
         )
         try expect(
-            UpdateCheck.sanitizedReleaseURL("http://github.com/shlgd/SuperDictate/releases/tag/v9.8.7",
+            UpdateCheck.sanitizedReleaseURL("http://github.com/shlgd/Dictor/releases/tag/v9.8.7",
                                             expectedTag: "v9.8.7"),
             equals: GITHUB_RELEASES_PAGE.absoluteString,
             "release URL sanitizing should require HTTPS"
         )
         try expect(
-            UpdateCheck.sanitizedReleaseURL("https://user@github.com/shlgd/SuperDictate/releases/tag/v9.8.7",
+            UpdateCheck.sanitizedReleaseURL("https://user@github.com/shlgd/Dictor/releases/tag/v9.8.7",
                                             expectedTag: "v9.8.7"),
             equals: GITHUB_RELEASES_PAGE.absoluteString,
             "release URL sanitizing should reject userinfo"
         )
         try expect(
-            UpdateCheck.sanitizedReleaseURL("https://github.com/shlgd/SuperDictate/releases/tag/v9.8.7?download=1",
+            UpdateCheck.sanitizedReleaseURL("https://github.com/shlgd/Dictor/releases/tag/v9.8.7?download=1",
                                             expectedTag: "v9.8.7"),
             equals: GITHUB_RELEASES_PAGE.absoluteString,
             "release URL sanitizing should reject query strings"
@@ -2794,8 +2794,8 @@ enum ParakeySelfTest {
         )
         let updateEnv = updateProcessEnvironment(current: [
             "LANG": "C\nbad",
-            "USER": "parakey-user",
-            "LOGNAME": "parakey-logname",
+            "USER": "dictor-user",
+            "LOGNAME": "dictor-logname",
             "__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0",
             "BASH_ENV": "/tmp/pwn.sh",
             "ENV": "/tmp/pwn.sh",
@@ -2810,9 +2810,9 @@ enum ParakeySelfTest {
                    "update environment should use a deterministic PATH")
         try expect(updateEnv["LANG"], equals: Optional("en_US.UTF-8"),
                    "update environment should reject unsafe locale values")
-        try expect(updateEnv["USER"], equals: Optional("parakey-user"),
+        try expect(updateEnv["USER"], equals: Optional("dictor-user"),
                    "update environment should preserve a safe USER value")
-        try expect(updateEnv["LOGNAME"], equals: Optional("parakey-logname"),
+        try expect(updateEnv["LOGNAME"], equals: Optional("dictor-logname"),
                    "update environment should preserve a safe LOGNAME value")
         for key in ["BASH_ENV", "ENV", "SHELLOPTS", "RUBYOPT", "HOMEBREW_BOTTLE_DOMAIN"] {
             try expect(updateEnv[key], equals: String?.none,
@@ -2820,7 +2820,7 @@ enum ParakeySelfTest {
         }
         let systemEnv = systemToolProcessEnvironment(current: [
             "LANG": "en_GB.UTF-8",
-            "USER": "parakey-user",
+            "USER": "dictor-user",
             "BASH_ENV": "/tmp/pwn.sh",
             "DYLD_INSERT_LIBRARIES": "/tmp/pwn.dylib",
             "PATH": "/tmp/bin",
@@ -2829,7 +2829,7 @@ enum ParakeySelfTest {
                    "system tool environment should not include Homebrew or inherited PATH entries")
         try expect(systemEnv["LANG"], equals: Optional("en_GB.UTF-8"),
                    "system tool environment should preserve a safe locale")
-        try expect(systemEnv["USER"], equals: Optional("parakey-user"),
+        try expect(systemEnv["USER"], equals: Optional("dictor-user"),
                    "system tool environment should preserve a safe USER value")
         for key in ["BASH_ENV", "DYLD_INSERT_LIBRARIES"] {
             try expect(systemEnv[key], equals: String?.none,
@@ -2839,27 +2839,27 @@ enum ParakeySelfTest {
         let script = updateHelperScript(pid: 123,
                                         brewPath: "/opt/homebrew/bin/brew",
                                         targetVersion: "9.8.7",
-                                        statePath: "/tmp/parakey-update.state",
-                                        appPath: "/Applications/SuperDictate.app",
+                                        statePath: "/tmp/dictor-update.state",
+                                        appPath: "/Applications/Dictor.app",
                                         releasesPageURL: "https://example.test/releases")
         for fragment in [
             "umask 077",
             "TARGET_VERSION='9.8.7'",
-            "STATE_PATH='/tmp/parakey-update.state'",
+            "STATE_PATH='/tmp/dictor-update.state'",
             "PARAKEY_PID=123",
             "SCRIPT_PATH=\"$0\"",
             "trap cleanup EXIT",
             "/bin/rm -f \"$SCRIPT_PATH\"",
             "printf '[%s] %s\\n' \"$(timestamp)\" \"$*\"",
             "printf '%s\\t%s\\n' \"$phase\" \"$message\" >\"$tmp\"",
-            "CASK_TAP='shlgd/superdictate'",
-            "CASK_TOKEN='shlgd/superdictate/superdictate'",
-            "CASK_INSTALLED_TOKEN='parakey'",
+            "CASK_TAP='shlgd/dictor'",
+            "CASK_TOKEN='shlgd/dictor/dictor'",
+            "CASK_INSTALLED_TOKEN='dictor'",
             "PlistBuddy -c \"Print :CFBundleShortVersionString\"",
             "version_at_least \"$installed\" \"$TARGET_VERSION\"",
-            "state \"preparing\" \"Preparing Homebrew for Parakey v$TARGET_VERSION...\"",
-            "state \"downloading\" \"Downloading Parakey v$TARGET_VERSION...\"",
-            "state \"installing\" \"Installing Parakey v$TARGET_VERSION...\"",
+            "state \"preparing\" \"Preparing Homebrew for Dictor v$TARGET_VERSION...\"",
+            "state \"downloading\" \"Downloading Dictor v$TARGET_VERSION...\"",
+            "state \"installing\" \"Installing Dictor v$TARGET_VERSION...\"",
             "run_brew tap \"$CASK_TAP\"",
             "run_brew update --force",
             "run_brew fetch --cask --force \"$CASK_TOKEN\"",
@@ -2867,7 +2867,7 @@ enum ParakeySelfTest {
             "run_brew reinstall --cask --force --appdir=\"$APP_DIR\" \"$CASK_TOKEN\"",
             "installed_target_version",
             "sleep 2",
-            "state \"complete\" \"Parakey v$TARGET_VERSION is installed.\"",
+            "state \"complete\" \"Dictor v$TARGET_VERSION is installed.\"",
             "/usr/bin/open \"$APP_PATH\""
         ] {
             guard script.contains(fragment) else {
@@ -2883,32 +2883,32 @@ enum ParakeySelfTest {
         let directScript = superDictateDirectUpdateHelperScript(
             pid: 123,
             targetVersion: "9.8.7",
-            statePath: "/tmp/superdictate-update.state",
-            stagedAppPath: "/tmp/work/release/SuperDictate.app",
+            statePath: "/tmp/dictor-update.state",
+            stagedAppPath: "/tmp/work/release/Dictor.app",
             workDirectory: "/tmp/work",
-            backupAppPath: "/Applications/.SuperDictate-update-backup-test.app",
-            appPath: "/Applications/SuperDictate.app",
+            backupAppPath: "/Applications/.Dictor-update-backup-test.app",
+            appPath: "/Applications/Dictor.app",
             language: .english
         )
         for fragment in [
             "PANEL_PID=123",
             "TARGET_VERSION='9.8.7'",
-            "STAGED_APP='/tmp/work/release/SuperDictate.app'",
-            "BACKUP_APP='/Applications/.SuperDictate-update-backup-test.app'",
+            "STAGED_APP='/tmp/work/release/Dictor.app'",
+            "BACKUP_APP='/Applications/.Dictor-update-backup-test.app'",
             "wait_for_panel_exit || rollback",
             "launchctl bootout \"$SERVICE\"",
             "/bin/mv \"$APP_PATH\" \"$BACKUP_APP\" || rollback",
             "/usr/bin/ditto \"$STAGED_APP\" \"$APP_PATH\" || rollback",
             "/usr/bin/codesign --verify --deep --strict \"$APP_PATH\"",
             "if [ -d \"$BACKUP_APP\" ]; then",
-            "state \"complete\" 'SuperDictate v9.8.7 is installed.'",
+            "state \"complete\" 'Dictor v9.8.7 is installed.'",
         ] {
             guard directScript.contains(fragment) else {
                 throw SelfTestFailure.failed("direct update helper missing fragment: \(fragment)")
             }
         }
         let directTmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("superdictate-direct-update-self-test-\(UUID().uuidString).sh")
+            .appendingPathComponent("dictor-direct-update-self-test-\(UUID().uuidString).sh")
         try directScript.write(to: directTmp, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: directTmp) }
         let directProc = Process()
@@ -2923,7 +2923,7 @@ enum ParakeySelfTest {
         }
 
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-update-self-test-\(UUID().uuidString).sh")
+            .appendingPathComponent("dictor-update-self-test-\(UUID().uuidString).sh")
         try script.write(to: tmp, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: tmp) }
 
@@ -2940,7 +2940,7 @@ enum ParakeySelfTest {
 
         let fm = FileManager.default
         let helperRoot = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-update-helper-test-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dictor-update-helper-test-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: helperRoot, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: helperRoot) }
 
@@ -3004,7 +3004,7 @@ enum ParakeySelfTest {
             "update helper script writer should leave symlink targets untouched"
         )
 
-        let preferredLog = helperRoot.appendingPathComponent("SuperDictate-update.log")
+        let preferredLog = helperRoot.appendingPathComponent("Dictor-update.log")
         let helperLog = try openPrivateUpdateHelperLog(preferredPath: preferredLog.path,
                                                        fallbackDirectory: helperRoot.path)
         helperLog.handle.write(Data("log\n".utf8))
@@ -3068,15 +3068,15 @@ enum ParakeySelfTest {
     private static func testDirectUpdateReplacement() throws {
         let fileManager = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("superdictate-update-replacement-test-\(UUID().uuidString)",
+            .appendingPathComponent("dictor-update-replacement-test-\(UUID().uuidString)",
                                     isDirectory: true)
         let applications = root.appendingPathComponent("Applications", isDirectory: true)
-        let currentApp = applications.appendingPathComponent("SuperDictate.app", isDirectory: true)
+        let currentApp = applications.appendingPathComponent("Dictor.app", isDirectory: true)
         let workDirectory = root.appendingPathComponent("work", isDirectory: true)
         let stagedApp = workDirectory
             .appendingPathComponent("release", isDirectory: true)
-            .appendingPathComponent("SuperDictate.app", isDirectory: true)
-        let backupApp = applications.appendingPathComponent(".SuperDictate-update-backup.app",
+            .appendingPathComponent("Dictor.app", isDirectory: true)
+        let backupApp = applications.appendingPathComponent(".Dictor-update-backup.app",
                                                              isDirectory: true)
         let statePath = root.appendingPathComponent("state.txt")
         let helperPath = root.appendingPathComponent("helper.sh")
@@ -3112,7 +3112,7 @@ enum ParakeySelfTest {
             throw SelfTestFailure.failed("direct update replacement failed: \(processOutput)")
         }
 
-        try SuperDictateUpdateInstaller.validateApp(at: currentApp,
+        try DictorUpdateInstaller.validateApp(at: currentApp,
                                                      expectedVersion: "9.8.7")
         try expect(fileManager.fileExists(atPath: backupApp.path), equals: false,
                    "successful direct update should remove its backup")
@@ -3131,14 +3131,14 @@ enum ParakeySelfTest {
         let fileManager = FileManager.default
         let executableDirectory = appURL.appendingPathComponent("Contents/MacOS", isDirectory: true)
         try fileManager.createDirectory(at: executableDirectory, withIntermediateDirectories: true)
-        let executableURL = executableDirectory.appendingPathComponent("SuperDictate")
+        let executableURL = executableDirectory.appendingPathComponent("Dictor")
         try fileManager.copyItem(at: sourceExecutable, to: executableURL)
         try fileManager.setAttributes([.posixPermissions: 0o755],
                                       ofItemAtPath: executableURL.path)
         let info: [String: Any] = [
-            "CFBundleExecutable": "SuperDictate",
-            "CFBundleIdentifier": "com.local.superdictate",
-            "CFBundleName": "SuperDictate",
+            "CFBundleExecutable": "Dictor",
+            "CFBundleIdentifier": "com.raul.dictor",
+            "CFBundleName": "Dictor",
             "CFBundlePackageType": "APPL",
             "CFBundleShortVersionString": version,
             "CFBundleVersion": "1",
@@ -3147,7 +3147,7 @@ enum ParakeySelfTest {
                                                           format: .xml,
                                                           options: 0)
         try infoData.write(to: appURL.appendingPathComponent("Contents/Info.plist"))
-        let signing = SuperDictateAgentService.run("/usr/bin/codesign",
+        let signing = DictorAgentService.run("/usr/bin/codesign",
                                                    ["--force", "--deep", "--sign", "-", appURL.path])
         guard signing.status == 0 else {
             throw SelfTestFailure.failed("could not sign synthetic update app: \(signing.output)")
@@ -3157,8 +3157,8 @@ enum ParakeySelfTest {
     private static func testUpdateProgressState() throws {
         let launch = UpdateProgressLaunch(arguments: [
             UPDATE_PROGRESS_ARGUMENT,
-            "/tmp/parakey.state",
-            "/tmp/parakey.log",
+            "/tmp/dictor.state",
+            "/tmp/dictor.log",
             "9.8.7",
             "/tmp/\(UPDATE_PROGRESS_APP_PREFIX)test.app",
         ])
@@ -3167,7 +3167,7 @@ enum ParakeySelfTest {
         try expect(launch?.targetVersion, equals: Optional("9.8.7"),
                    "update progress launch should retain target version")
         try expect(
-            UpdateProgressLaunch(arguments: [UPDATE_PROGRESS_ARGUMENT, "", "/tmp/parakey.log", "9.8.7", "/tmp/app"]) != nil,
+            UpdateProgressLaunch(arguments: [UPDATE_PROGRESS_ARGUMENT, "", "/tmp/dictor.log", "9.8.7", "/tmp/app"]) != nil,
             equals: false,
             "update progress launch should reject empty paths"
         )
@@ -3205,10 +3205,10 @@ enum ParakeySelfTest {
             .appendingPathComponent("\(UPDATE_PROGRESS_APP_PREFIX)test.app")
         try expect(isSafeUpdateProgressCleanupPath(safeCleanupPath), equals: true,
                    "update progress cleanup should allow copied temp app bundles")
-        try expect(isSafeUpdateProgressCleanupPath("/Applications/SuperDictate.app"), equals: false,
+        try expect(isSafeUpdateProgressCleanupPath("/Applications/Dictor.app"), equals: false,
                    "update progress cleanup should reject non-temp app bundles")
         let unsafeTempPath = (NSTemporaryDirectory() as NSString)
-            .appendingPathComponent("Parakey.app")
+            .appendingPathComponent("Dictor.app")
         try expect(isSafeUpdateProgressCleanupPath(unsafeTempPath), equals: false,
                    "update progress cleanup should reject temp app bundles without the copied-helper prefix")
     }
@@ -3345,7 +3345,7 @@ enum ParakeySelfTest {
         )
 
         let recoveryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("superdictate-recovery-test-\(UUID().uuidString)")
+            .appendingPathComponent("dictor-recovery-test-\(UUID().uuidString)")
             .appendingPathExtension("sdaudio")
         defer { try? FileManager.default.removeItem(at: recoveryURL) }
         let expectedSamples: [Float] = [-0.75, -0.125, 0, 0.25, 0.875]
@@ -3379,12 +3379,12 @@ enum ParakeySelfTest {
 
         let processed = processedDictationText(
             rawTranscript: "  Um, parakeet is fast.  ",
-            corrections: [TranscriptCorrection(source: "parakeet", replacement: "Parakey")],
+            corrections: [TranscriptCorrection(source: "parakeet", replacement: "Dictor")],
             removeFillerWords: true
         )
         try expect(
             processed,
-            equals: DictationTextProcessingResult(text: "Parakey is fast.",
+            equals: DictationTextProcessingResult(text: "Dictor is fast.",
                                                   appliedCorrectionCount: 1,
                                                   removedFillerWordCount: 1),
             "dictation text processing should trim, apply corrections, then remove fillers"
@@ -3392,12 +3392,12 @@ enum ParakeySelfTest {
 
         let preservedFillers = processedDictationText(
             rawTranscript: "  Um, parakeet is fast.  ",
-            corrections: [TranscriptCorrection(source: "parakeet", replacement: "Parakey")],
+            corrections: [TranscriptCorrection(source: "parakeet", replacement: "Dictor")],
             removeFillerWords: false
         )
         try expect(
             preservedFillers,
-            equals: DictationTextProcessingResult(text: "Um, Parakey is fast.",
+            equals: DictationTextProcessingResult(text: "Um, Dictor is fast.",
                                                   appliedCorrectionCount: 1,
                                                   removedFillerWordCount: 0),
             "dictation text processing should preserve fillers when the setting is off"
@@ -3610,7 +3610,7 @@ enum ParakeySelfTest {
 
         let fm = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("parakey-mute-marker-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dictor-mute-marker-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: root) }
 

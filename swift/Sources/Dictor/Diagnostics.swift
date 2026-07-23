@@ -108,7 +108,7 @@ func diagnosticBulletLines(_ lines: [String], emptyText: String) -> String {
 
 func diagnosticsReportText(from snapshot: DiagnosticsReportSnapshot) -> String {
     """
-    Parakey diagnostics
+    Dictor diagnostics
     Generated: \(snapshot.generated)
     App version: \(snapshot.appVersion) (\(snapshot.appBuild))
     macOS: \(snapshot.macOS)
@@ -254,7 +254,7 @@ func isNewer(_ candidate: String, than current: String) -> Bool {
 // previous denial is still cached). On a fresh launch after an
 // upgrade (CFBundleShortVersionString differs from
 // settings.lastSeenVersion), we proactively `tccutil reset` any
-// DENIED entry for `com.local.superdictate`. GRANTED entries stay
+// DENIED entry for `com.raul.dictor`. GRANTED entries stay
 // intact — we never reset away permissions the user gave us.
 //
 // The companion to this is the click-twice-to-reset retry in the
@@ -274,7 +274,7 @@ enum TCC {
 
     /// Serial so multiple resets (e.g. the upgrade-recovery loop)
     /// execute in the order they were requested.
-    private static let queue = DispatchQueue(label: "ParakeyTCCReset", qos: .userInitiated)
+    private static let queue = DispatchQueue(label: "DictorTCCReset", qos: .userInitiated)
 
     /// Runs `tccutil reset` on a background queue. tccutil is usually
     /// quick but waitUntilExit() on the main thread would run behind

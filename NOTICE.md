@@ -1,3 +1,7 @@
+# Notices
+
+Dictor is a personal fork. Upstream attributions below are preserved as required by the MIT license.
+
 # Attribution
 
 SuperDictate is derived from

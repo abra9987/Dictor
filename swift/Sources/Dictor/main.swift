@@ -1,4 +1,4 @@
-// Parakey — push-to-talk dictation for macOS Apple Silicon.
+// Dictor — push-to-talk dictation for macOS Apple Silicon.
 //
 // Swift menu-bar app. The runtime covers hotkey capture (`CGEventTap`), audio capture
 // (`AVAudioEngine`), transcription (`FluidAudio` on the Apple
@@ -38,7 +38,7 @@ import UniformTypeIdentifiers
 
 
 #if DEBUG
-if let status = ParakeySelfTest.run(arguments: Array(CommandLine.arguments.dropFirst())) {
+if let status = DictorSelfTest.run(arguments: Array(CommandLine.arguments.dropFirst())) {
     exit(status)
 }
 #endif
@@ -47,7 +47,7 @@ let app = NSApplication.shared
 let launchArguments = Array(CommandLine.arguments.dropFirst())
 if launchArguments.first == RECORDING_HUD_EXPORT_ARGUMENT {
     guard launchArguments.count == 2 else {
-        fputs("usage: SuperDictate --export-hud-animation <frames-directory>\n", stderr)
+        fputs("usage: Dictor --export-hud-animation <frames-directory>\n", stderr)
         exit(EXIT_FAILURE)
     }
     do {
@@ -64,7 +64,7 @@ if launchArguments.first == RECORDING_HUD_EXPORT_ARGUMENT {
     app.run()
 } else if launchArguments.contains(AGENT_ARGUMENT) {
     app.setActivationPolicy(.accessory)
-    let delegate = ParakeyApp()
+    let delegate = DictorApp()
     app.delegate = delegate
     // Refuse to start under a tampered launch environment that would
     // redirect FluidAudio's model download to an attacker-controlled host.
@@ -73,7 +73,7 @@ if launchArguments.first == RECORDING_HUD_EXPORT_ARGUMENT {
     refuseHostileRegistryEnvironmentAndExit()
     app.run()
 } else {
-    let delegate = SuperDictateControlPanelApp()
+    let delegate = DictorControlPanelApp()
     app.delegate = delegate
     app.run()
 }

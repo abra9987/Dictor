@@ -33,24 +33,24 @@ let MIN_CLIP_SECONDS: Double = 0.25
 let UPDATE_CHECK_FIRST_DELAY_SECONDS: TimeInterval = 30
 let UPDATE_CHECK_INTERVAL_SECONDS: TimeInterval = 6 * 3600  // 6h
 let UPDATE_REMIND_LATER_SECONDS: TimeInterval = 24 * 3600  // 24h
-let GITHUB_LATEST_RELEASE_URL = URL(string: "https://api.github.com/repos/shlgd/SuperDictate/releases/latest")!
-let GITHUB_REPOSITORY_PAGE = URL(string: "https://github.com/shlgd/SuperDictate")!
-let GITHUB_RELEASES_PAGE = URL(string: "https://github.com/shlgd/SuperDictate/releases/latest")!
-let GITHUB_UPDATE_MANIFEST_URL = URL(string: "https://raw.githubusercontent.com/shlgd/SuperDictate/main/update.json")!
+let GITHUB_LATEST_RELEASE_URL = URL(string: "https://api.github.com/repos/shlgd/Dictor/releases/latest")!
+let GITHUB_REPOSITORY_PAGE = URL(string: "https://github.com/shlgd/Dictor")!
+let GITHUB_RELEASES_PAGE = URL(string: "https://github.com/shlgd/Dictor/releases/latest")!
+let GITHUB_UPDATE_MANIFEST_URL = URL(string: "https://raw.githubusercontent.com/shlgd/Dictor/main/update.json")!
 let UPDATE_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
-let HOMEBREW_CASK_TAP = "shlgd/superdictate"
-let HOMEBREW_CASK_TOKEN = "shlgd/superdictate/superdictate"
-let HOMEBREW_CASK_INSTALLED_TOKEN = "parakey"
-let INSTALLED_APP_BUNDLE_PATH = "/Applications/SuperDictate.app"
+let HOMEBREW_CASK_TAP = "shlgd/dictor"
+let HOMEBREW_CASK_TOKEN = "shlgd/dictor/dictor"
+let HOMEBREW_CASK_INSTALLED_TOKEN = "dictor"
+let INSTALLED_APP_BUNDLE_PATH = "/Applications/Dictor.app"
 let AGENT_ARGUMENT = "--agent"
-let AGENT_LABEL = "com.local.superdictate.agent"
-let APP_SUPPORT_DIR_NAME = "SuperDictate"
+let AGENT_LABEL = "com.raul.dictor.agent"
+let APP_SUPPORT_DIR_NAME = "Dictor"
 let AGENT_STATUS_FILE_NAME = "AgentStatus.json"
 let CONTROL_PANEL_PID_FILE_NAME = "ControlPanel.pid"
 let UPDATE_HELPER_LOG_PATH = (NSHomeDirectory() as NSString)
-    .appendingPathComponent("Library/Logs/SuperDictate-update.log")
+    .appendingPathComponent("Library/Logs/Dictor-update.log")
 let UPDATE_PROGRESS_ARGUMENT = "--update-progress"
-let UPDATE_PROGRESS_APP_PREFIX = "SuperDictate-update-progress-"
+let UPDATE_PROGRESS_APP_PREFIX = "Dictor-update-progress-"
 let MAX_SKIPPED_UPDATE_VERSIONS = 20
 let MAX_CORRECTION_SYNC_PATH_BYTES = 4096
 let MAX_INPUT_DEVICE_PREFERENCE_BYTES = 512
@@ -71,8 +71,8 @@ let RECORDING_HUD_DISPLAY_LINK_MAX_FPS: Float = 120
 let RECORDING_HUD_RECORDING_BASE_PHASE_SPEED: CGFloat = 16.96
 let RECORDING_HUD_RECORDING_LEVEL_PHASE_SPEED: CGFloat = 10.08
 let RECORDING_HUD_TRANSCRIBING_PHASE_SPEED: CGFloat = 10.2
-let HOTKEY_CAPTURE_BEGIN_NOTIFICATION = Notification.Name("com.local.superdictate.hotkey-capture-begin")
-let HOTKEY_CAPTURE_END_NOTIFICATION = Notification.Name("com.local.superdictate.hotkey-capture-end")
+let HOTKEY_CAPTURE_BEGIN_NOTIFICATION = Notification.Name("com.raul.dictor.hotkey-capture-begin")
+let HOTKEY_CAPTURE_END_NOTIFICATION = Notification.Name("com.raul.dictor.hotkey-capture-end")
 let HOTKEY_CAPTURE_FAILSAFE_SECONDS: TimeInterval = 45
 let DICTATION_ERROR_FLASH_SECONDS: TimeInterval = 1.5  // how long the menu-bar icon flags a dropped dictation before returning to idle
 let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]
@@ -80,10 +80,10 @@ let AUDIO_IDLE_STOP_DELAY_SECONDS: TimeInterval = 5
 let AUDIO_CONFIGURATION_CHANGE_SUPPRESSION_SECONDS: TimeInterval = 1
 let MODEL_DOWNLOAD_HEADROOM_BYTES: Int64 = 500 * 1024 * 1024
 
-let SETTINGS_SUITE = "com.local.superdictate"
-let CORRECTIONS_FILE_UTI = "com.local.superdictate.corrections"
-let CORRECTIONS_FILE_EXTENSION = "superdictate-corrections"
-let CORRECTIONS_FILE_NAME = "SuperDictate Corrections.\(CORRECTIONS_FILE_EXTENSION)"
+let SETTINGS_SUITE = "com.raul.dictor"
+let CORRECTIONS_FILE_UTI = "com.raul.dictor.corrections"
+let CORRECTIONS_FILE_EXTENSION = "dictor-corrections"
+let CORRECTIONS_FILE_NAME = "Dictor Corrections.\(CORRECTIONS_FILE_EXTENSION)"
 let MAX_TRANSCRIPT_CORRECTIONS = 512
 let MAX_TRANSCRIPT_CORRECTION_SOURCE_BYTES = 512
 let MAX_TRANSCRIPT_CORRECTION_REPLACEMENT_BYTES = 4096
@@ -481,9 +481,9 @@ enum SpeechModelProfile: String, CaseIterable {
     var cacheResetDetail: String {
         switch self {
         case .multilingualV3:
-            return "Parakey will delete the local Parakeet TDT v3 model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
+            return "Dictor will delete the local Parakeet TDT v3 model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
         case .englishUnified:
-            return "Parakey will delete the local Parakeet TDT v3 model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
+            return "Dictor will delete the local Parakeet TDT v3 model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
         }
     }
 

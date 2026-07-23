@@ -60,18 +60,18 @@ enum UpdateCheckFailure: Error, Equatable, Sendable {
 func manualUpdateCheckFailureText(_ failure: UpdateCheckFailure) -> String {
     switch failure {
     case .network:
-        return "SuperDictate couldn't reach GitHub. Check your internet connection and try again."
+        return "Dictor couldn't reach GitHub. Check your internet connection and try again."
     case .httpStatus(403):
         return "GitHub declined the update check (HTTP 403). This is usually temporary rate limiting — try again in a few minutes."
     case .httpStatus(let code):
         return "GitHub returned an error (HTTP \(code)). Try again later."
     case .unexpectedResponse:
-        return "GitHub returned a response SuperDictate couldn't read. Try again later, or check the releases page on GitHub directly."
+        return "GitHub returned a response Dictor couldn't read. Try again later, or check the releases page on GitHub directly."
     }
 }
 
 enum UpdateCheck {
-    private static let githubReleaseURLPathPrefix = "/shlgd/SuperDictate/releases/tag/"
+    private static let githubReleaseURLPathPrefix = "/shlgd/Dictor/releases/tag/"
     static let maxReleaseResponseBytes = 512 * 1024
 
     static func fetchLatest() async -> Result<GitHubRelease, UpdateCheckFailure> {
@@ -80,7 +80,7 @@ enum UpdateCheck {
         // The privacy docs promise exactly this fixed token — no
         // version, device, or user identifiers. Must stay in sync with
         // docs/privacy/network-calls.json.
-        req.setValue("superdictate-update-check", forHTTPHeaderField: "User-Agent")
+        req.setValue("dictor-update-check", forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 10
         let config = URLSessionConfiguration.ephemeral
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -159,18 +159,18 @@ enum UpdateCheck {
     }
 }
 
-struct SuperDictateUpdateManifest: Decodable, Equatable, Sendable {
+struct DictorUpdateManifest: Decodable, Equatable, Sendable {
     let version: String
     let sha256: String
 }
 
-struct PreparedSuperDictateUpdate: Sendable {
+struct PreparedDictorUpdate: Sendable {
     let version: String
     let workDirectory: URL
     let stagedAppURL: URL
 }
 
-enum SuperDictateUpdateInstallerError: LocalizedError, Equatable, Sendable {
+enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
     case network
     case httpStatus(Int)
     case invalidManifest
@@ -203,7 +203,7 @@ enum SuperDictateUpdateInstallerError: LocalizedError, Equatable, Sendable {
             case .invalidBundle(let detail):
                 return "The new application failed verification: \(detail)"
             case .appNotWritable:
-                return "SuperDictate cannot replace the application in Applications. Run the regular installer once."
+                return "Dictor cannot replace the application in Applications. Run the regular installer once."
             }
         }
         switch self {
@@ -224,36 +224,36 @@ enum SuperDictateUpdateInstallerError: LocalizedError, Equatable, Sendable {
         case .invalidBundle(let detail):
             return "Проверка нового приложения не пройдена: \(detail)"
         case .appNotWritable:
-            return "SuperDictate не может заменить приложение в папке Applications. Запустите обычный установщик один раз."
+            return "Dictor не может заменить приложение в папке Applications. Запустите обычный установщик один раз."
         }
     }
 }
 
-enum SuperDictateUpdateInstaller {
+enum DictorUpdateInstaller {
     private static let manifestMaxBytes = 16 * 1024
 
-    static func fetchManifest(expectedVersion: String) async throws -> SuperDictateUpdateManifest {
+    static func fetchManifest(expectedVersion: String) async throws -> DictorUpdateManifest {
         var request = URLRequest(url: GITHUB_UPDATE_MANIFEST_URL)
-        request.setValue("superdictate-in-app-update", forHTTPHeaderField: "User-Agent")
+        request.setValue("dictor-in-app-update", forHTTPHeaderField: "User-Agent")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = 15
         let (data, response) = try await fetch(request: request, maxBytes: manifestMaxBytes)
         guard (200..<300).contains(response.statusCode) else {
-            throw SuperDictateUpdateInstallerError.httpStatus(response.statusCode)
+            throw DictorUpdateInstallerError.httpStatus(response.statusCode)
         }
         return try parseManifest(data, expectedVersion: expectedVersion)
     }
 
     static func parseManifest(_ data: Data,
-                              expectedVersion: String) throws -> SuperDictateUpdateManifest {
-        guard let manifest = try? JSONDecoder().decode(SuperDictateUpdateManifest.self, from: data),
+                              expectedVersion: String) throws -> DictorUpdateManifest {
+        guard let manifest = try? JSONDecoder().decode(DictorUpdateManifest.self, from: data),
               UpdateCheck.normalizedReleaseVersion(from: manifest.version) == manifest.version,
               manifest.sha256.count == 64,
               manifest.sha256.allSatisfy({ $0.isHexDigit }) else {
-            throw SuperDictateUpdateInstallerError.invalidManifest
+            throw DictorUpdateInstallerError.invalidManifest
         }
         guard manifest.version == expectedVersion else {
-            throw SuperDictateUpdateInstallerError.manifestVersionMismatch(
+            throw DictorUpdateInstallerError.manifestVersionMismatch(
                 expected: expectedVersion,
                 actual: manifest.version
             )
@@ -261,31 +261,31 @@ enum SuperDictateUpdateInstaller {
         return manifest
     }
 
-    static func prepare(manifest: SuperDictateUpdateManifest) async throws -> PreparedSuperDictateUpdate {
+    static func prepare(manifest: DictorUpdateManifest) async throws -> PreparedDictorUpdate {
         guard appCanBeReplaced(at: Bundle.main.bundleURL) else {
-            throw SuperDictateUpdateInstallerError.appNotWritable
+            throw DictorUpdateInstallerError.appNotWritable
         }
 
-        let archiveURL = URL(string: "https://github.com/shlgd/SuperDictate/releases/download/v\(manifest.version)/SuperDictate.zip")!
+        let archiveURL = URL(string: "https://github.com/shlgd/Dictor/releases/download/v\(manifest.version)/Dictor.zip")!
         var request = URLRequest(url: archiveURL)
-        request.setValue("superdictate-in-app-update", forHTTPHeaderField: "User-Agent")
+        request.setValue("dictor-in-app-update", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 60
         let (archiveData, response) = try await fetch(request: request,
                                                       maxBytes: UPDATE_ARCHIVE_MAX_BYTES)
         guard (200..<300).contains(response.statusCode) else {
-            throw SuperDictateUpdateInstallerError.httpStatus(response.statusCode)
+            throw DictorUpdateInstallerError.httpStatus(response.statusCode)
         }
 
         var hasher = SHA256()
         hasher.update(data: archiveData)
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         guard digest.caseInsensitiveCompare(manifest.sha256) == .orderedSame else {
-            throw SuperDictateUpdateInstallerError.checksumMismatch
+            throw DictorUpdateInstallerError.checksumMismatch
         }
 
         let workDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("SuperDictate-update-\(UUID().uuidString)", isDirectory: true)
-        let archiveFile = workDirectory.appendingPathComponent("SuperDictate.zip")
+            .appendingPathComponent("Dictor-update-\(UUID().uuidString)", isDirectory: true)
+        let archiveFile = workDirectory.appendingPathComponent("Dictor.zip")
         let extractedDirectory = workDirectory.appendingPathComponent("release", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: extractedDirectory,
@@ -294,30 +294,30 @@ enum SuperDictateUpdateInstaller {
             try archiveData.write(to: archiveFile, options: [.atomic])
         } catch {
             try? FileManager.default.removeItem(at: workDirectory)
-            throw SuperDictateUpdateInstallerError.extractionFailed(error.localizedDescription)
+            throw DictorUpdateInstallerError.extractionFailed(error.localizedDescription)
         }
 
         let extraction = await Task.detached(priority: .userInitiated) {
-            SuperDictateAgentService.run("/usr/bin/ditto",
+            DictorAgentService.run("/usr/bin/ditto",
                                          ["-x", "-k", archiveFile.path, extractedDirectory.path])
         }.value
         guard extraction.status == 0 else {
             try? FileManager.default.removeItem(at: workDirectory)
-            throw SuperDictateUpdateInstallerError.extractionFailed(extraction.output)
+            throw DictorUpdateInstallerError.extractionFailed(extraction.output)
         }
 
-        let stagedAppURL = extractedDirectory.appendingPathComponent("SuperDictate.app",
+        let stagedAppURL = extractedDirectory.appendingPathComponent("Dictor.app",
                                                                       isDirectory: true)
         do {
             try validateApp(at: stagedAppURL, expectedVersion: manifest.version)
-        } catch let error as SuperDictateUpdateInstallerError {
+        } catch let error as DictorUpdateInstallerError {
             try? FileManager.default.removeItem(at: workDirectory)
             throw error
         } catch {
             try? FileManager.default.removeItem(at: workDirectory)
-            throw SuperDictateUpdateInstallerError.invalidBundle(error.localizedDescription)
+            throw DictorUpdateInstallerError.invalidBundle(error.localizedDescription)
         }
-        return PreparedSuperDictateUpdate(version: manifest.version,
+        return PreparedDictorUpdate(version: manifest.version,
                                           workDirectory: workDirectory,
                                           stagedAppURL: stagedAppURL)
     }
@@ -333,16 +333,16 @@ enum SuperDictateUpdateInstaller {
     static func validateApp(at appURL: URL, expectedVersion: String) throws {
         let fileManager = FileManager.default
         let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
-        let executableURL = appURL.appendingPathComponent("Contents/MacOS/SuperDictate")
-        guard appURL.lastPathComponent == "SuperDictate.app",
+        let executableURL = appURL.appendingPathComponent("Contents/MacOS/Dictor")
+        guard appURL.lastPathComponent == "Dictor.app",
               fileManager.fileExists(atPath: infoURL.path),
               fileManager.isExecutableFile(atPath: executableURL.path),
               let infoData = try? Data(contentsOf: infoURL),
               let info = try? PropertyListSerialization.propertyList(from: infoData,
                                                                      format: nil) as? [String: Any],
-              info["CFBundleIdentifier"] as? String == "com.local.superdictate",
+              info["CFBundleIdentifier"] as? String == "com.raul.dictor",
               info["CFBundleShortVersionString"] as? String == expectedVersion else {
-            throw SuperDictateUpdateInstallerError.invalidBundle("неверный идентификатор или версия")
+            throw DictorUpdateInstallerError.invalidBundle("неверный идентификатор или версия")
         }
 
         if let enumerator = fileManager.enumerator(at: appURL,
@@ -350,15 +350,15 @@ enum SuperDictateUpdateInstaller {
                                                    options: []) {
             for case let itemURL as URL in enumerator {
                 if (try? itemURL.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
-                    throw SuperDictateUpdateInstallerError.invalidBundle("архив содержит символическую ссылку")
+                    throw DictorUpdateInstallerError.invalidBundle("архив содержит символическую ссылку")
                 }
             }
         }
 
-        let signature = SuperDictateAgentService.run("/usr/bin/codesign",
+        let signature = DictorAgentService.run("/usr/bin/codesign",
                                                       ["--verify", "--deep", "--strict", appURL.path])
         guard signature.status == 0 else {
-            throw SuperDictateUpdateInstallerError.invalidBundle("codesign: \(signature.output)")
+            throw DictorUpdateInstallerError.invalidBundle("codesign: \(signature.output)")
         }
     }
 
@@ -374,16 +374,16 @@ enum SuperDictateUpdateInstaller {
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
-                throw SuperDictateUpdateInstallerError.network
+                throw DictorUpdateInstallerError.network
             }
             guard data.count <= maxBytes else {
-                throw SuperDictateUpdateInstallerError.archiveTooLarge
+                throw DictorUpdateInstallerError.archiveTooLarge
             }
             return (data, http)
-        } catch let error as SuperDictateUpdateInstallerError {
+        } catch let error as DictorUpdateInstallerError {
             throw error
         } catch {
-            throw SuperDictateUpdateInstallerError.network
+            throw DictorUpdateInstallerError.network
         }
     }
 }
@@ -522,7 +522,7 @@ func updateHelperScript(pid: pid_t,
         "$BREW" "$@"
     }
 
-    wait_for_parakey_exit() {
+    wait_for_dictor_exit() {
         for _ in {1..60}; do
             if ! kill -0 "$PARAKEY_PID" 2>/dev/null; then
                 return 0
@@ -530,7 +530,7 @@ func updateHelperScript(pid: pid_t,
             sleep 0.5
         done
 
-        log "Parakey was still running after 30s; sending TERM before updating."
+        log "Dictor was still running after 30s; sending TERM before updating."
         kill -TERM "$PARAKEY_PID" 2>/dev/null || true
         for _ in {1..20}; do
             if ! kill -0 "$PARAKEY_PID" 2>/dev/null; then
@@ -539,7 +539,7 @@ func updateHelperScript(pid: pid_t,
             sleep 0.5
         done
 
-        fail "Parakey did not quit, so the app bundle was not touched."
+        fail "Dictor did not quit, so the app bundle was not touched."
     }
 
     installed_target_version() {
@@ -550,7 +550,7 @@ func updateHelperScript(pid: pid_t,
     }
 
     {
-        echo "[$(timestamp)] Parakey update starting"
+        echo "[$(timestamp)] Dictor update starting"
         echo "Target version: $TARGET_VERSION"
         echo "Current installed version: $(app_version)"
         echo "Brew: $BREW"
@@ -560,7 +560,7 @@ func updateHelperScript(pid: pid_t,
         echo "App: $APP_PATH"
     }
 
-    state "preparing" "Preparing Homebrew for Parakey v$TARGET_VERSION..."
+    state "preparing" "Preparing Homebrew for Dictor v$TARGET_VERSION..."
 
     if ! run_brew tap "$CASK_TAP"; then
         fail "brew tap failed; leaving the existing app in place."
@@ -571,13 +571,13 @@ func updateHelperScript(pid: pid_t,
         fail "brew update failed; leaving the existing app in place."
     fi
 
-    state "downloading" "Downloading Parakey v$TARGET_VERSION..."
+    state "downloading" "Downloading Dictor v$TARGET_VERSION..."
     if ! run_brew fetch --cask --force "$CASK_TOKEN"; then
         fail "brew cask fetch failed; leaving the existing app in place."
     fi
 
-    state "installing" "Installing Parakey v$TARGET_VERSION..."
-    wait_for_parakey_exit
+    state "installing" "Installing Dictor v$TARGET_VERSION..."
+    wait_for_dictor_exit
 
     if ! run_brew upgrade --cask --force --appdir="$APP_DIR" "$CASK_TOKEN"; then
         fail "brew cask upgrade failed; leaving the existing app in place."
@@ -586,7 +586,7 @@ func updateHelperScript(pid: pid_t,
     state "verifying" "Verifying the installed app..."
     if ! installed_target_version; then
         log "brew upgrade completed without installing v$TARGET_VERSION; forcing qualified cask reinstall."
-        state "installing" "Reinstalling Parakey v$TARGET_VERSION..."
+        state "installing" "Reinstalling Dictor v$TARGET_VERSION..."
         if ! run_brew update --force; then
             fail "brew update failed before reinstall; leaving the existing app in place."
         fi
@@ -596,13 +596,13 @@ func updateHelperScript(pid: pid_t,
     fi
 
     if ! installed_target_version; then
-        fail "Expected Parakey v$TARGET_VERSION or newer after update, but the installed app is still $(app_version)."
+        fail "Expected Dictor v$TARGET_VERSION or newer after update, but the installed app is still $(app_version)."
     fi
 
-    state "relaunching" "Update complete. Reopening Parakey..."
+    state "relaunching" "Update complete. Reopening Dictor..."
     sleep 2
     /usr/bin/open "$APP_PATH"
-    state "complete" "Parakey v$TARGET_VERSION is installed."
+    state "complete" "Dictor v$TARGET_VERSION is installed."
     """#
 }
 
@@ -618,17 +618,17 @@ func superDictateDirectUpdateHelperScript(pid: pid_t,
     let preparing = localizedText("Подготавливаю замену приложения…",
                                   "Preparing to replace the application…",
                                   language: language)
-    let installing = localizedText("Устанавливаю SuperDictate v\(targetVersion)…",
-                                    "Installing SuperDictate v\(targetVersion)…",
+    let installing = localizedText("Устанавливаю Dictor v\(targetVersion)…",
+                                    "Installing Dictor v\(targetVersion)…",
                                     language: language)
     let verifying = localizedText("Проверяю установленную версию…",
                                    "Verifying the installed version…",
                                    language: language)
-    let relaunching = localizedText("Обновление готово. Запускаю SuperDictate…",
-                                    "Update complete. Reopening SuperDictate…",
+    let relaunching = localizedText("Обновление готово. Запускаю Dictor…",
+                                    "Update complete. Reopening Dictor…",
                                     language: language)
-    let complete = localizedText("SuperDictate v\(targetVersion) установлена.",
-                                  "SuperDictate v\(targetVersion) is installed.",
+    let complete = localizedText("Dictor v\(targetVersion) установлена.",
+                                  "Dictor v\(targetVersion) is installed.",
                                   language: language)
     let failed = localizedText("Обновление не установлено. Предыдущая версия восстановлена.",
                                 "The update was not installed. The previous version was restored.",
@@ -692,8 +692,8 @@ func superDictateDirectUpdateHelperScript(pid: pid_t,
     }
 
     verify_app() {
-        [ -x "$APP_PATH/Contents/MacOS/SuperDictate" ] || return 1
-        [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST" 2>/dev/null)" = "com.local.superdictate" ] || return 1
+        [ -x "$APP_PATH/Contents/MacOS/Dictor" ] || return 1
+        [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO_PLIST" 2>/dev/null)" = "com.raul.dictor" ] || return 1
         [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST" 2>/dev/null)" = "$TARGET_VERSION" ] || return 1
         /usr/bin/codesign --verify --deep --strict "$APP_PATH"
     }
@@ -719,7 +719,7 @@ func superDictateDirectUpdateHelperScript(pid: pid_t,
     wait_for_panel_exit || rollback
 
     /bin/launchctl bootout "$SERVICE" >/dev/null 2>&1 || true
-    /usr/bin/pkill -f "$APP_PATH/Contents/MacOS/SuperDictate --agent" >/dev/null 2>&1 || true
+    /usr/bin/pkill -f "$APP_PATH/Contents/MacOS/Dictor --agent" >/dev/null 2>&1 || true
 
     state "installing" \#(shellSingleQuoted(installing))
     /bin/mv "$APP_PATH" "$BACKUP_APP" || rollback
@@ -742,7 +742,7 @@ func writePrivateUpdateHelperScript(_ script: String,
                                             directory: String = NSTemporaryDirectory(),
                                             fileName: String? = nil) throws -> String {
     guard !directory.isEmpty else { throw posixError(EINVAL) }
-    let leafName = fileName ?? "parakey-update-\(UUID().uuidString).sh"
+    let leafName = fileName ?? "dictor-update-\(UUID().uuidString).sh"
     guard !leafName.isEmpty,
           (leafName as NSString).lastPathComponent == leafName else {
         throw posixError(EINVAL)
@@ -791,7 +791,7 @@ func openPrivateUpdateHelperLog(preferredPath: String = UPDATE_HELPER_LOG_PATH,
                                  handle: FileHandle(fileDescriptor: fd, closeOnDealloc: true))
     } catch {
         let fallbackPath = (fallbackDirectory as NSString)
-            .appendingPathComponent("parakey-update-\(UUID().uuidString).log")
+            .appendingPathComponent("dictor-update-\(UUID().uuidString).log")
         let fd = try openPrivateOutputFileDescriptor(atPath: fallbackPath,
                                                      exclusive: true,
                                                      removeOnFailure: true)
