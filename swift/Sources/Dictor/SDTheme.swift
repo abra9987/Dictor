@@ -14,6 +14,8 @@ enum SD {
         static let paper = adaptive(light: 0xF5F4F1, dark: 0x1E1D1B)
         /// Фон окна настроек по макету 2c/4b: #F5F4F1 / #262523.
         static let settingsPaper = adaptive(light: 0xF5F4F1, dark: 0x262523)
+        /// Карточка онбординга по макету 2d: #F8F7F4 / тёмная бумага настроек.
+        static let onboardingPaper = adaptive(light: 0xF8F7F4, dark: 0x262523)
         /// Фон поповера по макету 1d/1e: rgba(248,247,244,.97) / rgba(38,37,35,.97).
         static let popoverPaper = NSColor(name: nil) { appearance in
             appearance.isDark

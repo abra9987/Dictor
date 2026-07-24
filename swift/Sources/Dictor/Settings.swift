@@ -247,6 +247,12 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Self.keyAgentEnabled) }
     }
 
+    /// Онбординг показан и закрыт (пройден или пропущен).
+    var onboardingCompleted: Bool {
+        get { defaults.bool(forKey: "onboarding_completed_v1") }
+        set { defaults.set(newValue, forKey: "onboarding_completed_v1") }
+    }
+
     var pasteSuffix: PasteSuffix {
         get {
             if let v = defaults.string(forKey: Self.keyPasteSuffix), let s = PasteSuffix(rawValue: v) {
