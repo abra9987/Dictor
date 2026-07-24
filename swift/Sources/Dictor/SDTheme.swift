@@ -12,10 +12,24 @@ enum SD {
         static let ink = adaptive(light: 0x1C1B19, dark: 0xF2F1EE)
         static let graphite = adaptive(light: 0x6E6B66, dark: 0xA3A09A)
         static let paper = adaptive(light: 0xF5F4F1, dark: 0x1E1D1B)
+        /// Фон окна настроек по макету 2c/4b: #F5F4F1 / #262523.
+        static let settingsPaper = adaptive(light: 0xF5F4F1, dark: 0x262523)
+        /// Приглушённые подписи под заголовком строки. В макете пара
+        /// инвертирована относительно graphite: светлая #A3A09A, тёмная #6E6B66.
+        static let subtle = adaptive(light: 0xA3A09A, dark: 0x6E6B66)
+        /// Выбранная пилюля: «чернильная» в светлой теме, «бумажная» в тёмной.
+        static let pillSelectedFill = adaptive(light: 0x1C1B19, dark: 0xF2F1EE)
+        static let pillSelectedText = adaptive(light: 0xF5F4F1, dark: 0x1C1B19)
         static let hairline = NSColor(name: nil) { appearance in
             appearance.isDark
                 ? NSColor.white.withAlphaComponent(0.08)
                 : NSColor.black.withAlphaComponent(0.07)
+        }
+        /// Разделители строк настроек чуть светлее hairline: .06 / .07.
+        static let rowHairline = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.07)
+                : NSColor.black.withAlphaComponent(0.06)
         }
         /// Заливка капсулы в тёмном исполнении (дефолт дизайна).
         static let capsuleDark = NSColor(calibratedRed: 28 / 255,
@@ -71,6 +85,20 @@ enum SD {
 extension NSAppearance {
     var isDark: Bool {
         bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+}
+
+extension NSView {
+    /// `.cgColor` динамического NSColor резолвится под appearance,
+    /// актуальную В МОМЕНТ обращения, а не под тему вью — из-за этого
+    /// слои красились «светлыми» цветами в тёмной теме. Всегда
+    /// резолвим под effectiveAppearance.
+    func resolvedCGColor(_ color: NSColor) -> CGColor {
+        var resolved = color.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            resolved = color.cgColor
+        }
+        return resolved
     }
 }
 
@@ -189,12 +217,17 @@ final class PaperBackgroundView: NSView {
     var cornerRadius: CGFloat = 0 {
         didSet { needsDisplay = true }
     }
+    /// Каждая поверхность в макете имеет свой оттенок бумаги
+    /// (настройки #262523, поповер #2B2A27 в тёмной теме).
+    var fill: NSColor = SD.C.paper {
+        didSet { needsDisplay = true }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds,
                                 xRadius: cornerRadius,
                                 yRadius: cornerRadius)
-        SD.C.paper.setFill()
+        fill.setFill()
         path.fill()
         if cornerRadius > 0 {
             SD.C.hairline.setStroke()
