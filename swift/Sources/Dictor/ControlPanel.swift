@@ -297,17 +297,19 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.edgeInsets = NSEdgeInsets(top: 22, left: 24, bottom: 22, right: 24)
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addArrangedSubview(settingsHeaderView())
         root.addArrangedSubview(settingsTabBar())
         root.addArrangedSubview(separator())
         switch settingsTab {
         case "hotkeys":
             addHotkeyTabRows(to: root, draft: draft)
+        case "model":
+            addModelTabRows(to: root)
+        case "dict":
+            addDictTabRows(to: root)
         case "look":
             addLookTabRows(to: root, draft: draft)
-            root.addArrangedSubview(settingsActionsRow(draft: draft))
         case "privacy":
-            root.addArrangedSubview(privacyInfoView())
+            addPrivacyTabRows(to: root)
         default:
             addGeneralTabRows(to: root, draft: draft)
         }
@@ -333,11 +335,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     // MARK: - Вкладки настроек (дизайн 2c, адаптировано)
 
     private func settingsTabBar() -> NSView {
+        let wrapper = NSView()
         let bar = NSStackView()
         bar.orientation = .horizontal
         bar.spacing = 2
         let tabs = [("general", t("Основное", "General")),
                     ("hotkeys", t("Хоткеи", "Hotkeys")),
+                    ("model", t("Модель", "Model")),
+                    ("dict", t("Словарь", "Dictionary")),
                     ("look", t("Внешний вид", "Appearance")),
                     ("privacy", t("Приватность", "Privacy"))]
         for (id, title) in tabs {
@@ -358,7 +363,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             button.heightAnchor.constraint(equalToConstant: 26).isActive = true
             bar.addArrangedSubview(button)
         }
-        return bar
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(bar)
+        NSLayoutConstraint.activate([
+            wrapper.heightAnchor.constraint(equalToConstant: 40),
+            bar.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
+            bar.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor),
+        ])
+        return wrapper
     }
 
     @objc private func settingsTabClicked(_ sender: NSButton) {
@@ -368,114 +380,419 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addGeneralTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        root.addArrangedSubview(compactServiceCard())
         let missingPermissions = Permission.allCases.filter { !Permissions.isGranted($0) }
         if !missingPermissions.isEmpty {
             root.addArrangedSubview(compactPermissionsCard())
         }
-        root.addArrangedSubview(popupRow(
+
+        let running = DictorAgentService.isAgentRunning()
+        let serviceToggle = SDToggle()
+        serviceToggle.isOn = running && settings.agentEnabled
+        serviceToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            if enabled {
+                self.startAgentClicked(NSButton())
+            } else {
+                self.stopAgentClicked(NSButton())
+                self.refresh(force: true)
+            }
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Запускать при входе в систему", "Launch at login"),
+            subtitle: t("Служба стартует тихо, без окон", "The service starts silently, no windows"),
+            control: serviceToggle
+        ))
+
+        let langPills = SDPills(options: [
+            .init(title: "RU", value: DictationLanguage.russian.rawValue),
+            .init(title: "EN", value: DictationLanguage.english.rawValue),
+            .init(title: t("Авто", "Auto"), value: DictationLanguage.auto.rawValue),
+        ], selected: settings.dictationLanguage.rawValue)
+        langPills.onSelect = { [weak self] raw in
+            guard let language = DictationLanguage(rawValue: raw) else { return }
+            self?.settings.dictationLanguage = language
+        }
+        root.addArrangedSubview(SDRowView(
             title: t("Язык распознавания", "Dictation language"),
-            detail: t("Авто определяет язык по речи.", "Auto detects the language from speech."),
-            selectedValue: settings.dictationLanguage.rawValue,
-            options: [(t("Авто", "Auto"), DictationLanguage.auto.rawValue),
-                      ("Русский", DictationLanguage.russian.rawValue),
-                      ("English", DictationLanguage.english.rawValue)]
-                + DictationLanguage.allCases
-                    .filter { ![.auto, .russian, .english].contains($0) }
-                    .map { (DICTATION_LANGUAGE_DISPLAY[$0] ?? $0.rawValue, $0.rawValue) },
-            action: #selector(selectDictationLanguageFromPanel(_:)),
-            toolTip: t("Язык, который ожидает модель распознавания.",
-                       "The language the speech model should expect.")
+            control: langPills
         ))
-        root.addArrangedSubview(primaryCompletionBehaviorRow(draft))
-        root.addArrangedSubview(enterDelayRow(draft))
-        root.addArrangedSubview(popupRow(
+
+        let microphonePopup = NSPopUpButton()
+        microphonePopup.addItem(withTitle: t("Системный по умолчанию", "System default"))
+        microphonePopup.lastItem?.representedObject = ""
+        let devices = availableAudioInputDevices()
+        let saved = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
+        for device in devices {
+            microphonePopup.addItem(withTitle: device.name)
+            microphonePopup.lastItem?.representedObject = device.uid
+        }
+        if let index = microphonePopup.itemArray.firstIndex(where: {
+            ($0.representedObject as? String) == saved
+        }) {
+            microphonePopup.selectItem(at: index)
+        }
+        microphonePopup.target = self
+        microphonePopup.action = #selector(selectMicrophoneFromPanel(_:))
+        root.addArrangedSubview(SDRowView(
+            title: t("Микрофон", "Microphone"),
+            subtitle: t("Если пропадёт — вернёмся к встроенному",
+                        "Falls back to the built-in mic if it disappears"),
+            control: SDFieldButton(popup: microphonePopup)
+        ))
+
+        let completionPills = SDPills(options: [
+            .init(title: t("Ничего", "Nothing"), value: DictationCompletionBehavior.insert.rawValue),
+            .init(title: t("Нажать Enter", "Press Enter"),
+                  value: DictationCompletionBehavior.insertAndEnter.rawValue),
+        ], selected: settings.primaryCompletionBehavior.rawValue)
+        completionPills.onSelect = { [weak self] raw in
+            guard let behavior = DictationCompletionBehavior(rawValue: raw) else { return }
+            self?.settings.primaryCompletionBehavior = behavior
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("После вставки текста", "After inserting text"),
+            control: completionPills
+        ))
+
+        let delayStepper = SDStepperRow(value: settings.enterDelayMilliseconds,
+                                        step: 20,
+                                        range: 0...2000,
+                                        suffix: "ms")
+        delayStepper.onChange = { [weak self] value in
+            self?.settings.enterDelayMilliseconds = value
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Задержка перед Enter", "Delay before Enter"),
+            subtitle: t("Пауза между вставкой и подтверждением",
+                        "Pause between inserting and confirming"),
+            control: delayStepper
+        ))
+
+        let soundsToggle = SDToggle()
+        soundsToggle.isOn = settings.playFeedbackSounds
+        soundsToggle.onToggle = { [weak self] enabled in
+            self?.settings.playFeedbackSounds = enabled
+        }
+        root.addArrangedSubview(SDRowView(
             title: t("Звуки", "Sounds"),
-            detail: t("Короткие сигналы начала, конца и ошибки диктовки.",
-                      "Short cues for start, finish and errors."),
-            selectedValue: settings.playFeedbackSounds ? "on" : "off",
-            options: [(t("Вкл", "On"), "on"), (t("Выкл", "Off"), "off")],
-            action: #selector(selectFeedbackSoundsFromPanel(_:)),
-            toolTip: t("Звуковая обратная связь диктовки.", "Dictation sound feedback.")
+            subtitle: t("Сигналы начала, конца и ошибки диктовки",
+                        "Cues for start, finish and errors"),
+            control: soundsToggle,
+            hairline: false
         ))
-        root.addArrangedSubview(settingsActionsRow(draft: draft))
     }
 
-    @objc private func selectDictationLanguageFromPanel(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let language = DictationLanguage(rawValue: raw) else { return }
-        settings.dictationLanguage = language
-        refresh(force: true)
-    }
-
-    @objc private func selectFeedbackSoundsFromPanel(_ sender: NSPopUpButton) {
-        let raw = sender.selectedItem?.representedObject as? String
-        settings.playFeedbackSounds = raw == "on"
-        refresh(force: true)
+    @objc private func selectMicrophoneFromPanel(_ sender: NSPopUpButton) {
+        settings.inputDevice = (sender.selectedItem?.representedObject as? String) ?? ""
     }
 
     private func addHotkeyTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        root.addArrangedSubview(hotkeyRow(
-            title: t("Диктовка", "Dictation"),
-            shortcut: draft.dictationHotkey,
-            kind: .dictation,
-            toolTip: t("Начать запись. Повторное нажатие завершает её выбранным способом.",
-                       "Start recording. Press again to finish using the selected action.")
+        root.addArrangedSubview(SDRowView(
+            title: t("Начать / остановить диктовку", "Start / stop dictation"),
+            control: hotkeyControl(shortcut: draft.dictationHotkey, kind: .dictation)
         ))
-        root.addArrangedSubview(primaryCompletionBehaviorRow(draft))
-        root.addArrangedSubview(alternateCompletionRow(draft))
-        root.addArrangedSubview(enterDelayRow(draft))
-        root.addArrangedSubview(hotkeyRow(
-            title: t("История", "History"),
-            shortcut: draft.historyHotkey,
-            kind: .history,
-            toolTip: t("Открыть или закрыть последние транскрипции.",
-                       "Open or close recent transcriptions.")
+        root.addArrangedSubview(SDRowView(
+            title: t("Открыть историю", "Open history"),
+            control: hotkeyControl(shortcut: draft.historyHotkey, kind: .history)
+        ))
+        root.addArrangedSubview(SDRowView(
+            title: t("Альтернативное завершение", "Alternative finish"),
+            subtitle: t("Завершает диктовку противоположным действием",
+                        "Finishes dictation with the opposite action"),
+            control: hotkeyControl(shortcut: draft.enterHotkey, kind: .alternateCompletion)
         ))
         root.addArrangedSubview(settingsActionsRow(draft: draft))
+        let hint = panelLabel(t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет.",
+                                "Click “Change” and press the new combo. Esc cancels."),
+                              size: 11, color: .secondaryLabelColor)
+        root.addArrangedSubview(hint)
+    }
+
+    private func hotkeyControl(shortcut: HotkeyChoice, kind: ControlPanelShortcutKind) -> NSView {
+        let caps = SDKeycaps(keys: keycapLabels(for: shortcut, language: language))
+        let change = NSButton(title: t("Изменить", "Change"),
+                              target: self,
+                              action: #selector(recordDictationShortcutClicked(_:)))
+        change.isBordered = false
+        change.font = .systemFont(ofSize: 11, weight: .medium)
+        change.contentTintColor = SD.C.graphite
+        change.tag = kind.rawValue
+        let stack = NSStackView(views: [caps, change])
+        stack.orientation = .horizontal
+        stack.spacing = 10
+        return stack
+    }
+
+    private func addModelTabRows(to root: NSStackView) {
+        let active = settings.speechModelProfile
+        for profile in SpeechModelProfile.allCases {
+            let isActive = profile == active
+            let detail: String
+            switch profile {
+            case .parakeetV3Multilingual:
+                detail = t("~460 МБ · русский, английский и ещё 17 языков · Neural Engine",
+                           "~460 MB · Russian, English and 17 more · Neural Engine")
+            default:
+                detail = t("Устаревший профиль, только английский",
+                           "Deprecated profile, English only")
+            }
+            let card = SDModelCard(
+                title: profile.shortName + (isActive ? " · " + t("используется", "in use") : ""),
+                detail: detail,
+                active: isActive,
+                actionTitle: isActive ? "✓ " + t("Активна", "Active") : t("Выбрать", "Select"),
+                target: self,
+                action: isActive ? nil : #selector(selectSpeechModelFromPanel(_:)),
+                identifier: profile.rawValue
+            )
+            root.addArrangedSubview(card)
+        }
+        let note = panelLabel(t("Смена модели перезапустит службу; новая модель докачается сама.",
+                                "Switching restarts the service; the model downloads itself."),
+                              size: 11, color: .secondaryLabelColor)
+        root.addArrangedSubview(note)
+    }
+
+    @objc private func selectSpeechModelFromPanel(_ sender: NSButton) {
+        guard let raw = sender.identifier?.rawValue,
+              let profile = SpeechModelProfile(rawValue: raw) else { return }
+        settings.speechModelProfile = profile
+        restartAgentClicked(NSButton())
+        refresh(force: true)
+    }
+
+    private func addDictTabRows(to root: NSStackView) {
+        let addButton = NSButton(title: "+ " + t("Добавить", "Add"),
+                                 target: self,
+                                 action: #selector(addCorrectionFromPanel(_:)))
+        addButton.isBordered = false
+        addButton.font = .systemFont(ofSize: 12, weight: .semibold)
+        addButton.contentTintColor = SD.C.voice
+        let headerRow = NSStackView(views: [
+            panelLabel(t("Автозамены после распознавания", "Corrections applied after transcription"),
+                       size: 12, color: .secondaryLabelColor),
+            NSView(),
+            addButton,
+        ])
+        headerRow.orientation = .horizontal
+        root.addArrangedSubview(headerRow)
+
+        let corrections = settings.transcriptCorrections
+        if corrections.isEmpty {
+            root.addArrangedSubview(panelLabel(
+                t("Пока пусто. Добавьте термины, которые модель слышит неправильно.",
+                  "Empty so far. Add terms the model keeps mishearing."),
+                size: 12, color: .secondaryLabelColor))
+        }
+        for (index, correction) in corrections.prefix(8).enumerated() {
+            let source = panelLabel("«\(correction.source)»", size: 12, color: .secondaryLabelColor)
+            let arrow = panelLabel("→", size: 12, color: .tertiaryLabelColor)
+            let target = panelLabel(correction.replacement, size: 12, weight: .medium)
+            let remove = NSButton(title: "✕", target: self,
+                                  action: #selector(removeCorrectionFromPanel(_:)))
+            remove.isBordered = false
+            remove.font = .systemFont(ofSize: 11)
+            remove.contentTintColor = SD.C.graphite
+            remove.tag = index
+            let row = NSStackView(views: [source, arrow, target, NSView(), remove])
+            row.orientation = .horizontal
+            row.spacing = 8
+            root.addArrangedSubview(row)
+        }
+        if corrections.count > 8 {
+            root.addArrangedSubview(panelLabel(
+                t("…и ещё \(corrections.count - 8). Полный список — в сервисном меню.",
+                  "…and \(corrections.count - 8) more. Full list in the service menu."),
+                size: 11, color: .tertiaryLabelColor))
+        }
+
+        let fillerToggle = SDToggle()
+        fillerToggle.isOn = settings.removeFillerWords
+        fillerToggle.onToggle = { [weak self] enabled in
+            self?.settings.removeFillerWords = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Убирать слова-паразиты", "Remove filler words"),
+            subtitle: t("«Эээ», «ммм» и подобное исчезают из текста",
+                        "“Uh”, “um” and similar vanish from the text"),
+            control: fillerToggle,
+            hairline: false
+        ))
+    }
+
+    @objc private func addCorrectionFromPanel(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = t("Новая автозамена", "New correction")
+        alert.informativeText = t("Что слышит модель — и что должно быть в тексте.",
+                                  "What the model hears — and what the text should say.")
+        let sourceField = NSTextField(frame: NSRect(x: 0, y: 32, width: 260, height: 24))
+        sourceField.placeholderString = t("слышится («супер диктант»)", "heard (“super dictate”)")
+        let replacementField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        replacementField.placeholderString = t("должно быть (Dictor)", "should be (Dictor)")
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 60))
+        holder.addSubview(sourceField)
+        holder.addSubview(replacementField)
+        alert.accessoryView = holder
+        alert.addButton(withTitle: t("Добавить", "Add"))
+        alert.addButton(withTitle: t("Отмена", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let source = sourceField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replacement = replacementField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, !replacement.isEmpty else { return }
+        let next = normalizedTranscriptCorrections(
+            settings.transcriptCorrections + [TranscriptCorrection(source: source,
+                                                                   replacement: replacement)]
+        )
+        settings.transcriptCorrections = next
+        refresh(force: true)
+    }
+
+    @objc private func removeCorrectionFromPanel(_ sender: NSButton) {
+        var corrections = settings.transcriptCorrections
+        guard corrections.indices.contains(sender.tag) else { return }
+        corrections.remove(at: sender.tag)
+        settings.transcriptCorrections = corrections
+        refresh(force: true)
+    }
+
+    private func addPrivacyTabRows(to root: NSStackView) {
+        // Витрина: волна + главное обещание продукта.
+        let wave = QuickPanelWaveView()
+        wave.isActive = true
+        wave.translatesAutoresizingMaskIntoConstraints = false
+        wave.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        wave.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        let headline = panelLabel(t("Ваш голос не покидает этот Mac",
+                                    "Your voice never leaves this Mac"),
+                                  size: 15, weight: .bold)
+        let sub = panelLabel(
+            t("Запись, распознавание и история живут локально. Интернет нужен один раз — скачать модель.",
+              "Recording, transcription and history live locally. The internet is needed once — to download the model."),
+            size: 12, color: .secondaryLabelColor)
+        sub.maximumNumberOfLines = 2
+        sub.alignment = .center
+        let showcase = NSStackView(views: [wave, headline, sub])
+        showcase.orientation = .vertical
+        showcase.alignment = .centerX
+        showcase.spacing = 8
+        showcase.edgeInsets = NSEdgeInsets(top: 18, left: 0, bottom: 14, right: 0)
+        root.addArrangedSubview(showcase)
+        showcase.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -48).isActive = true
+
+        root.addArrangedSubview(SDRowView(
+            title: t("Сетевые запросы", "Network requests"),
+            control: monoValueLabel(t("0 — обновления отключены", "0 — updates disabled"))
+        ))
+
+        let limitPills = SDPills(options: RecentTranscriptLimit.allCases.map {
+            .init(title: localizedTranscriptLimitName($0), value: $0.rawValue)
+        }, selected: settings.recentTranscriptLimit.rawValue)
+        limitPills.onSelect = { [weak self] raw in
+            guard let limit = RecentTranscriptLimit(rawValue: raw) else { return }
+            self?.settings.recentTranscriptLimit = limit
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Хранить историю", "Keep history"),
+            subtitle: t("Локальный список последних диктовок", "A local list of recent dictations"),
+            control: limitPills
+        ))
+
+        root.addArrangedSubview(SDRowView(
+            title: t("Аудио после распознавания", "Audio after transcription"),
+            control: monoValueLabel(t("Удаляется сразу", "Deleted immediately")),
+            hairline: false
+        ))
+
+        let showModels = NSButton(title: t("Показать файлы моделей…", "Show model files…"),
+                                  target: self, action: #selector(revealModelFilesFromPanel(_:)))
+        let wipeHistory = NSButton(title: t("Стереть историю…", "Erase history…"),
+                                   target: self, action: #selector(eraseHistoryFromPanel(_:)))
+        for button in [showModels, wipeHistory] {
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 12, weight: .semibold)
+        }
+        showModels.contentTintColor = SD.C.ink
+        wipeHistory.contentTintColor = SD.C.voice
+        let actions = NSStackView(views: [showModels, wipeHistory, NSView()])
+        actions.orientation = .horizontal
+        actions.spacing = 16
+        root.addArrangedSubview(actions)
+    }
+
+    private func monoValueLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        label.textColor = SD.C.ink
+        return label
+    }
+
+    private func localizedTranscriptLimitName(_ limit: RecentTranscriptLimit) -> String {
+        switch limit {
+        case .off: return t("Выкл", "Off")
+        case .last1: return "1"
+        case .last5: return "5"
+        case .last10: return "10"
+        }
+    }
+
+    @objc private func revealModelFilesFromPanel(_ sender: NSButton) {
+        NSWorkspace.shared.activateFileViewerSelecting([speechModelCacheBaseDirectory()])
+    }
+
+    @objc private func eraseHistoryFromPanel(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = t("Стереть всю историю диктовок?", "Erase all dictation history?")
+        alert.informativeText = t("Действие необратимо. Модель и настройки не затрагиваются.",
+                                  "This cannot be undone. The model and settings stay intact.")
+        alert.addButton(withTitle: t("Отмена", "Cancel"))
+        alert.addButton(withTitle: t("Стереть", "Erase"))
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        settings.recentTranscriptEntries = []
+        refresh(force: true)
     }
 
     private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        root.addArrangedSubview(popupRow(
+        let sizePills = SDPills(options: RecordingHUDSize.allCases.map {
+            .init(title: localizedHUDSizeName($0), value: $0.rawValue)
+        }, selected: settings.recordingHUDSize.rawValue)
+        sizePills.onSelect = { [weak self] raw in
+            guard let size = RecordingHUDSize(rawValue: raw) else { return }
+            self?.settings.recordingHUDSize = size
+        }
+        root.addArrangedSubview(SDRowView(
             title: t("Размер капсулы", "Capsule size"),
-            detail: t("Размер плавающего индикатора записи.",
-                      "Size of the floating recording indicator."),
-            selectedValue: draft.hudSize.rawValue,
-            options: RecordingHUDSize.allCases.map { (localizedHUDSizeName($0), $0.rawValue) },
-            action: #selector(selectRecordingHUDSize(_:)),
-            toolTip: t("Выбрать компактную, обычную или крупную капсулу.",
-                       "Choose a compact, standard, or large capsule.")
+            subtitle: t("Плавающий индикатор записи у курсора", "The floating indicator near the caret"),
+            control: sizePills
         ))
-        root.addArrangedSubview(popupRow(
-            title: t("Цвет записи", "Recording color"),
-            detail: t("Цвет аудиоволн, пока микрофон слушает.",
-                      "Color used while the microphone is listening."),
-            selectedValue: draft.recordingColor.rawValue,
-            options: RecordingHUDAccentColor.allCases.map { (localizedColorName($0), $0.rawValue) },
-            action: #selector(selectRecordingHUDRecordingColor(_:)),
-            toolTip: t("Цвет индикатора во время записи.", "Indicator color while recording.")
+
+        let backgroundPills = SDPills(options: RecordingHUDBackgroundStyle.allCases.map {
+            .init(title: localizedBackgroundName($0), value: $0.rawValue)
+        }, selected: settings.recordingHUDBackgroundStyle.rawValue)
+        backgroundPills.onSelect = { [weak self] raw in
+            guard let style = RecordingHUDBackgroundStyle(rawValue: raw) else { return }
+            self?.settings.recordingHUDBackgroundStyle = style
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Фон капсулы", "Capsule background"),
+            control: backgroundPills
         ))
-        root.addArrangedSubview(popupRow(
-            title: t("Цвет транскрибации", "Transcribing color"),
-            detail: t("Цвет анимации во время распознавания речи.",
-                      "Color used while speech is being converted to text."),
-            selectedValue: draft.transcribingColor.rawValue,
-            options: RecordingHUDAccentColor.allCases.map { (localizedColorName($0), $0.rawValue) },
-            action: #selector(selectRecordingHUDTranscribingColor(_:)),
-            toolTip: t("Цвет индикатора во время распознавания речи.",
-                       "Indicator color while speech is being transcribed.")
-        ))
-        root.addArrangedSubview(popupRow(
-            title: t("Фон капсулы", "HUD background"),
-            detail: t("Системная тема или постоянный светлый/тёмный фон.",
-                      "Follow the system appearance or use a fixed background."),
-            selectedValue: draft.backgroundStyle.rawValue,
-            options: RecordingHUDBackgroundStyle.allCases.map { (localizedBackgroundName($0), $0.rawValue) },
-            action: #selector(selectRecordingHUDBackgroundStyle(_:)),
-            toolTip: t("Выбрать фон плавающего индикатора диктовки.",
-                       "Choose the floating dictation indicator background.")
+
+        let colorPills = SDPills(options: RecordingHUDAccentColor.allCases.prefix(5).map {
+            .init(title: localizedColorName($0), value: $0.rawValue)
+        }, selected: settings.recordingHUDRecordingColor.rawValue)
+        colorPills.onSelect = { [weak self] raw in
+            guard let color = RecordingHUDAccentColor(rawValue: raw) else { return }
+            self?.settings.recordingHUDRecordingColor = color
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Цвет волны", "Wave color"),
+            subtitle: t("Один цвет для записи и бренда", "One color for recording and brand"),
+            control: colorPills,
+            hairline: false
         ))
     }
+
 
     private func compactHeaderView() -> NSView {
         let row = NSStackView()
