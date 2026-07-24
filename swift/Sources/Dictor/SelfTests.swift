@@ -1061,7 +1061,7 @@ enum DictorSelfTest {
             let row = HistoryTranscriptItemView(
                 transcript: "test",
                 preview: "test",
-                transcriptionDurationSeconds: 0.1,
+                meta: "0,1 с",
                 asrTiming: nil,
                 historyIndex: 0,
                 target: nil,

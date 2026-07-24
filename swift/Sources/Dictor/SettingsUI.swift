@@ -479,6 +479,136 @@ final class SDFieldButton: NSView {
     }
 }
 
+// MARK: - Общие куски окна истории (макет 2b/4a)
+// Используются и главным окном панели, и оверлеем агента.
+
+/// «15:42 · 34 слова · 1,2 с» — мета строки истории.
+func historyEntryMetaText(_ entry: TranscriptHistoryEntry,
+                          language: InterfaceLanguage) -> String {
+    var parts: [String] = []
+    if let createdAt = entry.createdAt {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .russian ? "ru_RU" : "en_US")
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        parts.append(formatter.string(from: createdAt))
+    }
+    let words = entry.text.split(whereSeparator: { $0.isWhitespace }).count
+    parts.append(dictatedWordsLabel(words, language: language))
+    if let duration = entry.transcriptionDurationSeconds {
+        parts.append(String(format: "%.1f %@", duration,
+                            localizedText("с", "s", language: language)))
+    }
+    return parts.joined(separator: " · ")
+}
+
+/// Заголовок группы по дню: Сегодня / Вчера / «21 июля» / Ранее.
+func historyDayHeaderText(for date: Date?, language: InterfaceLanguage) -> String {
+    guard let date else { return localizedText("Ранее", "Earlier", language: language) }
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) { return localizedText("Сегодня", "Today", language: language) }
+    if calendar.isDateInYesterday(date) { return localizedText("Вчера", "Yesterday", language: language) }
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: language == .russian ? "ru_RU" : "en_US")
+    formatter.dateFormat = "d MMMM"
+    return formatter.string(from: date)
+}
+
+/// Документ скролла с системой координат сверху вниз — иначе короткий
+/// список прижимается к нижней кромке NSScrollView.
+final class SDFlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// Капс-заголовок секции («СЕГОДНЯ»), 11/600 с трекингом .05em.
+@MainActor
+func historySectionLabel(_ text: String) -> NSTextField {
+    let label = NSTextField(labelWithString: "")
+    label.attributedStringValue = NSAttributedString(
+        string: text.uppercased(),
+        attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: SD.C.subtle,
+            .kern: 0.55,
+        ])
+    return label
+}
+
+/// Статистика за 30 дней в шапке истории: слова, WPM, экономия, бары
+/// по дням (макет 2b: mono 17/600 + подписи 10.5 + бары справа).
+@MainActor
+func historyMonthStatsRowView(usage: [DailyDictationUsage],
+                              language: InterfaceLanguage) -> NSView {
+    func t(_ russian: String, _ english: String) -> String {
+        localizedText(russian, english, language: language)
+    }
+    let calendar = Calendar.current
+    let now = Date()
+    var characters = 0
+    var audioSeconds: Double = 0
+    var dayCharacters: [Int] = []
+    for offset in stride(from: 29, through: 0, by: -1) {
+        guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+        let key = dictationUsageDayKey(for: day, calendar: calendar)
+        let entry = usage.first(where: { $0.day == key })
+        characters += entry?.characterCount ?? 0
+        audioSeconds += entry?.audioSeconds ?? 0
+        dayCharacters.append(entry?.characterCount ?? 0)
+    }
+    let words = approximateWordCount(characters: characters)
+    let minutes = audioSeconds / 60
+    let wpm = minutes > 0.05 ? Int((Double(words) / minutes).rounded()) : 0
+    let savedMinutes = max(0, Double(words) / 40 - minutes)
+    let savedText: String
+    if savedMinutes >= 90 {
+        savedText = "≈" + String(format: "%.1f", savedMinutes / 60)
+            .replacingOccurrences(of: ".", with: ",") + " " + t("ч", "h")
+    } else if savedMinutes >= 1 {
+        savedText = "≈\(Int(savedMinutes.rounded())) " + t("мин", "min")
+    } else {
+        savedText = "—"
+    }
+
+    func cell(_ value: String, _ caption: String) -> NSView {
+        let valueLabel = NSTextField(labelWithString: value)
+        valueLabel.font = .monospacedSystemFont(ofSize: 17, weight: .semibold)
+        valueLabel.textColor = SD.C.ink
+        let captionLabel = NSTextField(labelWithString: caption)
+        captionLabel.font = .systemFont(ofSize: 10.5)
+        captionLabel.textColor = SD.C.subtle
+        let stack = NSStackView(views: [valueLabel, captionLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 1
+        return stack
+    }
+
+    let cells = NSStackView(views: [
+        cell(formattedUsageInteger(words), t("слов за месяц", "words this month")),
+        cell(wpm > 0 ? "\(wpm)" : "—", t("WPM средний", "avg WPM")),
+        cell(savedText, t("сэкономлено", "saved")),
+    ])
+    cells.orientation = .horizontal
+    cells.distribution = .fillEqually
+    cells.spacing = 8
+
+    let maxCharacters = max(1, dayCharacters.max() ?? 1)
+    let bars = QuickPanelStatBars(values: dayCharacters.suffix(14).map {
+        CGFloat($0) / CGFloat(maxCharacters)
+    })
+    bars.translatesAutoresizingMaskIntoConstraints = false
+    bars.widthAnchor.constraint(equalToConstant: 14 * 5 - 2).isActive = true
+    bars.heightAnchor.constraint(equalToConstant: 30).isActive = true
+
+    let row = NSStackView(views: [cells, bars])
+    row.orientation = .horizontal
+    row.alignment = .centerY
+    row.spacing = 10
+    row.edgeInsets = NSEdgeInsets(top: 14, left: 20, bottom: 14, right: 20)
+    cells.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -120).isActive = true
+    return row
+}
+
 // MARK: - Свотчи цвета волны (кружки 22px, выбранный — с кольцом)
 
 final class SDColorSwatches: NSControl {

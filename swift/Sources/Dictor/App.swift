@@ -1039,18 +1039,16 @@ final class HistoryTranscriptItemView: NSControl {
 
     var transcript = ""
     private let label: HistoryItemLabel
-    private let timingLabel: HistoryItemLabel
-    private let timingBadge = NSView()
+    private let metaLabel: HistoryItemLabel
     private let deleteButton: HistoryDeleteButton
     private let onDelete: (Int) -> Void
     private var tracking: NSTrackingArea?
-    private let normalBackground = NSColor.controlBackgroundColor.withAlphaComponent(0.28)
-    private let hoverBackground = NSColor.labelColor.withAlphaComponent(0.08)
-    private let pressedBackground = NSColor.labelColor.withAlphaComponent(0.14)
 
+    // Макет 2b/4a: строка padding 9px 10px, радиус 8, текст 12.5 ink,
+    // мета 10.5 subtle, hover-подсветка rgba(0,0,0,.05)/rgba(255,255,255,.06).
     init(transcript: String,
          preview: String,
-         transcriptionDurationSeconds: Double?,
+         meta: String,
          asrTiming: ASRTimingBreakdown?,
          historyIndex: Int,
          target: AnyObject?,
@@ -1059,59 +1057,63 @@ final class HistoryTranscriptItemView: NSControl {
         self.transcript = transcript
         self.onDelete = onDelete
         label = HistoryItemLabel(preview)
-        timingLabel = HistoryItemLabel(transcriptionDurationLabel(transcriptionDurationSeconds))
+        metaLabel = HistoryItemLabel(meta)
         deleteButton = HistoryDeleteButton(historyIndex: historyIndex)
         super.init(frame: .zero)
         self.target = target
         self.action = action
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
-        layer?.backgroundColor = normalBackground.cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.13).cgColor
+        layer?.backgroundColor = .clear
+        toolTip = asrTimingTooltip(asrTiming)
 
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.textColor = .labelColor
+        label.font = .systemFont(ofSize: 12.5)
+        label.textColor = SD.C.ink
         label.lineBreakMode = .byTruncatingTail
-        label.maximumNumberOfLines = 2
+        label.maximumNumberOfLines = 1
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
-        timingBadge.wantsLayer = true
-        timingBadge.layer?.cornerRadius = 7
-        timingBadge.layer?.cornerCurve = .continuous
-        timingBadge.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.055).cgColor
-        timingBadge.layer?.borderWidth = 1
-        timingBadge.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.14).cgColor
-        timingBadge.toolTip = asrTimingTooltip(asrTiming)
-        timingBadge.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(timingBadge)
-
-        timingLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
-        timingLabel.textColor = transcriptionDurationSeconds == nil ? .tertiaryLabelColor : .secondaryLabelColor
-        timingLabel.alignment = .center
-        timingLabel.translatesAutoresizingMaskIntoConstraints = false
-        timingBadge.addSubview(timingLabel)
+        metaLabel.font = .systemFont(ofSize: 10.5)
+        metaLabel.textColor = SD.C.subtle
+        metaLabel.lineBreakMode = .byTruncatingTail
+        metaLabel.maximumNumberOfLines = 1
+        metaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        metaLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(metaLabel)
 
         deleteButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(deleteButton)
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 56),
-            timingBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            timingBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            timingBadge.widthAnchor.constraint(equalToConstant: 68),
-            timingBadge.heightAnchor.constraint(equalToConstant: 24),
-            timingLabel.leadingAnchor.constraint(equalTo: timingBadge.leadingAnchor, constant: 4),
-            timingLabel.trailingAnchor.constraint(equalTo: timingBadge.trailingAnchor, constant: -4),
-            timingLabel.centerYAnchor.constraint(equalTo: timingBadge.centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: timingBadge.trailingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            heightAnchor.constraint(equalToConstant: 48),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: deleteButton.leadingAnchor, constant: -8),
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            metaLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            metaLabel.trailingAnchor.constraint(lessThanOrEqualTo: deleteButton.leadingAnchor, constant: -8),
+            metaLabel.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 3),
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+    }
+
+    private var hoverColor: CGColor {
+        resolvedCGColor(NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.06)
+                : NSColor.black.withAlphaComponent(0.05)
+        })
+    }
+
+    private var pressedColor: CGColor {
+        resolvedCGColor(NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.1)
+                : NSColor.black.withAlphaComponent(0.09)
+        })
     }
 
     required init?(coder: NSCoder) {
@@ -1148,7 +1150,7 @@ final class HistoryTranscriptItemView: NSControl {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = hoverBackground.cgColor
+        layer?.backgroundColor = hoverColor
         updateDeleteHover(for: event)
     }
 
@@ -1157,7 +1159,7 @@ final class HistoryTranscriptItemView: NSControl {
     }
 
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = normalBackground.cgColor
+        layer?.backgroundColor = .clear
         deleteButton.setHovered(false)
     }
 
@@ -1165,7 +1167,7 @@ final class HistoryTranscriptItemView: NSControl {
         guard let hitAction = hitAction(atWindowPoint: event.locationInWindow) else { return }
         switch hitAction {
         case .copy:
-            layer?.backgroundColor = pressedBackground.cgColor
+            layer?.backgroundColor = pressedColor
             guard let action else { return }
             NSApp.sendAction(action, to: target, from: self)
         case .delete(let historyIndex):
@@ -1174,7 +1176,7 @@ final class HistoryTranscriptItemView: NSControl {
     }
 
     override func mouseUp(with event: NSEvent) {
-        layer?.backgroundColor = normalBackground.cgColor
+        layer?.backgroundColor = .clear
     }
 
     func hitAction(atWindowPoint point: NSPoint) -> HitAction? {
@@ -4300,11 +4302,12 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let visible = screen.visibleFrame
         let width: CGFloat = min(620, visible.width - 48)
         let displayedHistory = filteredHistoryForOverlay()
-        let dayHeaders = Set(displayedHistory.prefix(7).map { historyDayHeader(for: $0.1.createdAt) }).count
-        let rowHeight: CGFloat = displayedHistory.isEmpty
-            ? 58
-            : CGFloat(min(displayedHistory.count, 7)) * 64 + CGFloat(dayHeaders) * 24
-        let height: CGFloat = min(500, 42 + rowHeight)
+        let dayHeaders = Set(displayedHistory.map { historyDayHeader(for: $0.1.createdAt) }).count
+        let listHeight: CGFloat = displayedHistory.isEmpty
+            ? 130
+            : CGFloat(displayedHistory.count) * 50 + CGFloat(dayHeaders) * 30 + 16
+        // Шапка (поиск 52 + статистика 62) + список; лишнее прокручивается.
+        let height: CGFloat = min(visible.height - 96, min(640, 115 + listHeight))
         let y = visible.midY - (height / 2)
         return NSRect(x: visible.midX - (width / 2),
                       y: y,
@@ -4316,30 +4319,48 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         historyOverlayRows.removeAll(keepingCapacity: true)
         let frame = NSRect(origin: .zero, size: historyOverlayFrame().size)
         let root = PaperBackgroundView(frame: frame)
+        root.fill = SD.C.settingsPaper
         root.cornerRadius = 16
         root.wantsLayer = true
         root.layer?.cornerRadius = 16
         root.layer?.cornerCurve = .continuous
         root.layer?.masksToBounds = true
 
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -12),
-        ])
-
+        // Шапка: пилюля поиска + кнопки (макет: padding 12px 16px).
         let actions = NSStackView()
         actions.orientation = .horizontal
         actions.spacing = 8
         actions.alignment = .centerY
+        actions.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        let searchPill = NSView()
+        searchPill.wantsLayer = true
+        searchPill.layer?.cornerRadius = 7
+        searchPill.layer?.backgroundColor = root.resolvedCGColor(NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.07)
+                : NSColor.black.withAlphaComponent(0.05)
+        })
+        let search = NSSearchField()
+        search.placeholderString = historyT("Искать в истории…", "Search history…")
+        search.font = .systemFont(ofSize: 12)
+        search.isBordered = false
+        search.drawsBackground = false
+        search.focusRingType = .none
+        search.target = self
+        search.action = #selector(historySearchChanged(_:))
+        search.stringValue = historySearchQuery
+        search.sendsSearchStringImmediately = true
+        search.translatesAutoresizingMaskIntoConstraints = false
+        historySearchField = search
+        searchPill.addSubview(search)
+        searchPill.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            searchPill.heightAnchor.constraint(equalToConstant: 28),
+            search.leadingAnchor.constraint(equalTo: searchPill.leadingAnchor, constant: 6),
+            search.trailingAnchor.constraint(equalTo: searchPill.trailingAnchor, constant: -6),
+            search.centerYAnchor.constraint(equalTo: searchPill.centerYAnchor),
+        ])
+        actions.addArrangedSubview(searchPill)
         actions.addArrangedSubview(HistoryToolbarButton(
             symbolName: "chart.xyaxis.line",
             accessibilityDescription: "Статистика",
@@ -4347,18 +4368,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             target: self,
             action: #selector(showStatisticsFromHistoryOverlayClicked(_:))
         ))
-        let search = NSSearchField()
-        search.placeholderString = historyT("Искать в истории…", "Search history…")
-        search.font = .systemFont(ofSize: 12)
-        search.target = self
-        search.action = #selector(historySearchChanged(_:))
-        search.stringValue = historySearchQuery
-        search.sendsSearchStringImmediately = true
-        search.translatesAutoresizingMaskIntoConstraints = false
-        search.widthAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
-        historySearchField = search
-        actions.addArrangedSubview(search)
-        actions.addArrangedSubview(NSView())
         actions.addArrangedSubview(HistoryToolbarButton(
             symbolName: "gearshape",
             accessibilityDescription: "Настройки",
@@ -4366,8 +4375,15 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             target: self,
             action: #selector(showSetupFromHistoryOverlayClicked(_:))
         ))
-        stack.addArrangedSubview(actions)
-        actions.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+
+        let statsRow = historyMonthStatsRow()
+
+        // Список: весь архив, группировка по дням, прокрутка.
+        let listStack = NSStackView()
+        listStack.orientation = .vertical
+        listStack.alignment = .leading
+        listStack.spacing = 0
+        listStack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 12, right: 12)
 
         let displayedHistory = filteredHistoryForOverlay()
         if displayedHistory.isEmpty {
@@ -4376,39 +4392,89 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                              "Quiet so far — your first dictation will show up here.")
                 : historyT("Ничего не нашлось.", "No matches."))
             empty.font = .systemFont(ofSize: 13)
-            empty.textColor = .secondaryLabelColor
+            empty.textColor = SD.C.graphite
             empty.alignment = .center
-            stack.addArrangedSubview(empty)
-            empty.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            listStack.edgeInsets = NSEdgeInsets(top: 32, left: 12, bottom: 32, right: 12)
+            listStack.alignment = .centerX
+            listStack.addArrangedSubview(empty)
         } else {
             var lastHeader: String?
-            for (index, entry) in displayedHistory.prefix(7) {
+            for (index, entry) in displayedHistory {
                 let header = historyDayHeader(for: entry.createdAt)
                 if header != lastHeader {
                     lastHeader = header
-                    let label = HistoryItemLabel(header.uppercased())
-                    label.font = .systemFont(ofSize: 10.5, weight: .semibold)
-                    label.textColor = .tertiaryLabelColor
-                    stack.addArrangedSubview(label)
-                    label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                    // Макет: капс 11/600 с трекингом, отступы 12px 8px 4px.
+                    let label = HistoryItemLabel("")
+                    label.attributedStringValue = NSAttributedString(
+                        string: header.uppercased(),
+                        attributes: [
+                            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                            .foregroundColor: SD.C.subtle,
+                            .kern: 0.55,
+                        ])
+                    let wrapper = NSStackView(views: [label])
+                    wrapper.orientation = .vertical
+                    wrapper.alignment = .leading
+                    wrapper.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 4, right: 0)
+                    listStack.addArrangedSubview(wrapper)
                 }
                 let row = historyOverlayRow(index: index, entry: entry)
                 historyOverlayRows.append(row)
-                stack.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+                listStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: listStack.widthAnchor,
+                                           constant: -24).isActive = true
             }
         }
 
+        listStack.translatesAutoresizingMaskIntoConstraints = false
+        let documentView = SDFlippedView()
+        documentView.addSubview(listStack)
+        NSLayoutConstraint.activate([
+            listStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+            listStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+            listStack.topAnchor.constraint(equalTo: documentView.topAnchor),
+            listStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
+        ])
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.verticalScroller?.controlSize = .small
+        scroll.documentView = documentView
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
+
+        let column = NSStackView(views: [actions, SDHairlineView(), statsRow,
+                                         SDHairlineView(), scroll])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(column)
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            column.topAnchor.constraint(equalTo: root.topAnchor),
+            column.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        for view in column.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        }
         return root
     }
 
-    /// Видимая история с сохранением исходных индексов (для удаления)
-    /// и фильтром поиска.
+    private func historyMonthStatsRow() -> NSView {
+        historyMonthStatsRowView(usage: settings.dailyDictationUsage,
+                                 language: settings.interfaceLanguage)
+    }
+
+    /// Весь архив истории с сохранением исходных индексов (для
+    /// удаления) и фильтром поиска.
     private func filteredHistoryForOverlay() -> [(Int, TranscriptHistoryEntry)] {
         let query = historySearchQuery
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let indexed = Array(visibleHistory.enumerated())
+        let indexed = Array(history.enumerated())
         guard !query.isEmpty else { return indexed }
         return indexed.filter { $0.1.text.lowercased().contains(query) }
     }
@@ -4418,14 +4484,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func historyDayHeader(for date: Date?) -> String {
-        guard let date else { return historyT("Ранее", "Earlier") }
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) { return historyT("Сегодня", "Today") }
-        if calendar.isDateInYesterday(date) { return historyT("Вчера", "Yesterday") }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: settings.interfaceLanguage == .russian ? "ru_RU" : "en_US")
-        formatter.dateFormat = "d MMMM"
-        return formatter.string(from: date)
+        historyDayHeaderText(for: date, language: settings.interfaceLanguage)
     }
 
     @objc private func historySearchChanged(_ sender: NSSearchField) {
@@ -4440,9 +4499,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func historyOverlayRow(index: Int, entry: TranscriptHistoryEntry) -> HistoryTranscriptItemView {
-        HistoryTranscriptItemView(transcript: entry.text,
+        return HistoryTranscriptItemView(transcript: entry.text,
                                   preview: previewLine(for: entry.text),
-                                  transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
+                                  meta: historyEntryMetaText(entry, language: settings.interfaceLanguage),
                                   asrTiming: entry.asrTiming,
                                   historyIndex: index,
                                   target: self,
