@@ -45,6 +45,20 @@ if let status = DictorSelfTest.run(arguments: Array(CommandLine.arguments.dropFi
 
 let app = NSApplication.shared
 let launchArguments = Array(CommandLine.arguments.dropFirst())
+if launchArguments.first == "--export-settings-preview" {
+    guard launchArguments.count == 2 else {
+        fputs("usage: Dictor --export-settings-preview <directory>\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+    do {
+        try exportSettingsPanelPreviews(to: URL(fileURLWithPath: launchArguments[1],
+                                                isDirectory: true))
+        exit(EXIT_SUCCESS)
+    } catch {
+        fputs("settings preview export failed: \(error.localizedDescription)\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+}
 if launchArguments.first == RECORDING_HUD_EXPORT_ARGUMENT {
     guard launchArguments.count == 2 else {
         fputs("usage: Dictor --export-hud-animation <frames-directory>\n", stderr)

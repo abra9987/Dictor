@@ -87,7 +87,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private let settings = Settings.shared
     private var permissionClickCount: [Permission: Int] = [:]
     private var settingsDraft: ControlPanelSettingsDraft?
-    private var settingsTab = "general"
+    var settingsTab = "general"
     private var hotkeyRecorder: HotkeyRecorderController?
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
@@ -288,7 +288,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return background
     }
 
-    private func makeSettingsContentView() -> NSView {
+    func makeSettingsContentView() -> NSView {
         let draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
         let root = NSStackView()
         root.orientation = .vertical
@@ -2203,4 +2203,31 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         alert.addButton(withTitle: t("ОК", "OK"))
         alert.runModal()
     }
+}
+
+
+// MARK: - Превью настроек (для визуальной сверки с макетом)
+
+@MainActor
+func exportSettingsPanelPreviews(to directory: URL) throws {
+    let fileManager = FileManager.default
+    try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    let panel = DictorControlPanelApp()
+    let size = NSSize(width: 620, height: 560)
+    for tab in ["general", "hotkeys", "model", "dict", "look", "privacy"] {
+        panel.settingsTab = tab
+        for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                         ("dark", NSAppearance.Name.darkAqua)] {
+            let view = panel.makeSettingsContentView()
+            view.appearance = NSAppearance(named: appearanceName)
+            view.frame = NSRect(origin: .zero, size: size)
+            view.layoutSubtreeIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+            try png.write(to: directory.appendingPathComponent("settings-\(tab)-\(suffix).png"),
+                          options: .atomic)
+        }
+    }
+    print("SETTINGS_PREVIEW exported to \(directory.path)")
 }
