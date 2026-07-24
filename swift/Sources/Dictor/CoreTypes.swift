@@ -57,7 +57,11 @@ let MAX_INPUT_DEVICE_PREFERENCE_BYTES = 512
 let DIAGNOSTICS_LOG_MAX_BYTES = 128 * 1024
 let DIAGNOSTICS_LOG_MAX_LINES = 40
 let DIAGNOSTICS_LOG_MAX_LINE_CHARACTERS = 4096
-let TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES = 100
+// История хранится «как в Wispr Flow»: архив практически не
+// обрезается (10 000 записей ≈ годы диктовки, ~2 МБ JSON).
+// Пользовательский лимит «Хранить историю» влияет только на видимый
+// список в поповере/меню, не на архив.
+let TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES = 10_000
 let RECORDING_HUD_BASE_SIZE = NSSize(width: 64, height: 38)
 let RECORDING_HUD_ANIMATE_IN_SECONDS: TimeInterval = 0.32
 let RECORDING_HUD_ANIMATE_OUT_SECONDS: TimeInterval = 0.23
@@ -718,7 +722,9 @@ func transcriptHistoryArchive(_ entries: [TranscriptHistoryEntry],
     return next
 }
 
-let DICTATION_USAGE_MAX_DAYS = 400
+// ~11 лет дневной статистики; записи крошечные, храним долго — для
+// графиков по месяцам и годам.
+let DICTATION_USAGE_MAX_DAYS = 4000
 
 struct DailyDictationUsage: Codable, Equatable {
     let day: String

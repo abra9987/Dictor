@@ -305,7 +305,8 @@ final class Settings: @unchecked Sendable {
                     return TranscriptHistoryEntry(
                         text: text,
                         transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
-                        asrTiming: entry.asrTiming
+                        asrTiming: entry.asrTiming,
+                        createdAt: entry.createdAt
                     )
                 }
                 return limitedTranscriptHistoryArchive(cleaned)
@@ -321,7 +322,8 @@ final class Settings: @unchecked Sendable {
                     return TranscriptHistoryEntry(
                         text: text,
                         transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
-                        asrTiming: entry.asrTiming
+                        asrTiming: entry.asrTiming,
+                        createdAt: entry.createdAt
                     )
                 }
             )

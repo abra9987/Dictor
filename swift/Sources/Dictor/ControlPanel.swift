@@ -90,6 +90,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     var settingsTab = "general"
     private var hotkeyRecorder: HotkeyRecorderController?
     private let onboarding = OnboardingController()
+    private var mainHistorySearch = ""
+    private weak var mainHistorySearchField: NSSearchField?
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
 
@@ -155,11 +157,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 640),
                               styleMask: [.titled, .closable, .miniaturizable],
                               backing: .buffered,
                               defer: false)
         window.title = "Dictor"
+        window.contentMinSize = NSSize(width: 620, height: 640)
+        window.contentMaxSize = NSSize(width: 620, height: 640)
         window.titlebarAppearsTransparent = true
         window.backgroundColor = SD.C.settingsPaper
         window.isReleasedWhenClosed = false
@@ -187,14 +191,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func refresh(force: Bool = false) {
         guard let window else { return }
+        _ = settings.refreshFromDisk()
         let fingerprint = renderFingerprint()
         guard force || fingerprint != lastRenderFingerprint else { return }
         lastRenderFingerprint = fingerprint
-        window.title = t("Настройки Dictor", "Dictor Settings")
-        window.contentView = makeSettingsContentView()
-        if let contentView = window.contentView {
-            resizeSettingsWindowToFit(window, contentView: contentView)
-        }
+        // Главное окно — история (как в Wispr Flow); настройки живут
+        // в отдельном окне settingsWindow.
+        window.title = t("История Dictor", "Dictor History")
+        window.contentView = makeMainHistoryView()
+        restoreMainHistorySearchFocusIfNeeded(in: window)
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
             settingsWindow.contentView = makeSettingsContentView()
@@ -202,6 +207,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 resizeSettingsWindowToFit(settingsWindow, contentView: contentView)
             }
         }
+    }
+
+    private func restoreMainHistorySearchFocusIfNeeded(in window: NSWindow) {
+        guard !mainHistorySearch.isEmpty, let field = mainHistorySearchField else { return }
+        window.makeFirstResponder(field)
+        field.currentEditor()?.moveToEndOfLine(nil)
     }
 
 
@@ -220,7 +231,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                           String(state?.pid ?? 0),
                           state?.speechModelReady == true ? "1" : "0"].joined(separator: "|")
         }
+        let newestHistory = settings.recentTranscriptEntries.first
         return [language.rawValue,
+                "history:\(settings.recentTranscriptEntries.count):" +
+                    "\(newestHistory?.createdAt?.timeIntervalSince1970 ?? 0)",
+                "search:\(mainHistorySearch)",
                 serviceOperation?.rawValue ?? "idle",
                 updateStateFingerprint(),
                 DictorAgentService.isAgentRunning() ? "running" : "stopped",
@@ -766,6 +781,198 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         alert.addButton(withTitle: t("Стереть", "Erase"))
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         settings.recentTranscriptEntries = []
+        refresh(force: true)
+    }
+
+    // MARK: - Главное окно: история (макет 2b/4a)
+
+    func makeMainHistoryViewForPreview() -> NSView {
+        makeMainHistoryView()
+    }
+
+    private func makeMainHistoryView() -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+
+        // Шапка: пилюля поиска + шестерёнка настроек (padding 12px 16px).
+        let searchPill = NSView()
+        searchPill.wantsLayer = true
+        searchPill.layer?.cornerRadius = 7
+        searchPill.layer?.backgroundColor = root.resolvedCGColor(NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.07)
+                : NSColor.black.withAlphaComponent(0.05)
+        })
+        let search = NSSearchField()
+        search.placeholderString = t("Искать в истории…", "Search history…")
+        search.font = .systemFont(ofSize: 12)
+        search.isBordered = false
+        search.drawsBackground = false
+        search.focusRingType = .none
+        search.target = self
+        search.action = #selector(mainHistorySearchChanged(_:))
+        search.stringValue = mainHistorySearch
+        search.sendsSearchStringImmediately = true
+        search.translatesAutoresizingMaskIntoConstraints = false
+        mainHistorySearchField = search
+        searchPill.addSubview(search)
+        searchPill.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            searchPill.heightAnchor.constraint(equalToConstant: 28),
+            search.leadingAnchor.constraint(equalTo: searchPill.leadingAnchor, constant: 6),
+            search.trailingAnchor.constraint(equalTo: searchPill.trailingAnchor, constant: -6),
+            search.centerYAnchor.constraint(equalTo: searchPill.centerYAnchor),
+        ])
+
+        let gear = NSButton(title: t("Настройки", "Settings"),
+                            target: self,
+                            action: #selector(openSettingsClicked(_:)))
+        gear.isBordered = false
+        gear.font = .systemFont(ofSize: 12, weight: .medium)
+        gear.contentTintColor = SD.C.ink
+
+        let header = NSStackView(views: [searchPill, NSView(), gear])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 10
+        header.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        searchPill.widthAnchor.constraint(equalTo: header.widthAnchor,
+                                          constant: -140).isActive = true
+
+        // Список: весь архив с группировкой по дням, прокрутка.
+        let entries = filteredMainHistory()
+        let listStack = NSStackView()
+        listStack.orientation = .vertical
+        listStack.alignment = .leading
+        listStack.spacing = 0
+        listStack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 12, right: 12)
+
+        if entries.isEmpty {
+            listStack.alignment = .centerX
+            listStack.edgeInsets = NSEdgeInsets(top: 48, left: 24, bottom: 48, right: 24)
+            let wave = QuickPanelWaveView()
+            wave.isActive = false
+            wave.alphaValue = 0.45
+            wave.translatesAutoresizingMaskIntoConstraints = false
+            wave.widthAnchor.constraint(equalToConstant: 48).isActive = true
+            wave.heightAnchor.constraint(equalToConstant: 16).isActive = true
+            listStack.addArrangedSubview(wave)
+            listStack.setCustomSpacing(10, after: wave)
+            let title = panelLabel(mainHistorySearch.isEmpty
+                                       ? t("Пока тихо", "Quiet so far")
+                                       : t("Ничего не нашлось", "No matches"),
+                                   size: 13, weight: .semibold)
+            listStack.addArrangedSubview(title)
+            listStack.setCustomSpacing(3, after: title)
+            if mainHistorySearch.isEmpty {
+                let caps = keycapLabels(for: settings.configuredHotkey, language: language)
+                    .joined(separator: " + ")
+                let hint = panelLabel(
+                    t("Зажмите \(caps) в любом поле ввода — первая диктовка появится здесь.",
+                      "Hold \(caps) in any text field — your first dictation will show up here."),
+                    size: 11.5, color: SD.C.graphite)
+                hint.alignment = .center
+                hint.preferredMaxLayoutWidth = 280
+                listStack.addArrangedSubview(hint)
+            }
+        } else {
+            var lastHeader: String?
+            for (index, entry) in entries {
+                let header = historyDayHeaderText(for: entry.createdAt, language: language)
+                if header != lastHeader {
+                    lastHeader = header
+                    let label = historySectionLabel(header)
+                    let wrapper = NSStackView(views: [label])
+                    wrapper.orientation = .vertical
+                    wrapper.alignment = .leading
+                    wrapper.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 4, right: 0)
+                    listStack.addArrangedSubview(wrapper)
+                }
+                let row = HistoryTranscriptItemView(
+                    transcript: entry.text,
+                    preview: entry.text.replacingOccurrences(of: "\n", with: " "),
+                    meta: historyEntryMetaText(entry, language: language),
+                    asrTiming: entry.asrTiming,
+                    historyIndex: index,
+                    target: self,
+                    action: #selector(mainHistoryRowClicked(_:)),
+                    onDelete: { [weak self] index in
+                        self?.deleteMainHistoryEntry(at: index)
+                    })
+                listStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: listStack.widthAnchor,
+                                           constant: -24).isActive = true
+            }
+        }
+
+        listStack.translatesAutoresizingMaskIntoConstraints = false
+        let documentView = SDFlippedView()
+        documentView.addSubview(listStack)
+        NSLayoutConstraint.activate([
+            listStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+            listStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+            listStack.topAnchor.constraint(equalTo: documentView.topAnchor),
+            listStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
+        ])
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.verticalScroller?.controlSize = .small
+        scroll.documentView = documentView
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
+
+        let column = NSStackView(views: [
+            header,
+            SDHairlineView(),
+            historyMonthStatsRowView(usage: settings.dailyDictationUsage,
+                                     language: language),
+            SDHairlineView(),
+            scroll,
+        ])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(column)
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            column.topAnchor.constraint(equalTo: root.topAnchor),
+            column.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        for view in column.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        }
+        return root
+    }
+
+    private func filteredMainHistory() -> [(Int, TranscriptHistoryEntry)] {
+        let query = mainHistorySearch
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let indexed = Array(settings.recentTranscriptEntries.enumerated())
+        guard !query.isEmpty else { return indexed }
+        return indexed.filter { $0.1.text.lowercased().contains(query) }
+    }
+
+    @objc private func mainHistorySearchChanged(_ sender: NSSearchField) {
+        mainHistorySearch = sender.stringValue
+        refresh(force: true)
+    }
+
+    @objc private func mainHistoryRowClicked(_ sender: HistoryTranscriptItemView) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(sender.transcript, forType: .string)
+    }
+
+    private func deleteMainHistoryEntry(at index: Int) {
+        var entries = settings.recentTranscriptEntries
+        guard entries.indices.contains(index) else { return }
+        entries.remove(at: index)
+        settings.recentTranscriptEntries = entries
         refresh(force: true)
     }
 
@@ -2090,4 +2297,74 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
         throw SettingsPreviewExportError(message: "nothing exported")
     }
     print("SETTINGS_PREVIEW exported \(exported) files to \(directory.path)")
+}
+
+/// Превью главного окна истории. Сеет сэмпл-данные в defaults ТЕКУЩЕГО
+/// процесса (CLI-домен, не приложение) и рендерит светлый/тёмный вариант.
+@MainActor
+func exportHistoryPanelPreviews(to directory: URL) throws {
+    let fileManager = FileManager.default
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    let now = Date()
+    let settings = Settings.shared
+    settings.recentTranscriptEntries = [
+        TranscriptHistoryEntry(text: "Привет! По итогам звонка присылаю короткое резюме и три следующих шага, посмотри до пятницы",
+                               transcriptionDurationSeconds: 1.2,
+                               createdAt: now.addingTimeInterval(-3600)),
+        TranscriptHistoryEntry(text: "Давай созвонимся в четверг в три, я закину приглашение",
+                               transcriptionDurationSeconds: 0.7,
+                               createdAt: now.addingTimeInterval(-9000)),
+        TranscriptHistoryEntry(text: "Заголовок: локальная диктовка без облака — обзор Dictor",
+                               transcriptionDurationSeconds: 0.6,
+                               createdAt: now.addingTimeInterval(-16000)),
+        TranscriptHistoryEntry(text: "Собираем бету в пятницу, режем скоуп до словаря и режимов",
+                               transcriptionDurationSeconds: 0.9,
+                               createdAt: now.addingTimeInterval(-100_000)),
+    ]
+    var usage: [DailyDictationUsage] = []
+    let calendar = Calendar.current
+    for offset in 0..<30 {
+        guard let day = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+        let key = dictationUsageDayKey(for: day, calendar: calendar)
+        usage.append(DailyDictationUsage(day: key,
+                                         dictationCount: 8,
+                                         characterCount: 2500 + (offset * 137) % 2200,
+                                         audioSeconds: 400,
+                                         asrSeconds: 10))
+    }
+    settings.dailyDictationUsage = usage
+
+    let panel = DictorControlPanelApp()
+    let size = NSSize(width: 620, height: 640)
+    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                          styleMask: [.borderless],
+                          backing: .buffered,
+                          defer: false)
+    window.colorSpace = .sRGB
+    var exported = 0
+    for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                     ("dark", NSAppearance.Name.darkAqua)] {
+        window.appearance = NSAppearance(named: appearanceName)
+        let view = panel.makeMainHistoryViewForPreview()
+        view.frame = NSRect(origin: .zero, size: size)
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SettingsPreviewExportError(message: "no bitmap rep for history-\(suffix)")
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw SettingsPreviewExportError(message: "PNG encode failed for history-\(suffix)")
+        }
+        try png.write(to: directory.appendingPathComponent("history-\(suffix).png"),
+                      options: .atomic)
+        exported += 1
+    }
+    window.contentView = nil
+    guard exported > 0 else {
+        throw SettingsPreviewExportError(message: "nothing exported")
+    }
+    print("HISTORY_PREVIEW exported \(exported) files to \(directory.path)")
 }
