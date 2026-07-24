@@ -10,7 +10,13 @@ import AppKit
 final class SDRowView: NSView {
     private let hairline: Bool
 
-    init(title: String, subtitle: String? = nil, control: NSView, hairline: Bool = true) {
+    // Макет: padding 13px 0, разделитель rgba .06/.07 снизу,
+    // заголовок 13px ink, подпись 11px subtle с отступом 1px.
+    init(title: String,
+         subtitle: String? = nil,
+         control: NSView,
+         hairline: Bool = true,
+         verticalPadding: CGFloat = 13) {
         self.hairline = hairline
         super.init(frame: .zero)
         let titleLabel = NSTextField(labelWithString: title)
@@ -25,7 +31,7 @@ final class SDRowView: NSView {
         if let subtitle, !subtitle.isEmpty {
             let subtitleLabel = NSTextField(labelWithString: subtitle)
             subtitleLabel.font = .systemFont(ofSize: 11)
-            subtitleLabel.textColor = SD.C.graphite
+            subtitleLabel.textColor = SD.C.subtle
             textStack.addArrangedSubview(subtitleLabel)
         }
 
@@ -33,13 +39,26 @@ final class SDRowView: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
+        // Высота строки = 2×padding + самый высокий элемент; без
+        // low-priority «сжатия» неравенства дают неоднозначную высоту,
+        // и стек растягивает строку произвольно.
+        let squeeze = heightAnchor.constraint(equalToConstant: 0)
+        squeeze.priority = .defaultLow
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
+            squeeze,
             textStack.leadingAnchor.constraint(equalTo: leadingAnchor),
             textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textStack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor,
+                                           constant: verticalPadding),
             textStack.trailingAnchor.constraint(lessThanOrEqualTo: control.leadingAnchor, constant: -12),
             control.trailingAnchor.constraint(equalTo: trailingAnchor),
             control.centerYAnchor.constraint(equalTo: centerYAnchor),
+            control.topAnchor.constraint(greaterThanOrEqualTo: topAnchor,
+                                         constant: verticalPadding),
+            bottomAnchor.constraint(greaterThanOrEqualTo: textStack.bottomAnchor,
+                                    constant: verticalPadding),
+            bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor,
+                                    constant: verticalPadding),
         ])
     }
 
@@ -47,11 +66,82 @@ final class SDRowView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard hairline else { return }
-        SD.C.hairline.setFill()
+        SD.C.rowHairline.setFill()
         NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
     }
 
     override var isFlipped: Bool { true }
+}
+
+/// Кнопка-таб окна настроек. Активная — пилюля rgba(0,0,0,.08) /
+/// rgba(255,255,255,.1), текст ink 600; неактивная — graphite 400.
+/// Restyle на смене темы, иначе слой остаётся с цветом старой appearance.
+final class SDTabButton: NSButton {
+    var isActiveTab = false {
+        didSet { restyle() }
+    }
+
+    static let activeFill = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor.white.withAlphaComponent(0.1)
+            : NSColor.black.withAlphaComponent(0.08)
+    }
+
+    func restyle() {
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        font = .systemFont(ofSize: 12, weight: isActiveTab ? .semibold : .regular)
+        if isActiveTab {
+            layer?.backgroundColor = resolvedCGColor(SDTabButton.activeFill)
+            contentTintColor = SD.C.ink
+        } else {
+            layer?.backgroundColor = .clear
+            contentTintColor = SD.C.graphite
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+}
+
+/// Заливная коралловая кнопка действия (primary в языке дизайна).
+final class SDSolidButton: NSButton {
+    override var isEnabled: Bool {
+        didSet { restyle() }
+    }
+
+    func restyle() {
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        font = .systemFont(ofSize: 12, weight: .semibold)
+        layer?.backgroundColor = resolvedCGColor(SD.C.voice)
+        contentTintColor = NSColor.white
+        alphaValue = isEnabled ? 1 : 0.4
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+}
+
+/// Однопиксельная линия цвета hairline (граница под табами).
+final class SDHairlineView: NSView {
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 1)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        SD.C.hairline.setFill()
+        bounds.fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
 }
 
 // MARK: - Коралловый тумблер 36×22 (как в макете)
@@ -65,11 +155,14 @@ final class SDToggle: NSControl {
     override var intrinsicContentSize: NSSize { NSSize(width: 36, height: 22) }
 
     override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.isDark
         let track = NSBezierPath(roundedRect: bounds, xRadius: 11, yRadius: 11)
         if isOn {
             SD.C.voice.setFill()
         } else {
-            SD.C.ink.withAlphaComponent(0.14).setFill()
+            // Макет: off-трек rgba(0,0,0,.14) / rgba(255,255,255,.16).
+            (dark ? NSColor.white.withAlphaComponent(0.16)
+                  : NSColor.black.withAlphaComponent(0.14)).setFill()
         }
         track.fill()
         let knobX = isOn ? bounds.maxX - 20 : bounds.minX + 2
@@ -78,7 +171,7 @@ final class SDToggle: NSControl {
         let shadow = NSShadow()
         shadow.shadowBlurRadius = 2
         shadow.shadowOffset = NSSize(width: 0, height: -1)
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.2)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(dark ? 0.3 : 0.2)
         shadow.set()
         NSColor.white.setFill()
         NSBezierPath(ovalIn: knob).fill()
@@ -119,16 +212,20 @@ final class SDPills: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        // Макет: padding 4px 12px, радиус 999, шрифт 12 (выбранная — 600).
         for option in options {
             let button = NSButton(title: option.title, target: self,
                                   action: #selector(pillClicked(_:)))
             button.isBordered = false
             button.wantsLayer = true
-            button.layer?.cornerRadius = 12
+            button.layer?.cornerRadius = 11.5
             button.identifier = NSUserInterfaceItemIdentifier(option.value)
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
-            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 23).isActive = true
+            let textWidth = ceil(option.title.size(withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
+            ]).width)
+            button.widthAnchor.constraint(equalToConstant: textWidth + 24).isActive = true
             stack.addArrangedSubview(button)
             buttons.append(button)
         }
@@ -140,12 +237,10 @@ final class SDPills: NSView {
     private func restyle() {
         for button in buttons {
             let selected = button.identifier?.rawValue == selectedValue
-            button.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .medium)
+            button.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
             if selected {
-                // В мокапе выбранная пилюля — контрастная «чернильная»
-                // в светлой теме и «бумажная» в тёмной.
-                button.layer?.backgroundColor = SD.C.ink.cgColor
-                button.contentTintColor = SD.C.paper
+                button.layer?.backgroundColor = resolvedCGColor(SD.C.pillSelectedFill)
+                button.contentTintColor = SD.C.pillSelectedText
             } else {
                 button.layer?.backgroundColor = .clear
                 button.contentTintColor = SD.C.graphite
@@ -182,6 +277,7 @@ final class SDKeycaps: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        // Макет: mono 600 12px, padding 5px 9px, радиус 7.
         for key in keys {
             let cap = NSTextField(labelWithString: key)
             cap.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
@@ -191,8 +287,11 @@ final class SDKeycaps: NSView {
             cap.layer?.cornerRadius = 7
             cap.layer?.borderWidth = 1
             cap.translatesAutoresizingMaskIntoConstraints = false
-            cap.heightAnchor.constraint(equalToConstant: 26).isActive = true
-            cap.widthAnchor.constraint(greaterThanOrEqualToConstant: 30).isActive = true
+            cap.heightAnchor.constraint(equalToConstant: 25).isActive = true
+            let textWidth = ceil(key.size(withAttributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+            ]).width)
+            cap.widthAnchor.constraint(equalToConstant: max(25, textWidth + 18)).isActive = true
             capViews.append(cap)
             stack.addArrangedSubview(cap)
         }
@@ -207,7 +306,7 @@ final class SDKeycaps: NSView {
         let dark = effectiveAppearance.isDark
         for cap in capViews {
             cap.layer?.backgroundColor = dark
-                ? NSColor.white.withAlphaComponent(0.1).cgColor
+                ? NSColor.white.withAlphaComponent(0.09).cgColor
                 : NSColor.white.cgColor
             cap.layer?.borderColor = dark
                 ? NSColor.white.withAlphaComponent(0.14).cgColor
@@ -271,15 +370,18 @@ final class SDStepperRow: NSView {
         super.init(frame: .zero)
         valueLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
         valueLabel.textColor = SD.C.ink
-        let stepper = NSStepper()
-        stepper.minValue = Double(range.lowerBound)
-        stepper.maxValue = Double(range.upperBound)
-        stepper.increment = Double(step)
-        stepper.integerValue = value
-        stepper.target = self
-        stepper.action = #selector(stepperChanged(_:))
+        let arrows = SDStepperArrows()
+        arrows.onStep = { [weak self] delta in
+            guard let self else { return }
+            let next = max(self.range.lowerBound,
+                           min(self.range.upperBound, self.value + delta * self.step))
+            guard next != self.value else { return }
+            self.value = next
+            self.refreshLabel()
+            self.onChange?(next)
+        }
         refreshLabel()
-        let stack = NSStackView(views: [valueLabel, stepper])
+        let stack = NSStackView(views: [valueLabel, arrows])
         stack.orientation = .horizontal
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -297,11 +399,44 @@ final class SDStepperRow: NSView {
     private func refreshLabel() {
         valueLabel.stringValue = "\(value) \(suffix)"
     }
+}
 
-    @objc private func stepperChanged(_ sender: NSStepper) {
-        value = sender.integerValue
-        refreshLabel()
-        onChange?(value)
+/// Пара крошечных кнопок ▲▼ 18×11 из макета — вместо системного NSStepper.
+final class SDStepperArrows: NSView {
+    var onStep: ((Int) -> Void)?
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 18, height: 23) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.isDark
+        let fill = dark ? NSColor.white.withAlphaComponent(0.09)
+                        : NSColor.black.withAlphaComponent(0.07)
+        let up = NSRect(x: 0, y: bounds.midY + 0.5, width: 18, height: 11)
+        let down = NSRect(x: 0, y: bounds.midY - 11.5, width: 18, height: 11)
+        fill.setFill()
+        NSBezierPath(roundedRect: up, xRadius: 3, yRadius: 3).fill()
+        NSBezierPath(roundedRect: down, xRadius: 3, yRadius: 3).fill()
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 7),
+            .foregroundColor: SD.C.graphite,
+        ]
+        for (glyph, rect) in [("▲", up), ("▼", down)] {
+            let size = glyph.size(withAttributes: attrs)
+            glyph.draw(at: NSPoint(x: rect.midX - size.width / 2,
+                                   y: rect.midY - size.height / 2),
+                       withAttributes: attrs)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        onStep?(point.y >= bounds.midY ? 1 : -1)
+        needsDisplay = true
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }
 
@@ -313,15 +448,17 @@ final class SDFieldButton: NSView {
     init(popup: NSPopUpButton) {
         self.button = popup
         super.init(frame: .zero)
+        // Макет: font 12, padding 5px 10px, радиус 7,
+        // фон rgba(0,0,0,.05) / rgba(255,255,255,.07).
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = 7
         popup.isBordered = false
-        popup.font = .systemFont(ofSize: 12, weight: .medium)
+        popup.font = .systemFont(ofSize: 12)
         popup.translatesAutoresizingMaskIntoConstraints = false
         addSubview(popup)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 30),
-            popup.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            heightAnchor.constraint(equalToConstant: 27),
+            popup.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             popup.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             popup.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -332,13 +469,180 @@ final class SDFieldButton: NSView {
 
     private func restyle() {
         layer?.backgroundColor = effectiveAppearance.isDark
-            ? NSColor.white.withAlphaComponent(0.08).cgColor
+            ? NSColor.white.withAlphaComponent(0.07).cgColor
             : NSColor.black.withAlphaComponent(0.05).cgColor
     }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         restyle()
+    }
+}
+
+// MARK: - Свотчи цвета волны (кружки 22px, выбранный — с кольцом)
+
+final class SDColorSwatches: NSControl {
+    struct Swatch {
+        let value: String
+        let color: NSColor
+    }
+
+    private let swatches: [Swatch]
+    private(set) var selectedValue: String
+    var onSelect: ((String) -> Void)?
+
+    private let diameter: CGFloat = 22
+    private let gap: CGFloat = 6
+
+    init(swatches: [Swatch], selected: String) {
+        self.swatches = swatches
+        self.selectedValue = selected
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: CGFloat(swatches.count) * diameter
+                   + CGFloat(max(0, swatches.count - 1)) * gap,
+               height: diameter + 8)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // Макет: выбранный кружок — box-shadow 0 0 0 2px «бумага»,
+        // 0 0 0 3.5px цвет (кольцо с просветом).
+        for (index, swatch) in swatches.enumerated() {
+            let rect = circleRect(index)
+            if swatch.value == selectedValue {
+                swatch.color.setFill()
+                NSBezierPath(ovalIn: rect.insetBy(dx: -3.5, dy: -3.5)).fill()
+                SD.C.settingsPaper.setFill()
+                NSBezierPath(ovalIn: rect.insetBy(dx: -2, dy: -2)).fill()
+            }
+            swatch.color.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            // Светлые цвета (белый) без канта сливаются с бумагой.
+            SD.C.ink.withAlphaComponent(0.12).setStroke()
+            let ring = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
+            ring.lineWidth = 1
+            ring.stroke()
+        }
+    }
+
+    private func circleRect(_ index: Int) -> NSRect {
+        NSRect(x: CGFloat(index) * (diameter + gap),
+               y: (bounds.height - diameter) / 2,
+               width: diameter,
+               height: diameter)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        for (index, swatch) in swatches.enumerated()
+        where circleRect(index).insetBy(dx: -3, dy: -3).contains(point) {
+            selectedValue = swatch.value
+            needsDisplay = true
+            onSelect?(swatch.value)
+            return
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+// MARK: - Карточки размера капсулы (три превью в ряд)
+
+final class SDCapsuleSizeCard: NSControl {
+    private let title: String
+    private let kind: String
+    private(set) var isSelected: Bool
+    var onSelect: ((String) -> Void)?
+
+    init(title: String, kind: String, selected: Bool) {
+        self.title = title
+        self.kind = kind
+        self.isSelected = selected
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 78).isActive = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setSelected(_ selected: Bool) {
+        isSelected = selected
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.isDark
+        // Карточка: radius 9, фон #fff / rgba(255,255,255,.05),
+        // кольцо 1px rgba(0,0,0,.08)|rgba(255,255,255,.1), у выбранной 1.5px акцент.
+        let card = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1),
+                                xRadius: 9, yRadius: 9)
+        (dark ? NSColor.white.withAlphaComponent(0.05) : NSColor.white).setFill()
+        card.fill()
+        if isSelected {
+            SD.C.voice.setStroke()
+            card.lineWidth = 1.5
+        } else {
+            (dark ? NSColor.white.withAlphaComponent(0.1)
+                  : NSColor.black.withAlphaComponent(0.08)).setStroke()
+            card.lineWidth = 1
+        }
+        card.stroke()
+
+        // Мини-превью капсулы: чёрная пилюля с коралловым баром.
+        let capsuleHeight: CGFloat = kind == "compact" ? 14 : 18
+        let capsuleWidth: CGFloat = kind == "compact" ? 30 : (kind == "standard" ? 44 : 54)
+        let capsuleRect = NSRect(x: bounds.midX - capsuleWidth / 2,
+                                 y: bounds.midY + 2,
+                                 width: capsuleWidth,
+                                 height: kind == "large" ? 24 : capsuleHeight)
+        (dark ? NSColor(hex: 0x111111) : NSColor(hex: 0x1C1B19)).setFill()
+        NSBezierPath(roundedRect: capsuleRect,
+                     xRadius: kind == "large" ? 8 : capsuleRect.height / 2,
+                     yRadius: kind == "large" ? 8 : capsuleRect.height / 2).fill()
+        let barY = kind == "large" ? capsuleRect.midY + 3 : capsuleRect.midY
+        SD.C.voiceDark.setFill()
+        NSBezierPath(roundedRect: NSRect(x: capsuleRect.minX + 8, y: barY - 3,
+                                         width: kind == "compact" ? 14 : 18, height: 6),
+                     xRadius: 3, yRadius: 3).fill()
+        if kind != "compact" {
+            NSColor(hex: 0xA3A09A).setFill()
+            NSBezierPath(roundedRect: NSRect(x: capsuleRect.minX + 30, y: barY - 1.5,
+                                             width: 12, height: 3),
+                         xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        if kind == "large" {
+            NSColor.white.withAlphaComponent(0.3).setFill()
+            NSBezierPath(roundedRect: NSRect(x: capsuleRect.minX + 8,
+                                             y: capsuleRect.minY + 4,
+                                             width: 34, height: 3),
+                         xRadius: 1.5, yRadius: 1.5).fill()
+        }
+
+        // Подпись: 11px, выбранная — 600 ink, остальные graphite.
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: isSelected ? .semibold : .regular),
+            .foregroundColor: isSelected ? SD.C.ink : SD.C.graphite,
+        ]
+        let size = title.size(withAttributes: attrs)
+        title.draw(at: NSPoint(x: bounds.midX - size.width / 2,
+                               y: bounds.minY + 10),
+                   withAttributes: attrs)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onSelect?(kind)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 }
 
@@ -361,7 +665,7 @@ final class SDModelCard: NSView {
         titleLabel.textColor = SD.C.ink
         let detailLabel = NSTextField(labelWithString: detail)
         detailLabel.font = .systemFont(ofSize: 11)
-        detailLabel.textColor = SD.C.graphite
+        detailLabel.textColor = SD.C.subtle
 
         let textStack = NSStackView(views: [titleLabel, detailLabel])
         textStack.orientation = .vertical
@@ -372,7 +676,8 @@ final class SDModelCard: NSView {
         if let actionTitle, let action {
             let button = NSButton(title: actionTitle, target: target, action: action)
             button.isBordered = false
-            button.font = .systemFont(ofSize: 11, weight: .semibold)
+            // Макет: «✓ Активна» 11px 600 акцент, «Выбрать» 11px 400 graphite.
+            button.font = .systemFont(ofSize: 11, weight: active ? .semibold : .regular)
             button.contentTintColor = active ? SD.C.voice : SD.C.graphite
             button.identifier = NSUserInterfaceItemIdentifier(identifier)
             views.append(button)
@@ -383,11 +688,15 @@ final class SDModelCard: NSView {
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        let squeeze = heightAnchor.constraint(equalToConstant: 0)
+        squeeze.priority = .defaultLow
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 56),
+            squeeze,
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 55),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 12),
         ])
     }
 
@@ -397,7 +706,7 @@ final class SDModelCard: NSView {
 
     private func restyle() {
         if active {
-            layer?.borderColor = SD.C.voice.cgColor
+            layer?.borderColor = resolvedCGColor(SD.C.voice)
             layer?.backgroundColor = effectiveAppearance.isDark
                 ? NSColor.white.withAlphaComponent(0.05).cgColor
                 : NSColor.white.cgColor

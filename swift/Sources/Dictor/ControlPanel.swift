@@ -157,8 +157,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                               backing: .buffered,
                               defer: false)
         window.title = "Dictor"
-        window.contentMinSize = NSSize(width: 620, height: 560)
-        window.contentMaxSize = NSSize(width: 620, height: 560)
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = SD.C.settingsPaper
         window.isReleasedWhenClosed = false
         window.delegate = self
         self.window = window
@@ -189,9 +189,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         lastRenderFingerprint = fingerprint
         window.title = t("Настройки Dictor", "Dictor Settings")
         window.contentView = makeSettingsContentView()
+        if let contentView = window.contentView {
+            resizeSettingsWindowToFit(window, contentView: contentView)
+        }
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
             settingsWindow.contentView = makeSettingsContentView()
+            if let contentView = settingsWindow.contentView {
+                resizeSettingsWindowToFit(settingsWindow, contentView: contentView)
+            }
         }
     }
 
@@ -293,12 +299,16 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
-        root.spacing = 11
-        root.edgeInsets = NSEdgeInsets(top: 22, left: 24, bottom: 22, right: 24)
+        // Макет: контент padding 6px 24px 20px, вертикальные отступы
+        // живут внутри строк (13px), между строками — только hairline.
+        root.spacing = 0
+        root.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 20, right: 24)
         root.translatesAutoresizingMaskIntoConstraints = false
 
         root.addArrangedSubview(settingsTabBar())
-        root.addArrangedSubview(separator())
+        let tabsHairline = SDHairlineView()
+        root.addArrangedSubview(tabsHairline)
+        root.setCustomSpacing(6, after: tabsHairline)
         switch settingsTab {
         case "hotkeys":
             addHotkeyTabRows(to: root, draft: draft)
@@ -315,6 +325,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
 
         let background = PaperBackgroundView()
+        background.fill = SD.C.settingsPaper
         background.addSubview(root)
 
         NSLayoutConstraint.activate([
@@ -332,6 +343,33 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return background
     }
 
+    /// Высота окна под контент вкладки, как в макете (min-height 330 у
+    /// контентной зоны). Меньше не сжимаем, чтобы окно не «прыгало».
+    static func settingsContentHeight(for view: NSView, width: CGFloat = 620) -> CGFloat {
+        guard let root = view.subviews.first as? NSStackView else { return 404 }
+        // Фиксируем ширину, чтобы fittingSize мерил высоту при реальной
+        // ширине окна (многострочные подписи).
+        let widthPin = root.widthAnchor.constraint(equalToConstant: width)
+        widthPin.isActive = true
+        root.layoutSubtreeIfNeeded()
+        let fitting = root.fittingSize.height
+        widthPin.isActive = false
+        return max(404, ceil(fitting))
+    }
+
+    private func resizeSettingsWindowToFit(_ window: NSWindow, contentView: NSView) {
+        let height = Self.settingsContentHeight(for: contentView)
+        let size = NSSize(width: 620, height: height)
+        guard window.contentView?.frame.size.height != height else { return }
+        let topY = window.frame.maxY
+        window.contentMinSize = size
+        window.contentMaxSize = size
+        window.setContentSize(size)
+        var frame = window.frame
+        frame.origin.y = topY - frame.height
+        window.setFrame(frame, display: true)
+    }
+
     // MARK: - Вкладки настроек (дизайн 2c, адаптировано)
 
     private func settingsTabBar() -> NSView {
@@ -345,28 +383,27 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                     ("dict", t("Словарь", "Dictionary")),
                     ("look", t("Внешний вид", "Appearance")),
                     ("privacy", t("Приватность", "Privacy"))]
+        // Макет: таб padding 5px 12px, радиус 7, шрифт 12; активный —
+        // 600, ink, пилюля rgba(0,0,0,.08)/rgba(255,255,255,.1);
+        // неактивный — 400 graphite. Ряд: padding 10px 0.
         for (id, title) in tabs {
-            let button = NSButton(title: title, target: self,
-                                  action: #selector(settingsTabClicked(_:)))
+            let button = SDTabButton(title: title, target: self,
+                                     action: #selector(settingsTabClicked(_:)))
             button.isBordered = false
-            button.font = .systemFont(ofSize: 12, weight: settingsTab == id ? .semibold : .regular)
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 7
-            if settingsTab == id {
-                button.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
-                button.contentTintColor = .labelColor
-            } else {
-                button.contentTintColor = .secondaryLabelColor
-            }
+            button.isActiveTab = settingsTab == id
             button.identifier = NSUserInterfaceItemIdentifier(id)
             button.translatesAutoresizingMaskIntoConstraints = false
-            button.heightAnchor.constraint(equalToConstant: 26).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 27).isActive = true
+            let textWidth = ceil(title.size(withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
+            ]).width)
+            button.widthAnchor.constraint(equalToConstant: textWidth + 24).isActive = true
             bar.addArrangedSubview(button)
         }
         bar.translatesAutoresizingMaskIntoConstraints = false
         wrapper.addSubview(bar)
         NSLayoutConstraint.activate([
-            wrapper.heightAnchor.constraint(equalToConstant: 40),
+            wrapper.heightAnchor.constraint(equalToConstant: 47),
             bar.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
             bar.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor),
         ])
@@ -501,10 +538,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                         "Finishes dictation with the opposite action"),
             control: hotkeyControl(shortcut: draft.alternateCompletionHotkey, kind: .alternateCompletion)
         ))
-        root.addArrangedSubview(settingsActionsRow(draft: draft))
+        let actions = settingsActionsRow(draft: draft)
+        root.addArrangedSubview(actions)
+        root.setCustomSpacing(14, after: actions)
         let hint = panelLabel(t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет.",
                                 "Click “Change” and press the new combo. Esc cancels."),
-                              size: 11, color: .secondaryLabelColor)
+                              size: 11, color: SD.C.graphite)
         root.addArrangedSubview(hint)
     }
 
@@ -514,12 +553,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                               target: self,
                               action: #selector(recordDictationShortcutClicked(_:)))
         change.isBordered = false
-        change.font = .systemFont(ofSize: 11, weight: .medium)
+        change.font = .systemFont(ofSize: 11)
         change.contentTintColor = SD.C.graphite
         change.tag = kind.rawValue
         let stack = NSStackView(views: [caps, change])
         stack.orientation = .horizontal
-        stack.spacing = 10
+        stack.spacing = 11
         return stack
     }
 
@@ -547,9 +586,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             )
             root.addArrangedSubview(card)
         }
+        if let lastCard = root.arrangedSubviews.last {
+            root.setCustomSpacing(12, after: lastCard)
+        }
         let note = panelLabel(t("Смена модели перезапустит службу; новая модель докачается сама.",
                                 "Switching restarts the service; the model downloads itself."),
-                              size: 11, color: .secondaryLabelColor)
+                              size: 11, color: SD.C.graphite)
         root.addArrangedSubview(note)
     }
 
@@ -570,11 +612,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         addButton.contentTintColor = SD.C.voice
         let headerRow = NSStackView(views: [
             panelLabel(t("Автозамены после распознавания", "Corrections applied after transcription"),
-                       size: 12, color: .secondaryLabelColor),
+                       size: 12, color: SD.C.graphite),
             NSView(),
             addButton,
         ])
         headerRow.orientation = .horizontal
+        headerRow.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 10, right: 0)
         root.addArrangedSubview(headerRow)
 
         let corrections = settings.transcriptCorrections
@@ -582,28 +625,32 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             root.addArrangedSubview(panelLabel(
                 t("Пока пусто. Добавьте термины, которые модель слышит неправильно.",
                   "Empty so far. Add terms the model keeps mishearing."),
-                size: 12, color: .secondaryLabelColor))
+                size: 12, color: SD.C.graphite))
         }
+        // Макет: строка словаря — padding 10px 0, слово 13px ink слева,
+        // приглушённая аннотация 11px справа, hairline снизу.
         for (index, correction) in corrections.prefix(8).enumerated() {
-            let source = panelLabel("«\(correction.source)»", size: 12, color: .secondaryLabelColor)
-            let arrow = panelLabel("→", size: 12, color: .tertiaryLabelColor)
-            let target = panelLabel(correction.replacement, size: 12, weight: .medium)
+            let annotation = panelLabel("«\(correction.source)»", size: 11, color: SD.C.subtle)
             let remove = NSButton(title: "✕", target: self,
                                   action: #selector(removeCorrectionFromPanel(_:)))
             remove.isBordered = false
             remove.font = .systemFont(ofSize: 11)
             remove.contentTintColor = SD.C.graphite
             remove.tag = index
-            let row = NSStackView(views: [source, arrow, target, NSView(), remove])
-            row.orientation = .horizontal
-            row.spacing = 8
-            root.addArrangedSubview(row)
+            let right = NSStackView(views: [annotation, remove])
+            right.orientation = .horizontal
+            right.spacing = 10
+            root.addArrangedSubview(SDRowView(
+                title: correction.replacement,
+                control: right,
+                verticalPadding: 10
+            ))
         }
         if corrections.count > 8 {
             root.addArrangedSubview(panelLabel(
                 t("…и ещё \(corrections.count - 8). Полный список — в сервисном меню.",
                   "…and \(corrections.count - 8) more. Full list in the service menu."),
-                size: 11, color: .tertiaryLabelColor))
+                size: 11, color: SD.C.subtle))
         }
 
         let fillerToggle = SDToggle()
@@ -668,20 +715,24 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let sub = panelLabel(
             t("Запись, распознавание и история живут локально. Интернет нужен один раз — скачать модель.",
               "Recording, transcription and history live locally. The internet is needed once — to download the model."),
-            size: 12, color: .secondaryLabelColor)
+            size: 12, color: SD.C.graphite)
         sub.maximumNumberOfLines = 2
         sub.alignment = .center
+        sub.preferredMaxLayoutWidth = 380
         let showcase = NSStackView(views: [wave, headline, sub])
         showcase.orientation = .vertical
         showcase.alignment = .centerX
         showcase.spacing = 8
-        showcase.edgeInsets = NSEdgeInsets(top: 18, left: 0, bottom: 14, right: 0)
+        // Макет: витрина padding 22px 0 18px + hairline снизу.
+        showcase.edgeInsets = NSEdgeInsets(top: 22, left: 0, bottom: 18, right: 0)
         root.addArrangedSubview(showcase)
         showcase.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -48).isActive = true
+        root.addArrangedSubview(SDHairlineView())
 
         root.addArrangedSubview(SDRowView(
             title: t("Сетевые запросы", "Network requests"),
-            control: monoValueLabel(t("0 — обновления отключены", "0 — updates disabled"))
+            control: monoValueLabel(t("0 — обновления отключены", "0 — updates disabled")),
+            verticalPadding: 12
         ))
 
         let limitPills = SDPills(options: RecentTranscriptLimit.allCases.map {
@@ -694,14 +745,19 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.addArrangedSubview(SDRowView(
             title: t("Хранить историю", "Keep history"),
             subtitle: t("Локальный список последних диктовок", "A local list of recent dictations"),
-            control: limitPills
+            control: limitPills,
+            verticalPadding: 12
         ))
 
-        root.addArrangedSubview(SDRowView(
+        // Макет: значение здесь обычным шрифтом 12/500, не mono.
+        let audioRow = SDRowView(
             title: t("Аудио после распознавания", "Audio after transcription"),
-            control: monoValueLabel(t("Удаляется сразу", "Deleted immediately")),
-            hairline: false
-        ))
+            control: panelLabel(t("Удаляется сразу", "Deleted immediately"),
+                                size: 12, weight: .medium),
+            verticalPadding: 12
+        )
+        root.addArrangedSubview(audioRow)
+        root.setCustomSpacing(14, after: audioRow)
 
         let showModels = NSButton(title: t("Показать файлы моделей…", "Show model files…"),
                                   target: self, action: #selector(revealModelFilesFromPanel(_:)))
@@ -753,18 +809,43 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        let sizePills = SDPills(options: RecordingHUDSize.allCases.map {
-            .init(title: localizedHUDSizeName($0), value: $0.rawValue)
-        }, selected: settings.recordingHUDSize.rawValue)
-        sizePills.onSelect = { [weak self] raw in
-            guard let size = RecordingHUDSize(rawValue: raw) else { return }
-            self?.settings.recordingHUDSize = size
+        // Макет: секция «Размер капсулы» — заголовок 13px + три карточки
+        // с мини-превью (padding 14px 0 10px, hairline снизу).
+        let sizeTitle = panelLabel(t("Размер капсулы", "Capsule size"), size: 13)
+        sizeTitle.textColor = SD.C.ink
+        let sizeNames: [(RecordingHUDSize, String)] = [
+            (.compact, t("Компактный", "Compact")),
+            (.standard, t("Обычный", "Standard")),
+            (.large, t("Крупный", "Large")),
+        ]
+        var sizeCards: [SDCapsuleSizeCard] = []
+        for (size, name) in sizeNames {
+            let card = SDCapsuleSizeCard(title: name,
+                                         kind: size.rawValue,
+                                         selected: settings.recordingHUDSize == size)
+            card.onSelect = { [weak self] raw in
+                guard let self, let size = RecordingHUDSize(rawValue: raw) else { return }
+                self.settings.recordingHUDSize = size
+                for other in sizeCards {
+                    other.setSelected(false)
+                }
+                card.setSelected(true)
+            }
+            sizeCards.append(card)
         }
-        root.addArrangedSubview(SDRowView(
-            title: t("Размер капсулы", "Capsule size"),
-            subtitle: t("Плавающий индикатор записи у курсора", "The floating indicator near the caret"),
-            control: sizePills
-        ))
+        let cardsRow = NSStackView(views: sizeCards)
+        cardsRow.orientation = .horizontal
+        cardsRow.spacing = 10
+        cardsRow.distribution = .fillEqually
+        let sizeSection = NSStackView(views: [sizeTitle, cardsRow])
+        sizeSection.orientation = .vertical
+        sizeSection.alignment = .leading
+        sizeSection.spacing = 10
+        sizeSection.edgeInsets = NSEdgeInsets(top: 14, left: 0, bottom: 10, right: 0)
+        cardsRow.translatesAutoresizingMaskIntoConstraints = false
+        root.addArrangedSubview(sizeSection)
+        cardsRow.widthAnchor.constraint(equalTo: sizeSection.widthAnchor).isActive = true
+        root.addArrangedSubview(SDHairlineView())
 
         let backgroundPills = SDPills(options: RecordingHUDBackgroundStyle.allCases.map {
             .init(title: localizedBackgroundName($0), value: $0.rawValue)
@@ -778,17 +859,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             control: backgroundPills
         ))
 
-        let colorPills = SDPills(options: RecordingHUDAccentColor.allCases.prefix(5).map {
-            .init(title: localizedColorName($0), value: $0.rawValue)
-        }, selected: settings.recordingHUDRecordingColor.rawValue)
-        colorPills.onSelect = { [weak self] raw in
+        // Макет: кружки-свотчи 22px вместо пилюль с названиями.
+        let swatches = SDColorSwatches(
+            swatches: RecordingHUDAccentColor.allCases.map {
+                .init(value: $0.rawValue, color: $0.nsColor)
+            },
+            selected: settings.recordingHUDRecordingColor.rawValue
+        )
+        swatches.onSelect = { [weak self] raw in
             guard let color = RecordingHUDAccentColor(rawValue: raw) else { return }
             self?.settings.recordingHUDRecordingColor = color
         }
         root.addArrangedSubview(SDRowView(
             title: t("Цвет волны", "Wave color"),
             subtitle: t("Один цвет для записи и бренда", "One color for recording and brand"),
-            control: colorPills,
+            control: swatches,
             hairline: false
         ))
     }
@@ -1596,29 +1681,40 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             validation ?? (hasChanges
                 ? t("Есть несохранённые изменения", "You have unsaved changes")
                 : t("Все изменения сохранены", "All changes are saved")),
-            size: 11.5,
-            weight: .medium,
-            color: validation == nil ? .secondaryLabelColor : .systemRed
+            size: 11,
+            color: validation == nil ? SD.C.graphite : SD.C.voice
         )
         message.toolTip = validation
         row.addArrangedSubview(message)
         row.addArrangedSubview(NSView())
 
-        row.addArrangedSubview(panelButton(
-            t("Отменить", "Discard"),
-            action: #selector(discardSettingsClicked(_:)),
-            enabled: hasChanges && serviceOperation == nil,
-            toolTip: t("Отменить несохранённые изменения.", "Discard unsaved changes.")
-        ))
-        let save = panelButton(
-            t("Сохранить и перезапустить", "Save & Restart"),
-            action: #selector(saveSettingsClicked(_:)),
-            enabled: hasChanges && validation == nil && serviceOperation == nil,
-            toolTip: t("Сохранить настройки и перезапустить фоновую службу.",
-                       "Save settings and restart the background service.")
-        )
+        let discard = NSButton(title: t("Отменить", "Discard"),
+                               target: self,
+                               action: #selector(discardSettingsClicked(_:)))
+        discard.isBordered = false
+        discard.font = .systemFont(ofSize: 12, weight: .medium)
+        discard.contentTintColor = SD.C.graphite
+        discard.isEnabled = hasChanges && serviceOperation == nil
+        discard.alphaValue = discard.isEnabled ? 1 : 0.4
+        row.addArrangedSubview(discard)
+
+        let save = SDSolidButton(title: t("Сохранить и перезапустить", "Save & Restart"),
+                                 target: self,
+                                 action: #selector(saveSettingsClicked(_:)))
+        save.isBordered = false
+        save.isEnabled = hasChanges && validation == nil && serviceOperation == nil
+        save.toolTip = t("Сохранить настройки и перезапустить фоновую службу.",
+                         "Save settings and restart the background service.")
         save.keyEquivalent = "\r"
+        save.translatesAutoresizingMaskIntoConstraints = false
+        save.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        let saveWidth = ceil(save.title.size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
+        ]).width)
+        save.widthAnchor.constraint(equalToConstant: saveWidth + 28).isActive = true
+        save.restyle()
         row.addArrangedSubview(save)
+        row.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
         return row
     }
 
@@ -1980,17 +2076,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         settingsDraft = ControlPanelSettingsDraft(settings: settings)
 
         let settingsWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 590),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
-        settingsWindow.contentMinSize = NSSize(width: 680, height: 590)
-        settingsWindow.contentMaxSize = NSSize(width: 680, height: 590)
+        settingsWindow.titlebarAppearsTransparent = true
+        settingsWindow.backgroundColor = SD.C.settingsPaper
         settingsWindow.isReleasedWhenClosed = false
         settingsWindow.delegate = self
         settingsWindow.contentView = makeSettingsContentView()
+        if let contentView = settingsWindow.contentView {
+            resizeSettingsWindowToFit(settingsWindow, contentView: contentView)
+        }
         if let mainWindow = window, let visibleFrame = mainWindow.screen?.visibleFrame {
             let mainFrame = mainWindow.frame
             let preferredRight = mainFrame.maxX + 14
@@ -2234,7 +2333,10 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
                                          ("dark", NSAppearance.Name.darkAqua)] {
             window.appearance = NSAppearance(named: appearanceName)
             let view = panel.makeSettingsContentView()
-            view.frame = NSRect(origin: .zero, size: size)
+            let height = DictorControlPanelApp.settingsContentHeight(for: view)
+            window.setContentSize(NSSize(width: size.width, height: height))
+            view.frame = NSRect(origin: .zero,
+                                size: NSSize(width: size.width, height: height))
             window.contentView = view
             view.layoutSubtreeIfNeeded()
             window.layoutIfNeeded()
