@@ -122,6 +122,7 @@ final class DictorQuickPanel: NSPanel {
 
     private func rebuildContent() {
         let container = PaperBackgroundView()
+        container.fill = SD.C.popoverPaper
         container.cornerRadius = 12
         container.wantsLayer = true
         container.layer?.cornerRadius = 12
@@ -140,15 +141,25 @@ final class DictorQuickPanel: NSPanel {
         stack.addArrangedSubview(microphoneRow())
         stack.addArrangedSubview(hairline())
         stack.addArrangedSubview(recentHeader())
+        // Макет: блок записей с полем 4px 6px 6px, ряды со скруглением 8.
+        let recentBlock = NSStackView()
+        recentBlock.orientation = .vertical
+        recentBlock.alignment = .leading
+        recentBlock.spacing = 0
+        recentBlock.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 6, right: 6)
         for entry in state.recent.prefix(3) {
-            stack.addArrangedSubview(recentRow(entry))
+            let row = recentRow(entry)
+            recentBlock.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: recentBlock.widthAnchor,
+                                       constant: -12).isActive = true
         }
         if state.recent.isEmpty {
-            stack.addArrangedSubview(emptyRecentRow())
+            recentBlock.addArrangedSubview(emptyRecentRow())
         }
+        stack.addArrangedSubview(recentBlock)
         stack.addArrangedSubview(hairline())
         stack.addArrangedSubview(statsRow())
-        stack.addArrangedSubview(hairline())
+        stack.addArrangedSubview(hairline(inset: 0))
         stack.addArrangedSubview(footerRow())
 
         container.addSubview(stack)
@@ -169,17 +180,17 @@ final class DictorQuickPanel: NSPanel {
         setContentSize(NSSize(width: Self.panelWidth, height: height))
     }
 
-    private func hairline() -> NSView {
-        let line = NSBox()
-        line.boxType = .separator
+    private func hairline(inset: CGFloat = 16) -> NSView {
+        let line = SDHairlineView()
         line.translatesAutoresizingMaskIntoConstraints = false
         let wrapper = NSView()
         wrapper.addSubview(line)
         NSLayoutConstraint.activate([
             wrapper.heightAnchor.constraint(equalToConstant: 1),
-            line.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 16),
-            line.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -16),
+            line.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: inset),
+            line.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor, constant: -inset),
             line.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1),
         ])
         return wrapper
     }
@@ -198,26 +209,31 @@ final class DictorQuickPanel: NSPanel {
     // MARK: - Ряды
 
     private func headerRow() -> NSView {
+        // Макет: padding 16px 16px 14px, заголовок 13/600 ink + волна,
+        // подпись 11 graphite, коралловый тумблер 36×22.
         let row = NSView()
-        let title = label(state.statusTitle, size: 13, weight: .semibold)
+        let title = label(state.statusTitle, size: 13, weight: .semibold, color: SD.C.ink)
         let wave = QuickPanelWaveView()
         wave.isActive = state.enabled
         wave.isHot = state.isRecording
         waveView = wave
-        let subtitle = label(state.statusSubtitle, size: 11, color: .secondaryLabelColor)
-        let toggle = NSSwitch()
-        toggle.state = state.enabled ? .on : .off
-        toggle.target = self
-        toggle.action = #selector(toggleChanged(_:))
+        let subtitle = label(state.statusSubtitle, size: 11, color: SD.C.graphite)
+        let toggle = SDToggle()
+        toggle.isOn = state.enabled
+        toggle.onToggle = { [weak self] enabled in
+            self?.quickDelegate?.quickPanelDidToggleEnabled(enabled)
+        }
 
         for view in [title, wave, subtitle, toggle] {
             view.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 58),
+            row.heightAnchor.constraint(equalToConstant: 62),
+            toggle.widthAnchor.constraint(equalToConstant: 36),
+            toggle.heightAnchor.constraint(equalToConstant: 22),
             title.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
-            title.topAnchor.constraint(equalTo: row.topAnchor, constant: 14),
+            title.topAnchor.constraint(equalTo: row.topAnchor, constant: 16),
             wave.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 8),
             wave.centerYAnchor.constraint(equalTo: title.centerYAnchor),
             wave.widthAnchor.constraint(equalToConstant: 26),
@@ -232,11 +248,9 @@ final class DictorQuickPanel: NSPanel {
     }
 
     private func languageRow() -> NSView {
+        // Макет: подпись 12 graphite шириной 72, пилюли как в настройках.
         let row = NSView()
-        let caption = label(t("Язык", "Language"), size: 12, color: .secondaryLabelColor)
-        let pills = NSStackView()
-        pills.orientation = .horizontal
-        pills.spacing = 4
+        let caption = label(t("Язык", "Language"), size: 12, color: SD.C.graphite)
 
         var options: [(String, DictationLanguage)] = [
             ("RU", .russian),
@@ -246,11 +260,11 @@ final class DictorQuickPanel: NSPanel {
         if !options.contains(where: { $0.1 == state.language }) {
             options.insert((state.language.rawValue.uppercased(), state.language), at: 0)
         }
-        for (name, value) in options {
-            pills.addArrangedSubview(pillButton(name,
-                                                selected: state.language == value,
-                                                action: #selector(languagePillClicked(_:)),
-                                                represented: value.rawValue))
+        let pills = SDPills(options: options.map { .init(title: $0.0, value: $0.1.rawValue) },
+                            selected: state.language.rawValue)
+        pills.onSelect = { [weak self] raw in
+            guard let language = DictationLanguage(rawValue: raw) else { return }
+            self?.quickDelegate?.quickPanelDidSelectLanguage(language)
         }
 
         for view in [caption, pills] {
@@ -258,11 +272,11 @@ final class DictorQuickPanel: NSPanel {
             row.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 40),
+            row.heightAnchor.constraint(equalToConstant: 38),
             caption.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
             caption.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            caption.widthAnchor.constraint(equalToConstant: 78),
-            pills.leadingAnchor.constraint(equalTo: caption.trailingAnchor, constant: 6),
+            caption.widthAnchor.constraint(equalToConstant: 72),
+            pills.leadingAnchor.constraint(equalTo: caption.trailingAnchor, constant: 10),
             pills.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
         return row
@@ -270,7 +284,7 @@ final class DictorQuickPanel: NSPanel {
 
     private func microphoneRow() -> NSView {
         let row = NSView()
-        let caption = label(t("Микрофон", "Microphone"), size: 12, color: .secondaryLabelColor)
+        let caption = label(t("Микрофон", "Microphone"), size: 12, color: SD.C.graphite)
         let popup = NSPopUpButton()
         popup.isBordered = false
         popup.font = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -295,11 +309,11 @@ final class DictorQuickPanel: NSPanel {
             row.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 36),
+            row.heightAnchor.constraint(equalToConstant: 34),
             caption.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
             caption.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            caption.widthAnchor.constraint(equalToConstant: 78),
-            popup.leadingAnchor.constraint(equalTo: caption.trailingAnchor, constant: 2),
+            caption.widthAnchor.constraint(equalToConstant: 72),
+            popup.leadingAnchor.constraint(equalTo: caption.trailingAnchor, constant: 6),
             popup.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -12),
             popup.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
@@ -307,9 +321,18 @@ final class DictorQuickPanel: NSPanel {
     }
 
     private func recentHeader() -> NSView {
+        // Макет: капс 11/600 с трекингом .05em цвета subtle,
+        // справа «История» 11/500 акцентом.
         let row = NSView()
-        let caption = label(t("НЕДАВНЕЕ", "RECENT"), size: 11, weight: .semibold,
-                            color: .tertiaryLabelColor)
+        let caption = NSTextField(labelWithString: "")
+        caption.attributedStringValue = NSAttributedString(
+            string: t("НЕДАВНЕЕ", "RECENT"),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: SD.C.subtle,
+                .kern: 0.55,
+            ]
+        )
         let historyButton = NSButton(title: t("История", "History"),
                                      target: self,
                                      action: #selector(historyClicked))
@@ -332,24 +355,35 @@ final class DictorQuickPanel: NSPanel {
     }
 
     private func recentRow(_ entry: TranscriptHistoryEntry) -> NSView {
+        // Макет: ряд padding 7px 10px, радиус 8; текст 12 ink,
+        // мета 10.5 subtle «14:02 · 34 слова»; hover-действия
+        // «Скопировать» ink / «Вставить снова» акцент.
         let row = QuickPanelHoverRow()
-        let text = label(entry.text, size: 12)
+        row.wantsLayer = true
+        row.layer?.cornerRadius = 8
+        let text = label(entry.text, size: 12, color: SD.C.ink)
         let words = entry.text.split(whereSeparator: { $0.isWhitespace }).count
-        var metaText = dictatedWordsLabel(words, language: state.interfaceLanguage)
-        if let duration = entry.transcriptionDurationSeconds {
-            metaText += " · \(String(format: "%.1f", duration)) c"
+        var parts: [String] = []
+        if let createdAt = entry.createdAt {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: state.interfaceLanguage == .russian
+                                          ? "ru_RU" : "en_US")
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            parts.append(formatter.string(from: createdAt))
         }
-        let meta = label(metaText, size: 10.5, color: .tertiaryLabelColor)
+        parts.append(dictatedWordsLabel(words, language: state.interfaceLanguage))
+        let meta = label(parts.joined(separator: " · "), size: 10.5, color: SD.C.subtle)
 
         let copyButton = NSButton(title: t("Скопировать", "Copy"),
                                   target: self, action: #selector(copyRecentClicked(_:)))
-        let pasteButton = NSButton(title: t("Вставить", "Paste"),
+        let pasteButton = NSButton(title: t("Вставить снова", "Paste again"),
                                    target: self, action: #selector(pasteRecentClicked(_:)))
         for button in [copyButton, pasteButton] {
             button.isBordered = false
             button.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         }
-        copyButton.contentTintColor = .labelColor
+        copyButton.contentTintColor = SD.C.ink
         pasteButton.contentTintColor = SD.C.voice
         copyButton.cell?.representedObject = entry.text
         pasteButton.cell?.representedObject = entry.text
@@ -360,13 +394,13 @@ final class DictorQuickPanel: NSPanel {
             row.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 46),
-            text.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
-            text.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
-            text.topAnchor.constraint(equalTo: row.topAnchor, constant: 6),
-            meta.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+            row.heightAnchor.constraint(equalToConstant: 44),
+            text.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            text.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
+            text.topAnchor.constraint(equalTo: row.topAnchor, constant: 7),
+            meta.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
             meta.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 2),
-            pasteButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+            pasteButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
             pasteButton.centerYAnchor.constraint(equalTo: meta.centerYAnchor),
             copyButton.trailingAnchor.constraint(equalTo: pasteButton.leadingAnchor, constant: -10),
             copyButton.centerYAnchor.constraint(equalTo: meta.centerYAnchor),
@@ -430,33 +464,41 @@ final class DictorQuickPanel: NSPanel {
     }
 
     private func statCell(value: String, caption: String) -> NSView {
+        // Макет: значение mono 600 15 ink, подпись 10 subtle.
         let cell = NSStackView()
         cell.orientation = .vertical
         cell.alignment = .leading
         cell.spacing = 1
-        cell.addArrangedSubview(label(value, size: 14, weight: .semibold, mono: true))
-        cell.addArrangedSubview(label(caption, size: 10, color: .tertiaryLabelColor))
+        cell.addArrangedSubview(label(value, size: 15, weight: .semibold,
+                                      color: SD.C.ink, mono: true))
+        cell.addArrangedSubview(label(caption, size: 10, color: SD.C.subtle))
         return cell
     }
 
     private func footerRow() -> NSView {
-        let row = NSView()
+        // Макет: padding 9px 16px, лёгкая подложка (.02 чёрного / .03 белого),
+        // «Выйти» — 12/400 graphite.
+        let row = QuickPanelFooterView()
         let settingsButton = NSButton(title: t("Настройки…", "Settings…"),
                                       target: self, action: #selector(settingsClicked))
         let historyButton = NSButton(title: t("История", "History"),
                                      target: self, action: #selector(historyClicked))
         let quitButton = NSButton(title: t("Выйти", "Quit"),
                                   target: self, action: #selector(quitClicked))
-        for button in [settingsButton, historyButton, quitButton] {
+        for button in [settingsButton, historyButton] {
             button.isBordered = false
             button.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-            button.contentTintColor = .labelColor
+            button.contentTintColor = SD.C.ink
+        }
+        quitButton.isBordered = false
+        quitButton.font = NSFont.systemFont(ofSize: 12)
+        quitButton.contentTintColor = SD.C.graphite
+        for button in [settingsButton, historyButton, quitButton] {
             button.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(button)
         }
-        quitButton.contentTintColor = .secondaryLabelColor
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 38),
+            row.heightAnchor.constraint(equalToConstant: 34),
             settingsButton.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
             settingsButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             historyButton.leadingAnchor.constraint(equalTo: settingsButton.trailingAnchor, constant: 14),
@@ -467,37 +509,7 @@ final class DictorQuickPanel: NSPanel {
         return row
     }
 
-    private func pillButton(_ title: String, selected: Bool,
-                            action: Selector, represented: String) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.isBordered = false
-        button.font = NSFont.systemFont(ofSize: 12, weight: selected ? .semibold : .medium)
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 11
-        if selected {
-            button.layer?.backgroundColor = SD.C.ink.cgColor
-            button.contentTintColor = SD.C.paper
-        } else {
-            button.contentTintColor = .secondaryLabelColor
-        }
-        button.cell?.representedObject = represented
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        return button
-    }
-
     // MARK: - Действия
-
-    @objc private func toggleChanged(_ sender: NSSwitch) {
-        quickDelegate?.quickPanelDidToggleEnabled(sender.state == .on)
-    }
-
-    @objc private func languagePillClicked(_ sender: NSButton) {
-        guard let raw = sender.cell?.representedObject as? String,
-              let language = DictationLanguage(rawValue: raw) else { return }
-        quickDelegate?.quickPanelDidSelectLanguage(language)
-    }
 
     @objc private func microphoneChanged(_ sender: NSPopUpButton) {
         let uid = (sender.selectedItem?.representedObject as? String) ?? ""
@@ -615,16 +627,98 @@ final class QuickPanelStatBars: NSView {
         guard !values.isEmpty else { return }
         let barWidth: CGFloat = 3
         let gap: CGFloat = 2
-        SD.C.voice.withAlphaComponent(0.55).setFill()
+        SD.C.voice.withAlphaComponent(0.6).setFill()
         for (index, value) in values.enumerated() {
             let height = max(2, value * bounds.height)
+            // Бары растут от нижней кромки (align-items:end в макете).
             let rect = NSRect(x: CGFloat(index) * (barWidth + gap),
-                              y: bounds.height - height,
+                              y: 0,
                               width: barWidth,
                               height: height)
             NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5).fill()
         }
     }
+}
+
+// MARK: - Подложка футера поповера
+
+final class QuickPanelFooterView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        (effectiveAppearance.isDark
+            ? NSColor.white.withAlphaComponent(0.03)
+            : NSColor.black.withAlphaComponent(0.02)).setFill()
+        bounds.fill()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+// MARK: - Превью поповера (для визуальной сверки с макетом 1d/1e)
+
+@MainActor
+func exportQuickPanelPreviews(to directory: URL) throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    var exported = 0
+    for (suffix, appearanceName, language) in
+        [("light", NSAppearance.Name.aqua, InterfaceLanguage.russian),
+         ("dark", NSAppearance.Name.darkAqua, InterfaceLanguage.russian)] {
+        let now = Date()
+        let state = QuickPanelState(
+            statusTitle: language == .russian ? "Слушаю хоткей" : "Listening for hotkey",
+            statusSubtitle: language == .russian
+                ? "Всё распознаётся на этом Mac"
+                : "Everything is transcribed on this Mac",
+            enabled: true,
+            isRecording: false,
+            language: .russian,
+            microphoneName: "MacBook Pro (встроенный)",
+            devices: [],
+            recent: [
+                TranscriptHistoryEntry(
+                    text: "Привет! По итогам звонка присылаю короткое резюме и три следующих шага…",
+                    transcriptionDurationSeconds: 1.2,
+                    createdAt: now.addingTimeInterval(-120)),
+                TranscriptHistoryEntry(
+                    text: "Давай созвонимся в четверг в три, я закину приглашение",
+                    transcriptionDurationSeconds: 0.9,
+                    createdAt: now.addingTimeInterval(-9000)),
+                TranscriptHistoryEntry(
+                    text: "Заголовок: локальная диктовка без облака — обзор Dictor",
+                    transcriptionDurationSeconds: 0.8,
+                    createdAt: now.addingTimeInterval(-17000)),
+            ],
+            todayCharacters: 7192,
+            todayAudioSeconds: 810,
+            weekBars: [0.3, 0.55, 0.4, 0.8, 0.65, 1.0, 0.5],
+            interfaceLanguage: language
+        )
+        let panel = DictorQuickPanel(state: state)
+        panel.appearance = NSAppearance(named: appearanceName)
+        panel.apply(state: state)
+        guard let view = panel.contentView else {
+            throw SettingsPreviewExportError(message: "no popover content view")
+        }
+        view.layoutSubtreeIfNeeded()
+        panel.layoutIfNeeded()
+        panel.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SettingsPreviewExportError(message: "no bitmap rep for popover-\(suffix)")
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw SettingsPreviewExportError(message: "PNG encode failed for popover-\(suffix)")
+        }
+        try png.write(to: directory.appendingPathComponent("popover-\(suffix).png"),
+                      options: .atomic)
+        exported += 1
+    }
+    guard exported > 0 else {
+        throw SettingsPreviewExportError(message: "nothing exported")
+    }
+    print("POPOVER_PREVIEW exported \(exported) files to \(directory.path)")
 }
 
 // MARK: - Строка с hover-действиями

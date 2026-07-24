@@ -14,6 +14,12 @@ enum SD {
         static let paper = adaptive(light: 0xF5F4F1, dark: 0x1E1D1B)
         /// Фон окна настроек по макету 2c/4b: #F5F4F1 / #262523.
         static let settingsPaper = adaptive(light: 0xF5F4F1, dark: 0x262523)
+        /// Фон поповера по макету 1d/1e: rgba(248,247,244,.97) / rgba(38,37,35,.97).
+        static let popoverPaper = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor(hex: 0x262523, alpha: 0.97)
+                : NSColor(hex: 0xF8F7F4, alpha: 0.97)
+        }
         /// Приглушённые подписи под заголовком строки. В макете пара
         /// инвертирована относительно graphite: светлая #A3A09A, тёмная #6E6B66.
         static let subtle = adaptive(light: 0xA3A09A, dark: 0x6E6B66)
