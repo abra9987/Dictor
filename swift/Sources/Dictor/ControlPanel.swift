@@ -201,18 +201,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    private func resizeCompactPanel(_ window: NSWindow) {
-        let missingCount = Permission.allCases.filter { !Permissions.isGranted($0) }.count
-        let height = CGFloat(310 + max(0, missingCount - 1) * 28)
-        let oldTop = window.frame.maxY
-        let size = NSSize(width: 520, height: height)
-        window.contentMinSize = size
-        window.contentMaxSize = size
-        window.setContentSize(size)
-        var frame = window.frame
-        frame.origin.y = oldTop - frame.height
-        window.setFrame(frame, display: false)
-    }
 
     private func renderFingerprint() -> String {
         let state = AgentRuntimeStateStore.read()
@@ -263,36 +251,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    private func makeContentView() -> NSView {
-        let root = NSStackView()
-        root.orientation = .vertical
-        root.alignment = .leading
-        root.spacing = 10
-        root.edgeInsets = NSEdgeInsets(top: 18, left: 20, bottom: 16, right: 20)
-        root.translatesAutoresizingMaskIntoConstraints = false
-
-        root.addArrangedSubview(compactHeaderView())
-        root.addArrangedSubview(compactServiceCard())
-        root.addArrangedSubview(compactPermissionsCard())
-        root.addArrangedSubview(compactPrivacyFooter())
-
-        let background = PaperBackgroundView()
-        background.addSubview(root)
-
-        NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            root.topAnchor.constraint(equalTo: background.topAnchor),
-            root.bottomAnchor.constraint(equalTo: background.bottomAnchor),
-        ])
-
-        let innerWidthInset = -(root.edgeInsets.left + root.edgeInsets.right)
-        for view in root.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: root.widthAnchor,
-                                        constant: innerWidthInset).isActive = true
-        }
-        return background
-    }
 
     func makeSettingsContentView() -> NSView {
         let draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
@@ -879,179 +837,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
 
-    private func compactHeaderView() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 14
 
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 1
-        text.addArrangedSubview(panelLabel("Dictor", size: 20, weight: .semibold))
-        text.addArrangedSubview(panelLabel(
-            t("Локальная диктовка · работает в фоне", "Local dictation · runs in the background"),
-            size: 11.5,
-            color: .secondaryLabelColor
-        ))
 
-        let version = panelLabel("v\(currentBundleVersion())", size: 11, color: .tertiaryLabelColor)
-        version.setContentHuggingPriority(.required, for: .horizontal)
-        version.toolTip = t("Установленная версия Dictor", "Installed Dictor version")
-
-        let languageControl = NSSegmentedControl(labels: ["RU", "EN"],
-                                                 trackingMode: .selectOne,
-                                                 target: self,
-                                                 action: #selector(selectInterfaceLanguage(_:)))
-        languageControl.selectedSegment = language == .russian ? 0 : 1
-        languageControl.controlSize = .small
-        languageControl.toolTip = t("Язык панели и настроек", "Panel and settings language")
-        languageControl.setContentHuggingPriority(.required, for: .horizontal)
-
-        let settingsButton = compactIconButton(
-            symbol: "gearshape.fill",
-            accessibilityTitle: t("Открыть настройки", "Open Settings"),
-            toolTip: t("Открыть настройки диктовки и внешний вид индикатора",
-                       "Open dictation and indicator appearance settings"),
-            action: #selector(openSettingsClicked(_:))
-        )
-
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(version)
-        row.addArrangedSubview(languageControl)
-        row.addArrangedSubview(settingsButton)
-        return row
-    }
-
-    private func settingsHeaderView() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 2
-        text.addArrangedSubview(panelLabel(t("Настройки", "Settings"), size: 20, weight: .semibold))
-        text.addArrangedSubview(panelLabel(
-            t("Изменения применятся вместе после сохранения и перезапуска службы.",
-              "Changes are applied together after saving and restarting the service."),
-            size: 11.5,
-            color: .secondaryLabelColor
-        ))
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(panelLabel("v\(currentBundleVersion())", size: 11, color: .tertiaryLabelColor))
-        return row
-    }
-
-    private func compactServiceCard() -> NSView {
-        let running = DictorAgentService.isAgentRunning()
-        let state = AgentRuntimeStateStore.read()
-        let presentation = servicePresentation(running: running, state: state)
-        let card = compactCard()
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        let icon = panelSymbol(running ? "waveform.circle.fill" : "waveform.circle",
-                               color: presentation.color,
-                               description: t("Состояние службы", "Service status"),
-                               pointSize: 25)
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 2
-        text.addArrangedSubview(panelLabel(presentation.status, size: 14, weight: .semibold))
-        let primaryShortcut = "\(t("Диктовка", "Dictation")): \(localizedHotkeyName(settings.configuredHotkey, language: language))"
-        let historyShortcut = "\(t("История", "History")): \(localizedHotkeyName(settings.configuredHistoryHotkey, language: language))"
-        let primaryBehavior = localizedCompletionBehavior(settings.primaryCompletionBehavior)
-        let primaryAction = "\(t("Повторное нажатие", "Press again")): \(primaryBehavior)"
-        let alternateAction = localizedCompletionBehavior(settings.primaryCompletionBehavior.opposite)
-        let alternateShortcut = settings.alternateCompletionEnabled
-            ? "\(t("Альтернативно", "Alternative")): \(localizedHotkeyName(settings.configuredEnterHotkey, language: language)) — \(alternateAction)"
-            : t("Альтернативное завершение выключено", "Alternative finish is disabled")
-        let detail = panelLabel(
-            "\(presentation.detail)\n\(primaryShortcut) · \(historyShortcut)",
-            size: 11.5,
-            color: .secondaryLabelColor
-        )
-        detail.maximumNumberOfLines = 2
-        detail.lineBreakMode = .byTruncatingTail
-        detail.toolTip = "\(presentation.detail)\n\(primaryShortcut)\n\(primaryAction)\n\(alternateShortcut)\n\(historyShortcut)"
-        text.addArrangedSubview(detail)
-
-        // Progress bar for download
-        if running, state?.status == "starting", let fraction = state?.downloadProgressFraction {
-            let progressBar = NSProgressIndicator()
-            progressBar.style = .bar
-            progressBar.controlSize = .small
-            progressBar.isIndeterminate = false
-            progressBar.minValue = 0
-            progressBar.maxValue = 1
-            progressBar.doubleValue = fraction
-            progressBar.translatesAutoresizingMaskIntoConstraints = false
-            progressBar.heightAnchor.constraint(equalToConstant: 6).isActive = true
-            text.addArrangedSubview(progressBar)
-            progressBar.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
-        } else if running, state?.status == "starting" {
-            let progressBar = NSProgressIndicator()
-            progressBar.style = .bar
-            progressBar.controlSize = .small
-            progressBar.isIndeterminate = true
-            progressBar.startAnimation(nil)
-            progressBar.translatesAutoresizingMaskIntoConstraints = false
-            progressBar.heightAnchor.constraint(equalToConstant: 6).isActive = true
-            text.addArrangedSubview(progressBar)
-            progressBar.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
-        }
-
-        let actions = NSStackView()
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = 5
-        let enabled = serviceOperation == nil
-        if running {
-            actions.addArrangedSubview(compactIconButton(
-                symbol: "arrow.clockwise",
-                accessibilityTitle: t("Перезапустить службу", "Restart Service"),
-                toolTip: t("Перезапустить фоновую службу, не закрывая панель",
-                           "Restart the background service without closing the panel"),
-                action: #selector(restartAgentClicked(_:)),
-                enabled: enabled
-            ))
-            actions.addArrangedSubview(compactIconButton(
-                symbol: "stop.fill",
-                accessibilityTitle: t("Остановить службу", "Stop Service"),
-                toolTip: t("Остановить диктовку до следующего ручного запуска",
-                           "Stop dictation until it is started manually"),
-                action: #selector(stopAgentClicked(_:)),
-                enabled: enabled
-            ))
-        } else {
-            actions.addArrangedSubview(compactIconButton(
-                symbol: "play.fill",
-                accessibilityTitle: t("Запустить службу", "Start Service"),
-                toolTip: t("Запустить фоновую службу диктовки",
-                           "Start the background dictation service"),
-                action: #selector(startAgentClicked(_:)),
-                enabled: enabled
-            ))
-        }
-
-        row.addArrangedSubview(icon)
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(actions)
-        pin(row, inside: card, horizontal: 14, vertical: 11)
-        card.toolTip = presentation.detail
-        return card
-    }
 
     private func compactPermissionsCard() -> NSView {
         let missing = Permission.allCases.filter { !Permissions.isGranted($0) }
@@ -1125,43 +912,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return row
     }
 
-    private func compactUpdateCard() -> NSView {
-        let card = compactCard()
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 11
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        let presentation = compactUpdatePresentation()
-        row.addArrangedSubview(panelSymbol(presentation.symbol,
-                                           color: presentation.color,
-                                           description: t("Обновления", "Updates"),
-                                           pointSize: 17))
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 1
-        text.addArrangedSubview(panelLabel(presentation.title, size: 12.5, weight: .semibold))
-        let detail = panelLabel(presentation.detail, size: 11, color: .secondaryLabelColor)
-        detail.maximumNumberOfLines = 1
-        detail.lineBreakMode = .byTruncatingTail
-        detail.toolTip = presentation.detail
-        text.addArrangedSubview(detail)
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        if let buttonTitle = presentation.buttonTitle,
-           let action = presentation.action {
-            let button = panelButton(buttonTitle,
-                                     action: action,
-                                     enabled: presentation.buttonEnabled,
-                                     toolTip: presentation.buttonToolTip)
-            button.controlSize = .small
-            row.addArrangedSubview(button)
-        }
-        pin(row, inside: card, horizontal: 13, vertical: 9)
-        return card
-    }
 
     private func compactUpdatePresentation() -> (symbol: String,
                                                    color: NSColor,
@@ -1205,27 +955,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    private func compactPrivacyFooter() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 7
-        row.addArrangedSubview(panelSymbol("xmark.circle",
-                                           color: .tertiaryLabelColor,
-                                           description: nil,
-                                           pointSize: 10))
-        let label = panelLabel(
-            t("Панель можно закрыть — диктовка продолжит работать в фоне.",
-              "You can close this panel — dictation keeps running in the background."),
-            size: 10.5,
-            color: .tertiaryLabelColor
-        )
-        label.toolTip = t("Это только панель управления. Аудио и распознавание остаются на Mac.",
-                          "This is only the control panel. Audio and transcription stay on this Mac.")
-        row.addArrangedSubview(label)
-        row.addArrangedSubview(NSView())
-        return row
-    }
 
     private func operationTitle(_ operation: ControlPanelServiceOperation) -> String {
         switch operation {
