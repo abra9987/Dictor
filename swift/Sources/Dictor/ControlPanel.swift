@@ -89,6 +89,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var settingsDraft: ControlPanelSettingsDraft?
     var settingsTab = "general"
     private var hotkeyRecorder: HotkeyRecorderController?
+    private let onboarding = OnboardingController()
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
 
@@ -105,6 +106,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         if settings.agentEnabled && !DictorAgentService.isAgentRunning() {
             beginServiceOperation(.starting)
         }
+        onboarding.showIfNeeded(
+            force: CommandLine.arguments.contains("--onboarding"))
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
