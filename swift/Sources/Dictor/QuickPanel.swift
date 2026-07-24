@@ -164,6 +164,9 @@ final class DictorQuickPanel: NSPanel {
 
         container.addSubview(stack)
         NSLayoutConstraint.activate([
+            // Жёсткая ширина: без неё длинная запись в «Недавнем»
+            // продавливает fitting-ширину, и окно разъезжается на весь экран.
+            stack.widthAnchor.constraint(equalToConstant: Self.panelWidth),
             stack.topAnchor.constraint(equalTo: container.topAnchor),
             stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -203,6 +206,9 @@ final class DictorQuickPanel: NSPanel {
             : NSFont.systemFont(ofSize: size, weight: weight)
         field.textColor = color
         field.lineBreakMode = .byTruncatingTail
+        field.maximumNumberOfLines = 1
+        // Текст обязан обрезаться, а не распирать панель.
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return field
     }
 
