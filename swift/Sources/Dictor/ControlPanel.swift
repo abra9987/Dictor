@@ -499,7 +499,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: t("Альтернативное завершение", "Alternative finish"),
             subtitle: t("Завершает диктовку противоположным действием",
                         "Finishes dictation with the opposite action"),
-            control: hotkeyControl(shortcut: draft.enterHotkey, kind: .alternateCompletion)
+            control: hotkeyControl(shortcut: draft.alternateCompletionHotkey, kind: .alternateCompletion)
         ))
         root.addArrangedSubview(settingsActionsRow(draft: draft))
         let hint = panelLabel(t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет.",
@@ -529,7 +529,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             let isActive = profile == active
             let detail: String
             switch profile {
-            case .parakeetV3Multilingual:
+            case .multilingualV3:
                 detail = t("~460 МБ · русский, английский и ещё 17 языков · Neural Engine",
                            "~460 MB · Russian, English and 17 more · Neural Engine")
             default:
@@ -2208,26 +2208,52 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
 // MARK: - Превью настроек (для визуальной сверки с макетом)
 
+struct SettingsPreviewExportError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 @MainActor
 func exportSettingsPanelPreviews(to directory: URL) throws {
     let fileManager = FileManager.default
-    try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     let panel = DictorControlPanelApp()
     let size = NSSize(width: 620, height: 560)
+    // Вне NSWindow layer-backed view не проходит через window server и
+    // bitmapImageRepForCachingDisplay возвращает пустой битмап — поэтому
+    // рендерим в офскрин-окне.
+    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                          styleMask: [.borderless],
+                          backing: .buffered,
+                          defer: false)
+    window.colorSpace = .sRGB
+    var exported = 0
     for tab in ["general", "hotkeys", "model", "dict", "look", "privacy"] {
         panel.settingsTab = tab
         for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                          ("dark", NSAppearance.Name.darkAqua)] {
+            window.appearance = NSAppearance(named: appearanceName)
             let view = panel.makeSettingsContentView()
-            view.appearance = NSAppearance(named: appearanceName)
             view.frame = NSRect(origin: .zero, size: size)
+            window.contentView = view
             view.layoutSubtreeIfNeeded()
-            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                throw SettingsPreviewExportError(message: "no bitmap rep for \(tab)-\(suffix)")
+            }
             view.cacheDisplay(in: view.bounds, to: rep)
-            guard let png = rep.representation(using: .png, properties: [:]) else { continue }
-            try png.write(to: directory.appendingPathComponent("settings-\(tab)-\(suffix).png"),
-                          options: .atomic)
+            guard let png = rep.representation(using: .png, properties: [:]) else {
+                throw SettingsPreviewExportError(message: "PNG encode failed for \(tab)-\(suffix)")
+            }
+            let url = directory.appendingPathComponent("settings-\(tab)-\(suffix).png")
+            try png.write(to: url, options: .atomic)
+            exported += 1
         }
     }
-    print("SETTINGS_PREVIEW exported to \(directory.path)")
+    window.contentView = nil
+    guard exported > 0 else {
+        throw SettingsPreviewExportError(message: "nothing exported")
+    }
+    print("SETTINGS_PREVIEW exported \(exported) files to \(directory.path)")
 }
