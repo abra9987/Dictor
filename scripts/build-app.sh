@@ -4,7 +4,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_APP="${1:-$ROOT_DIR/dist/Dictor.app}"
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+# Подпись. Ad-hoc («-») меняет отпечаток при каждой сборке, а macOS
+# привязывает выданные разрешения именно к нему — после каждой установки
+# приходилось выдавать микрофон, универсальный доступ и мониторинг ввода
+# заново. Постоянный сертификат «Dictor Dev» из связки ключей эту связь
+# сохраняет; если его нет, откатываемся на ad-hoc.
+DEFAULT_SIGN_IDENTITY="Dictor Dev"
+if [[ -z "${SIGN_IDENTITY:-}" ]]; then
+    if security find-identity -v -p codesigning 2>/dev/null \
+            | grep -q "\"$DEFAULT_SIGN_IDENTITY\""; then
+        SIGN_IDENTITY="$DEFAULT_SIGN_IDENTITY"
+    else
+        SIGN_IDENTITY="-"
+    fi
+fi
 
 say() {
     printf 'Dictor: %s\n' "$*"
