@@ -25,6 +25,30 @@ enum SD {
         /// Приглушённые подписи под заголовком строки. В макете пара
         /// инвертирована относительно graphite: светлая #A3A09A, тёмная #6E6B66.
         static let subtle = adaptive(light: 0xA3A09A, dark: 0x6E6B66)
+        /// Основной текст строк сайдбара и подписей окна (макет 6a: #3D3B37).
+        static let inkSecondary = adaptive(light: 0x3D3B37, dark: 0xC9C6C0)
+        /// Сайдбар главного окна (макет 6a: #E7E4DE). Тёмная пара выведена:
+        /// в макете сайдбар темнее контента, тёмная тема тёрна 6 ещё не нарисована.
+        static let sidebarPaper = adaptive(light: 0xE7E4DE, dark: 0x201F1D)
+        /// Средняя колонка «Истории» (макет 6b: #F0EEE9), тёмная пара выведена.
+        static let listPaper = adaptive(light: 0xF0EEE9, dark: 0x232220)
+        /// Карточки на бумаге (макет 6a: #fff), тёмная пара выведена.
+        static let cardFill = adaptive(light: 0xFFFFFF, dark: 0x2E2C2A)
+        /// Рамка карточек: rgba(0,0,0,.07) / rgba(255,255,255,.08).
+        static let cardBorder = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.08)
+                : NSColor.black.withAlphaComponent(0.07)
+        }
+        /// Плашка подсказки (макет 6a: #EAE7E1), тёмная пара выведена.
+        static let hintPaper = adaptive(light: 0xEAE7E1, dark: 0x2B2A27)
+        /// Выделение выбранного пункта сайдбара: rgba(232,80,47,.13).
+        static let sidebarSelection = NSColor(name: nil) { appearance in
+            (appearance.isDark ? NSColor(hex: 0xFF6B47) : NSColor(hex: 0xE8502F))
+                .withAlphaComponent(appearance.isDark ? 0.18 : 0.13)
+        }
+        /// «Готово к диктовке» и рост показателей (макет 6a: #3FA96A).
+        static let positive = adaptive(light: 0x3FA96A, dark: 0x54C083)
         /// Выбранная пилюля: «чернильная» в светлой теме, «бумажная» в тёмной.
         static let pillSelectedFill = adaptive(light: 0x1C1B19, dark: 0xF2F1EE)
         static let pillSelectedText = adaptive(light: 0xF5F4F1, dark: 0x1C1B19)
@@ -215,6 +239,33 @@ func dictatedWordsLabel(_ count: Int, language: InterfaceLanguage) -> String {
         noun = "слов"
     }
     return "\(count) \(noun)"
+}
+
+/// Русская форма «N минут» для сводки «Сегодня».
+func dictationMinutesLabel(_ count: Int, language: InterfaceLanguage) -> String {
+    guard language == .russian else {
+        return count == 1 ? "1 minute" : "\(count) minutes"
+    }
+    let mod100 = count % 100
+    let mod10 = count % 10
+    let noun: String
+    if (11...14).contains(mod100) {
+        noun = "минут"
+    } else if mod10 == 1 {
+        noun = "минута"
+    } else if (2...4).contains(mod10) {
+        noun = "минуты"
+    } else {
+        noun = "минут"
+    }
+    return "\(count) \(noun)"
+}
+
+/// Хоткей в середине предложения: без завершающей точки, иначе
+/// получается «⌘ прав..».
+func inlineShortcutText(_ caps: [String]) -> String {
+    let joined = caps.joined(separator: " + ")
+    return joined.hasSuffix(".") ? String(joined.dropLast()) : joined
 }
 
 // MARK: - Поверхность «бумага»

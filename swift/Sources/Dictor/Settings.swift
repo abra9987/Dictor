@@ -253,6 +253,16 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "onboarding_completed_v1") }
     }
 
+    /// Закрытые подсказки экрана «Сегодня». Правило макета 6e: закрыли —
+    /// больше не возвращается.
+    var dismissedHints: [String] {
+        get { defaults.stringArray(forKey: "dismissed_hints_v1") ?? [] }
+        set {
+            let cleaned = Array(Set(newValue)).sorted().prefix(64)
+            defaults.set(Array(cleaned), forKey: "dismissed_hints_v1")
+        }
+    }
+
     var pasteSuffix: PasteSuffix {
         get {
             if let v = defaults.string(forKey: Self.keyPasteSuffix), let s = PasteSuffix(rawValue: v) {
