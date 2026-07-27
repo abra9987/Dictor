@@ -1951,9 +1951,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         closeStatisticsOverlay()
     }
 
-    private func openControlPanelFromAgent() {
+    private func openControlPanelFromAgent(section: String? = nil) {
         if DictorControlPanelRegistry.activateExistingPanelIfPresent() {
             log("control panel activated from agent")
+            if let section {
+                // Окно уже открыто — просим его переключить раздел.
+                DistributedNotificationCenter.default().postNotificationName(
+                    CONTROL_PANEL_SECTION_NOTIFICATION,
+                    object: section,
+                    userInfo: nil,
+                    deliverImmediately: true)
+            }
             return
         }
         guard let executablePath = Bundle.main.executablePath else {
@@ -1962,7 +1970,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = []
+        process.arguments = section.map { [CONTROL_PANEL_SECTION_ARGUMENT, $0] } ?? []
         process.environment = systemToolProcessEnvironment()
         do {
             try process.run()
@@ -8173,11 +8181,11 @@ extension DictorApp: QuickPanelDelegate {
     }
 
     func quickPanelOpenSettings() {
-        openControlPanelFromAgent()
+        openControlPanelFromAgent(section: "settings")
     }
 
     func quickPanelOpenHistory() {
-        showHistoryOverlay()
+        openControlPanelFromAgent(section: "history")
     }
 
     func quickPanelQuit() {

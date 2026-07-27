@@ -111,6 +111,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
         DictorControlPanelRegistry.claimCurrentPanel()
+        // Раздел, запрошенный поповером (макет 6a: «История» и «Настройки»
+        // ведут в окно, а не открывают отдельные окна).
+        if let index = CommandLine.arguments.firstIndex(of: CONTROL_PANEL_SECTION_ARGUMENT),
+           CommandLine.arguments.indices.contains(index + 1),
+           let requested = MainWindowSection(rawValue: CommandLine.arguments[index + 1]) {
+            mainSection = requested
+            if requested == .settings {
+                settingsDraft = ControlPanelSettingsDraft(settings: settings)
+            }
+        }
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(openSectionRequested(_:)),
+            name: CONTROL_PANEL_SECTION_NOTIFICATION,
+            object: nil)
         showWindow()
         startRefreshTimer()
         checkForUpdates()
@@ -970,6 +985,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         ])
         hairline.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         return container
+    }
+
+    /// Поповер попросил открыть раздел в уже запущенном окне.
+    @objc private func openSectionRequested(_ notification: Notification) {
+        guard let raw = notification.object as? String,
+              let section = MainWindowSection(rawValue: raw) else { return }
+        if section == .settings {
+            settingsDraft = ControlPanelSettingsDraft(settings: settings)
+        }
+        mainSection = section
+        hotkeyNotice = nil
+        refresh(force: true)
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func sidebarItemClicked(_ sender: SDSidebarItemView) {
