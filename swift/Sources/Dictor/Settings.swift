@@ -253,6 +253,22 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "onboarding_completed_v1") }
     }
 
+    /// Закреплённые диктовки (макет 6b): хранятся текстом, чтобы пережить
+    /// чистку архива по лимиту.
+    var pinnedTranscripts: [String] {
+        get { defaults.stringArray(forKey: "pinned_transcripts_v1") ?? [] }
+        set {
+            let cleaned = newValue
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            var unique: [String] = []
+            for text in cleaned where !unique.contains(text) {
+                unique.append(text)
+            }
+            defaults.set(Array(unique.prefix(200)), forKey: "pinned_transcripts_v1")
+        }
+    }
+
     /// Закрытые подсказки экрана «Сегодня». Правило макета 6e: закрыли —
     /// больше не возвращается.
     var dismissedHints: [String] {

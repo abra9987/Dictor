@@ -656,6 +656,241 @@ final class SDRecentEntryRowView: NSControl {
     }
 }
 
+// MARK: - Кнопка второго плана
+
+/// Кнопка с контуром в шапке детального просмотра (макет 6b):
+/// высота 30, радиус 8, рамка rgba(0,0,0,.13).
+final class SDSecondaryButton: NSControl {
+    private let background = NSView()
+    private var isHovered = false {
+        didSet { restyle() }
+    }
+
+    init(title: String, target: AnyObject?, action: Selector) {
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 8
+        background.layer?.borderWidth = 1
+        background.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(background)
+
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12.5, weight: .medium)
+        label.textColor = SD.C.ink
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 30),
+            background.leadingAnchor.constraint(equalTo: leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: trailingAnchor),
+            background.topAnchor.constraint(equalTo: topAnchor),
+            background.bottomAnchor.constraint(equalTo: bottomAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -13),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        restyle()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    private func restyle() {
+        background.layer?.borderColor = resolvedCGColor(
+            NSColor(name: nil) { appearance in
+                appearance.isDark
+                    ? NSColor.white.withAlphaComponent(0.18)
+                    : NSColor.black.withAlphaComponent(0.13)
+            })
+        background.layer?.backgroundColor = resolvedCGColor(
+            isHovered
+                ? NSColor(name: nil) { appearance in
+                    appearance.isDark
+                        ? NSColor.white.withAlphaComponent(0.06)
+                        : NSColor.black.withAlphaComponent(0.04)
+                }
+                : .clear)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let action, let target else { return }
+        NSApp.sendAction(action, to: target, from: self)
+    }
+}
+
+// MARK: - Строка результата поиска (макет 6b)
+
+/// Карточка в средней колонке «Истории»: значок, мета, две строки текста
+/// с подсветкой совпадения. Выбранная — белая, с коралловым кольцом.
+final class SDHistoryResultRow: NSControl {
+    let entryIndex: Int
+    private let isSelected: Bool
+    private var isHovered = false {
+        didSet { restyle() }
+    }
+
+    init(entryIndex: Int,
+         meta: String,
+         time: String,
+         text: String,
+         highlight: String,
+         isPinned: Bool,
+         isSelected: Bool,
+         target: AnyObject?,
+         action: Selector) {
+        self.entryIndex = entryIndex
+        self.isSelected = isSelected
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        wantsLayer = true
+        layer?.cornerRadius = 9
+
+        let badge: NSView
+        if isPinned {
+            let pin = NSTextField(labelWithString: "⚑")
+            pin.font = .systemFont(ofSize: 11)
+            pin.textColor = SD.C.voice
+            pin.alignment = .center
+            badge = pin
+        } else {
+            badge = SDMiniWaveView(values: [0.35, 0.8, 0.5],
+                                   color: SD.C.subtle,
+                                   barWidth: 1.5,
+                                   gap: 1.5)
+        }
+        badge.translatesAutoresizingMaskIntoConstraints = false
+
+        let metaLabel = NSTextField(labelWithString: meta)
+        metaLabel.font = .systemFont(ofSize: 11)
+        metaLabel.textColor = SD.C.subtle
+        metaLabel.lineBreakMode = .byTruncatingTail
+
+        let timeLabel = NSTextField(labelWithString: time)
+        timeLabel.font = .systemFont(ofSize: 11)
+        timeLabel.textColor = SD.C.subtle
+        timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let head = NSStackView(views: [badge, metaLabel, NSView(), timeLabel])
+        head.orientation = .horizontal
+        head.alignment = .centerY
+        head.spacing = 8
+        head.translatesAutoresizingMaskIntoConstraints = false
+
+        let body = NSTextField(labelWithString: "")
+        body.attributedStringValue = SDHistoryResultRow.highlighted(
+            text: text,
+            query: highlight,
+            color: isSelected ? SD.C.ink : SD.C.inkSecondary)
+        body.lineBreakMode = .byTruncatingTail
+        body.maximumNumberOfLines = 2
+        body.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(head)
+        addSubview(body)
+        NSLayoutConstraint.activate([
+            badge.widthAnchor.constraint(equalToConstant: 15),
+            badge.heightAnchor.constraint(equalToConstant: 12),
+            head.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            head.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            head.topAnchor.constraint(equalTo: topAnchor, constant: 11),
+            body.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            body.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            body.topAnchor.constraint(equalTo: head.bottomAnchor, constant: 6),
+            body.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -11),
+        ])
+        restyle()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// Совпадение подсвечивается плашкой rgba(232,80,47,.18), как в макете.
+    private static func highlighted(text: String,
+                                    query: String,
+                                    color: NSColor) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12.5),
+                .foregroundColor: color,
+            ])
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return attributed }
+        var searchRange = NSRange(location: 0, length: (text as NSString).length)
+        while searchRange.length > 0 {
+            let found = (text as NSString).range(of: trimmed,
+                                                 options: [.caseInsensitive],
+                                                 range: searchRange)
+            guard found.location != NSNotFound else { break }
+            attributed.addAttribute(.backgroundColor,
+                                    value: SD.C.voice.withAlphaComponent(0.18),
+                                    range: found)
+            let next = found.location + found.length
+            searchRange = NSRange(location: next,
+                                  length: max(0, (text as NSString).length - next))
+        }
+        return attributed
+    }
+
+    private func restyle() {
+        if isSelected {
+            layer?.backgroundColor = resolvedCGColor(SD.C.cardFill)
+            layer?.borderWidth = 1
+            layer?.borderColor = resolvedCGColor(SD.C.voice.withAlphaComponent(0.28))
+        } else {
+            layer?.borderWidth = 0
+            layer?.backgroundColor = resolvedCGColor(
+                isHovered
+                    ? NSColor(name: nil) { appearance in
+                        appearance.isDark
+                            ? NSColor.white.withAlphaComponent(0.05)
+                            : NSColor.black.withAlphaComponent(0.04)
+                    }
+                    : .clear)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let action, let target else { return }
+        NSApp.sendAction(action, to: target, from: self)
+    }
+}
+
 // MARK: - Плашка подсказки
 
 /// Одна подсказка внизу «Сегодня». Правило из макета 6e: одна на экране,
