@@ -95,6 +95,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     var mainSection: MainWindowSection = .today
     /// Выбранная запись в «Истории» и фильтр «Закреплённые» (макет 6b).
     private var historySelectionKey: String?
+    private var pendingSettingsApply: DispatchWorkItem?
     private var historyShowsPinnedOnly = false
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
@@ -524,12 +525,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                         "Finishes dictation with the opposite action"),
             control: hotkeyControl(shortcut: draft.alternateCompletionHotkey, kind: .alternateCompletion)
         ))
-        let actions = settingsActionsRow(draft: draft)
-        root.addArrangedSubview(actions)
-        root.setCustomSpacing(14, after: actions)
-        let hint = panelLabel(t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет.",
-                                "Click “Change” and press the new combo. Esc cancels."),
-                              size: 11, color: SD.C.graphite)
+        // Кнопки «Сохранить» в макете нет: записанное сочетание применяется
+        // само, служба перезапускается следом.
+        let hint = panelLabel(
+            t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет. Новое сочетание применяется сразу: служба перезапустится за пару секунд.",
+              "Click “Change” and press the new combo. Esc cancels. It applies immediately — the service restarts in a couple of seconds."),
+            size: 11, color: SD.C.graphite)
+        hint.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
+            - MAIN_WINDOW_SIDEBAR_WIDTH - 100
+        root.setCustomSpacing(14, after: root.arrangedSubviews.last ?? hint)
         root.addArrangedSubview(hint)
     }
 
@@ -2372,96 +2376,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return row
     }
 
-    private func primaryCompletionBehaviorRow(_ draft: ControlPanelSettingsDraft) -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 14
-
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 3
-        text.addArrangedSubview(panelLabel(t("Повторное нажатие", "Press again"),
-                                           size: 13,
-                                           weight: .semibold))
-        text.addArrangedSubview(panelLabel(
-            t("Что сделать после вставки распознанного текста.",
-              "What to do after inserting the transcribed text."),
-            size: 12,
-            color: .secondaryLabelColor
-        ))
-
-        let control = NSSegmentedControl(
-            labels: [t("Вставить", "Insert"), t("Вставить + Enter", "Insert + Enter")],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(selectPrimaryCompletionBehavior(_:))
-        )
-        control.selectedSegment = draft.primaryCompletionBehavior == .insert ? 0 : 1
-        control.isEnabled = serviceOperation == nil
-        control.toolTip = t("Выберите действие при повторном нажатии основного хоткея.",
-                            "Choose what the main shortcut does when pressed again.")
-        control.setContentHuggingPriority(.required, for: .horizontal)
-
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(control)
-        return row
-    }
-
-    private func alternateCompletionRow(_ draft: ControlPanelSettingsDraft) -> NSView {
-        let behavior = draft.primaryCompletionBehavior.opposite
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 10
-
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 3
-        text.addArrangedSubview(panelLabel(
-            behavior == .insert
-                ? t("Завершить без Enter", "Finish without Enter")
-                : t("Завершить + Enter", "Finish + Enter"),
-            size: 13,
-            weight: .semibold
-        ))
-        text.addArrangedSubview(panelLabel(
-            t("Дополнительный хоткей работает только во время записи.",
-              "The alternative shortcut only works while recording."),
-            size: 12,
-            color: .secondaryLabelColor
-        ))
-
-        let toggle = NSSwitch()
-        toggle.target = self
-        toggle.action = #selector(toggleAlternateCompletion(_:))
-        toggle.state = draft.alternateCompletionEnabled ? .on : .off
-        toggle.isEnabled = serviceOperation == nil
-        toggle.toolTip = t("Включить дополнительный способ завершения записи.",
-                           "Enable the alternative way to finish recording.")
-        toggle.setContentHuggingPriority(.required, for: .horizontal)
-
-        let button = panelButton(
-            localizedHotkeyName(draft.alternateCompletionHotkey, language: language),
-            action: #selector(recordDictationShortcutClicked(_:)),
-            enabled: draft.alternateCompletionEnabled && serviceOperation == nil,
-            toolTip: t("Изменить дополнительный хоткей завершения.",
-                       "Change the alternative finish shortcut.")
-        )
-        button.tag = ControlPanelShortcutKind.alternateCompletion.rawValue
-        button.controlSize = .regular
-        button.widthAnchor.constraint(equalToConstant: 200).isActive = true
-
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(toggle)
-        row.addArrangedSubview(button)
-        return row
-    }
-
     private static let enterDelayOptions: [(title: String, value: String)] = [
         ("0 ms", "0"),
         ("50 ms", "50"),
@@ -2470,19 +2384,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         ("200 ms", "200"),
         ("300 ms", "300"),
     ]
-
-    private func enterDelayRow(_ draft: ControlPanelSettingsDraft) -> NSView {
-        popupRow(
-            title: t("Задержка Enter", "Enter delay"),
-            detail: t("Пауза между вставкой текста и нажатием Enter.",
-                      "Pause between inserting text and pressing Enter."),
-            selectedValue: String(draft.enterDelayMilliseconds),
-            options: Self.enterDelayOptions,
-            action: #selector(selectEnterDelay(_:)),
-            toolTip: t("Некоторым приложениям (Electron, VM) нужна пауза после вставки. Уменьшите для быстрых приложений.",
-                       "Some apps (Electron, VMs) need a pause after paste. Lower for fast native apps.")
-        )
-    }
 
     private func popupRow(title: String,
                           detail: String,
@@ -2517,56 +2418,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         row.addArrangedSubview(text)
         row.addArrangedSubview(NSView())
         row.addArrangedSubview(popup)
-        return row
-    }
-
-    private func settingsActionsRow(draft: ControlPanelSettingsDraft) -> NSView {
-        let persisted = ControlPanelSettingsDraft(settings: settings)
-        let hasChanges = draft != persisted
-        let validation = settingsValidationMessage(draft)
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 10
-
-        let message = panelLabel(
-            validation ?? (hasChanges
-                ? t("Есть несохранённые изменения", "You have unsaved changes")
-                : t("Все изменения сохранены", "All changes are saved")),
-            size: 11,
-            color: validation == nil ? SD.C.graphite : SD.C.voice
-        )
-        message.toolTip = validation
-        row.addArrangedSubview(message)
-        row.addArrangedSubview(NSView())
-
-        let discard = NSButton(title: t("Отменить", "Discard"),
-                               target: self,
-                               action: #selector(discardSettingsClicked(_:)))
-        discard.isBordered = false
-        discard.font = .systemFont(ofSize: 12, weight: .medium)
-        discard.contentTintColor = SD.C.graphite
-        discard.isEnabled = hasChanges && serviceOperation == nil
-        discard.alphaValue = discard.isEnabled ? 1 : 0.4
-        row.addArrangedSubview(discard)
-
-        let save = SDSolidButton(title: t("Сохранить и перезапустить", "Save & Restart"),
-                                 target: self,
-                                 action: #selector(saveSettingsClicked(_:)))
-        save.isBordered = false
-        save.isEnabled = hasChanges && validation == nil && serviceOperation == nil
-        save.toolTip = t("Сохранить настройки и перезапустить фоновую службу.",
-                         "Save settings and restart the background service.")
-        save.keyEquivalent = "\r"
-        save.translatesAutoresizingMaskIntoConstraints = false
-        save.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        let saveWidth = ceil(save.title.size(withAttributes: [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
-        ]).width)
-        save.widthAnchor.constraint(equalToConstant: saveWidth + 28).isActive = true
-        save.restyle()
-        row.addArrangedSubview(save)
-        row.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
         return row
     }
 
@@ -2976,6 +2827,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             }
             self.settingsDraft = draft
             self.refreshSettingsWindow()
+            // Записанное сочетание применяется сразу: агент подхватывает
+            // хоткей только при старте, поэтому служба перезапускается сама.
+            self.scheduleSettingsApply(after: 0.15)
         }
         hotkeyRecorder = recorder
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self, weak recorder] in
@@ -2989,20 +2843,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         _ = settings.refreshFromDisk()
         lastRenderFingerprint = ""
         refresh(force: true)
-    }
-
-    @objc private func selectPrimaryCompletionBehavior(_ sender: NSSegmentedControl) {
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.primaryCompletionBehavior = sender.selectedSegment == 1 ? .insertAndEnter : .insert
-        settingsDraft = draft
-        refreshSettingsWindow()
-    }
-
-    @objc private func toggleAlternateCompletion(_ sender: NSSwitch) {
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.alternateCompletionEnabled = sender.state == .on
-        settingsDraft = draft
-        refreshSettingsWindow()
     }
 
     @objc private func selectRecordingHUDRecordingColor(_ sender: NSPopUpButton) {
@@ -3032,15 +2872,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refreshSettingsWindow()
     }
 
-    @objc private func selectEnterDelay(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let ms = Int(raw) else { return }
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.enterDelayMilliseconds = ms
-        settingsDraft = draft
-        refreshSettingsWindow()
-    }
-
     @objc private func selectRecordingHUDSize(_ sender: NSPopUpButton) {
         guard let raw = sender.selectedItem?.representedObject as? String,
               let size = RecordingHUDSize(rawValue: raw) else { return }
@@ -3050,14 +2881,28 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refreshSettingsWindow()
     }
 
-    @objc private func discardSettingsClicked(_ sender: NSButton) {
-        settingsDraft = ControlPanelSettingsDraft(settings: settings)
-        refreshSettingsWindow()
+    /// Настройки применяются сами — кнопки «Сохранить» в макете нет.
+    /// Хоткей агент читает только при старте, поэтому применение тянет за
+    /// собой перезапуск службы; задержка нужна, чтобы щелчки по степперу
+    /// не перезапускали её на каждый клик.
+    private func scheduleSettingsApply(after delay: TimeInterval) {
+        pendingSettingsApply?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.applySettingsDraft()
+        }
+        pendingSettingsApply = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    @objc private func saveSettingsClicked(_ sender: NSButton) {
+    private func applySettingsDraft() {
+        pendingSettingsApply = nil
         guard let draft = settingsDraft,
-              settingsValidationMessage(draft) == nil else { return }
+              settingsValidationMessage(draft) == nil,
+              draft != ControlPanelSettingsDraft(settings: settings) else { return }
+        applySettings(draft)
+    }
+
+    private func applySettings(_ draft: ControlPanelSettingsDraft) {
         settings.setConfiguredHotkey(draft.dictationHotkey)
         settings.setConfiguredEnterHotkey(draft.alternateCompletionHotkey)
         settings.setConfiguredHistoryHotkey(draft.historyHotkey)
