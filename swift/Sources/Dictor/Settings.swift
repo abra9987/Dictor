@@ -33,6 +33,7 @@ final class Settings: @unchecked Sendable {
     private static let keyTriggerMode = "trigger_mode"
     private static let keyPasteSuffix = "paste_suffix"
     private static let keyRecentTranscripts = "recent_transcripts"
+    private static let keyPreferredRecentTranscripts = "recent_transcripts_preferred_v1"
     private static let keyRecentTranscriptHistory = "recent_transcript_history"
     private static let keyRecentTranscriptEntries = "recent_transcript_entries_v1"
     private static let keyDailyDictationUsage = "daily_dictation_usage_v1"
@@ -295,7 +296,24 @@ final class Settings: @unchecked Sendable {
             parseRecentTranscriptLimit(storedValue: defaults.object(forKey: Self.keyRecentTranscripts))
                 ?? DEFAULT_RECENT_TRANSCRIPT_LIMIT
         }
-        set { defaults.set(newValue.rawValue, forKey: Self.keyRecentTranscripts) }
+        set {
+            // Запоминаем последний ненулевой выбор, чтобы выключение и
+            // повторное включение истории возвращали ту же длину списка
+            // в меню-баре, а не молча подменяли её десяткой.
+            if newValue != .off {
+                defaults.set(newValue.rawValue, forKey: Self.keyPreferredRecentTranscripts)
+            }
+            defaults.set(newValue.rawValue, forKey: Self.keyRecentTranscripts)
+        }
+    }
+
+    /// Длина списка в меню-баре, к которой возвращаемся при включении
+    /// истории обратно.
+    var preferredRecentTranscriptLimit: RecentTranscriptLimit {
+        let stored = parseRecentTranscriptLimit(
+            storedValue: defaults.object(forKey: Self.keyPreferredRecentTranscripts))
+        guard let stored, stored != .off else { return DEFAULT_RECENT_TRANSCRIPT_LIMIT }
+        return stored
     }
 
     var recentTranscriptHistory: [String] {

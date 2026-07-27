@@ -1277,6 +1277,17 @@ enum DictorSelfTest {
             "memory should read in megabytes in the interface language"
         )
 
+        try expect(
+            groupedNumberLabel(10_000, language: .russian),
+            equals: "10\u{202F}000",
+            "Russian thousands are split by a narrow no-break space, not a comma"
+        )
+        try expect(
+            groupedNumberLabel(10_000, language: .english),
+            equals: "10,000",
+            "English thousands keep the comma regardless of the system locale"
+        )
+
         let base = ProcessResourceSample(physicalFootprintBytes: 0, cpuSeconds: 10)
         let later = ProcessResourceSample(physicalFootprintBytes: 0, cpuSeconds: 10.02)
         try expect(
