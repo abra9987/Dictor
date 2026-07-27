@@ -42,6 +42,7 @@ final class Settings: @unchecked Sendable {
     private static let keyRecordingHUDTranscribingColor = "recording_hud_transcribing_color"
     private static let keyRecordingHUDBackgroundStyle = "recording_hud_background_style"
     private static let keyRecordingHUDSize = "recording_hud_size"
+    private static let keyRecordingHUDPlacement = "recording_hud_placement_v1"
     private static let legacyKeyShowRecordingIndicator = "show_recording_indicator"
     private static let keyMuteWhileRecording = "mute_while_recording"
     private static let keyPlayFeedbackSounds = "play_feedback_sounds"
@@ -457,6 +458,20 @@ final class Settings: @unchecked Sendable {
         }
         set {
             defaults.set(newValue.rawValue, forKey: Self.keyRecordingHUDSize)
+            defaults.synchronize()
+        }
+    }
+
+    var recordingHUDPlacement: RecordingHUDPlacement {
+        get {
+            guard let raw = defaults.string(forKey: Self.keyRecordingHUDPlacement),
+                  let placement = RecordingHUDPlacement(rawValue: raw) else {
+                return .followsInput
+            }
+            return placement
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Self.keyRecordingHUDPlacement)
             defaults.synchronize()
         }
     }

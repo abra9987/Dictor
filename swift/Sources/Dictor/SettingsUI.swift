@@ -857,3 +857,61 @@ final class SDModelCard: NSView {
         restyle()
     }
 }
+
+/// Плитка производительности (макет 6d): подложка listPaper, радиус 9,
+/// поля 11×13, значение mono 17/600, подпись 11 с межстрочным 1.4.
+@MainActor
+final class SDMetricTile: NSView {
+    private let valueLabel = NSTextField(labelWithString: "")
+    private let captionLabel = NSTextField(labelWithString: "")
+
+    init(value: String, caption: String) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 9
+
+        valueLabel.font = .monospacedSystemFont(ofSize: 17, weight: .semibold)
+        captionLabel.font = .systemFont(ofSize: 11)
+        captionLabel.maximumNumberOfLines = 2
+        captionLabel.lineBreakMode = .byWordWrapping
+        captionLabel.preferredMaxLayoutWidth = 140
+        // Иначе длинная подпись растягивает плитку по ширине вместо переноса.
+        captionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let stack = NSStackView(views: [valueLabel, captionLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 3
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 13),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -13),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 11),
+            bottomAnchor.constraint(greaterThanOrEqualTo: stack.bottomAnchor, constant: 11),
+        ])
+
+        update(value: value, caption: caption)
+        restyle()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func update(value: String, caption: String?) {
+        valueLabel.stringValue = value
+        if let caption {
+            captionLabel.stringValue = caption
+        }
+    }
+
+    private func restyle() {
+        layer?.backgroundColor = resolvedCGColor(SD.C.listPaper)
+        valueLabel.textColor = SD.C.ink
+        captionLabel.textColor = SD.C.graphite
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+}

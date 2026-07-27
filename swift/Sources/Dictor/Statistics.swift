@@ -849,3 +849,46 @@ final class SDLegendSwatch: NSView {
         needsDisplay = true
     }
 }
+
+// MARK: - Плитки производительности (макет 6d)
+
+/// Медиана времени распознавания последних диктовок — от отпускания
+/// клавиши до готового текста, как его измеряет сам конвейер.
+/// Медиана, а не среднее: одна диктовка на сорок слов иначе перекашивает
+/// цифру, которую пользователь сверяет с ощущением «моментально».
+/// nil, когда мерить ещё нечего — плитка тогда честно говорит об этом,
+/// а не показывает ноль.
+func medianRecognitionSeconds(entries: [TranscriptHistoryEntry],
+                              limit: Int = 30) -> Double? {
+    let values = entries.prefix(limit).compactMap { entry -> Double? in
+        if let total = entry.asrTiming?.totalSeconds, total > 0 { return total }
+        guard let duration = entry.transcriptionDurationSeconds, duration > 0 else {
+            return nil
+        }
+        return duration
+    }.sorted()
+    guard !values.isEmpty else { return nil }
+    let middle = values.count / 2
+    return values.count.isMultiple(of: 2)
+        ? (values[middle - 1] + values[middle]) / 2
+        : values[middle]
+}
+
+/// «48 МБ». Не ByteCountFormatter: он берёт единицы из системной локали,
+/// и при русском интерфейсе на англоязычной macOS плитка писала «42,3 MB»
+/// рядом с русскими подписями.
+func memoryFootprintLabel(_ bytes: UInt64, language: InterfaceLanguage) -> String {
+    let megabytes = Double(bytes) / 1_048_576
+    return "\(Int(megabytes.rounded())) \(localizedText("МБ", "MB", language: language))"
+}
+
+/// «180 мс» / «1,4 с» — секунды становятся нечитаемыми в миллисекундах,
+/// а миллисекунды в секундах.
+func recognitionDurationLabel(_ seconds: Double, language: InterfaceLanguage) -> String {
+    if seconds < 1 {
+        return "\(Int((seconds * 1000).rounded())) \(localizedText("мс", "ms", language: language))"
+    }
+    let formatted = String(format: "%.1f", seconds)
+        .replacingOccurrences(of: ".", with: language == .russian ? "," : ".")
+    return "\(formatted) \(localizedText("с", "s", language: language))"
+}

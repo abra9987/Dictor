@@ -67,6 +67,42 @@ func currentAppMemoryUsage() -> AppMemoryUsage? {
                           physicalFootprintBytes: UInt64(info.phys_footprint))
 }
 
+struct ProcessResourceSample {
+    let physicalFootprintBytes: UInt64
+    /// Процессорное время, накопленное процессом с запуска. Само по
+    /// себе бесполезно — смысл появляется в разнице двух замеров.
+    let cpuSeconds: Double
+}
+
+/// Память и процессорное время чужого процесса того же пользователя.
+/// Нужно потому, что окно и служба — разные процессы: вкладка
+/// «Продвинутые» показывает нагрузку службы, а не свою собственную.
+func processResourceSample(pid: Int32) -> ProcessResourceSample? {
+    guard pid > 0 else { return nil }
+    var info = rusage_info_v4()
+    let result = withUnsafeMutablePointer(to: &info) { pointer -> Int32 in
+        pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
+            proc_pid_rusage(pid, RUSAGE_INFO_V4, rebound)
+        }
+    }
+    guard result == 0 else { return nil }
+    return ProcessResourceSample(
+        physicalFootprintBytes: info.ri_phys_footprint,
+        cpuSeconds: Double(info.ri_user_time + info.ri_system_time) / 1_000_000_000
+    )
+}
+
+/// Доля процессора между двумя замерами. nil, если интервал выродился
+/// — делить на него нельзя, а показывать выдуманное число нечестно.
+func cpuLoadPercent(from earlier: ProcessResourceSample,
+                    to later: ProcessResourceSample,
+                    elapsedSeconds: Double) -> Double? {
+    guard elapsedSeconds > 0.05 else { return nil }
+    let used = later.cpuSeconds - earlier.cpuSeconds
+    guard used >= 0 else { return nil }
+    return max(0, min(100, used / elapsedSeconds * 100))
+}
+
 func formattedByteCount(_ bytes: UInt64) -> String {
     ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .memory)
 }

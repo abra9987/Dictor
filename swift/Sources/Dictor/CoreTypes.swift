@@ -582,6 +582,17 @@ enum RecordingHUDAccentColor: String, CaseIterable {
     }
 }
 
+/// Где показывать капсулу во время диктовки. Макет 6d предлагал ещё и
+/// перетаскивание мышью — оно требует постоянно живой капсулы (макет
+/// 6c), которой пока нет: капсула существует только пока идёт диктовка.
+enum RecordingHUDPlacement: String, CaseIterable {
+    /// Над полем ввода, куда попадёт текст; если поле не нашлось —
+    /// внутри активного окна, иначе сверху по центру экрана.
+    case followsInput
+    /// Всегда снизу по центру экрана с курсором.
+    case bottomCenter
+}
+
 enum RecordingHUDSize: String, CaseIterable {
     case compact
     case standard

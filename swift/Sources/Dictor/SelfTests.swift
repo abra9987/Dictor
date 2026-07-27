@@ -1225,7 +1225,75 @@ enum DictorSelfTest {
         )
     }
 
+    /// Плитки вкладки «Продвинутые» показывают замеры, а не украшения:
+    /// пустая история должна давать «—», а не убедительный ноль.
+    private static func testPerformanceMetrics() throws {
+        func entry(_ seconds: Double?) -> TranscriptHistoryEntry {
+            TranscriptHistoryEntry(text: "x", transcriptionDurationSeconds: seconds)
+        }
+
+        try expect(
+            medianRecognitionSeconds(entries: []),
+            equals: Optional<Double>.none,
+            "no dictations means no median to show"
+        )
+        try expect(
+            medianRecognitionSeconds(entries: [entry(0.1), entry(0.2), entry(0.9)]),
+            equals: Optional(0.2),
+            "an odd number of dictations should take the middle one"
+        )
+        try expect(
+            medianRecognitionSeconds(entries: [entry(0.1), entry(0.3)]),
+            equals: Optional(0.2),
+            "an even number of dictations should average the middle pair"
+        )
+        try expect(
+            medianRecognitionSeconds(entries: [entry(nil), entry(0), entry(0.4)]),
+            equals: Optional(0.4),
+            "entries without a usable timing should be skipped, not counted as zero"
+        )
+        // 40 быстрых диктовок после одной медленной: окно в 30 записей
+        // отсекает старую, иначе плитка годами помнит первый запуск.
+        let recent = Array(repeating: entry(0.2), count: 30) + [entry(9)]
+        try expect(
+            medianRecognitionSeconds(entries: recent),
+            equals: Optional(0.2),
+            "the median should only look at the recent window"
+        )
+
+        try expect(
+            recognitionDurationLabel(0.18, language: .russian),
+            equals: "180 мс",
+            "sub-second timings should read in milliseconds"
+        )
+        try expect(
+            recognitionDurationLabel(1.42, language: .russian),
+            equals: "1,4 с",
+            "timings over a second should read in seconds with a decimal comma"
+        )
+        try expect(
+            memoryFootprintLabel(50_331_648, language: .russian),
+            equals: "48 МБ",
+            "memory should read in megabytes in the interface language"
+        )
+
+        let base = ProcessResourceSample(physicalFootprintBytes: 0, cpuSeconds: 10)
+        let later = ProcessResourceSample(physicalFootprintBytes: 0, cpuSeconds: 10.02)
+        try expect(
+            cpuLoadPercent(from: base, to: later, elapsedSeconds: 1).map { Int($0.rounded()) },
+            equals: Optional(2),
+            "cpu load should be the share of the interval actually spent running"
+        )
+        try expect(
+            cpuLoadPercent(from: base, to: later, elapsedSeconds: 0),
+            equals: Optional<Double>.none,
+            "a degenerate interval should report nothing rather than divide by it"
+        )
+    }
+
     private static func testDictationUsageStatistics() throws {
+        try testPerformanceMetrics()
+
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let reference = calendar.date(from: DateComponents(year: 2026, month: 7, day: 18, hour: 12))!

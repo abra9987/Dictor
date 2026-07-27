@@ -3152,6 +3152,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func recordingHUDFrame(size: NSSize) -> NSRect {
+        if settings.recordingHUDPlacement == .bottomCenter {
+            return recordingHUDFrameAtBottomCenter(size: size)
+        }
         if let targetFrame = recordingHUDInsertionTargetVisualFrame ?? recordingHUDInsertionTargetFrame {
             return recordingHUDFrameAboveTarget(targetFrame, size: size)
         }
@@ -3164,6 +3167,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let x = visible.midX - (size.width / 2)
         let y = visible.maxY - size.height - 96
         return NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// Снизу по центру того экрана, где сейчас курсор — на нём же
+    /// пользователь и печатает. 96 pt от края повторяют отступ, с
+    /// которым капсула висит сверху, когда поле ввода не нашлось.
+    private func recordingHUDFrameAtBottomCenter(size: NSSize) -> NSRect {
+        let visible = screenFor(point: NSEvent.mouseLocation).visibleFrame
+        return NSRect(x: visible.midX - (size.width / 2),
+                      y: visible.minY + 96,
+                      width: size.width,
+                      height: size.height)
     }
 
     private func recordingHUDFrameInsideFallbackWindow(_ windowFrame: NSRect,
