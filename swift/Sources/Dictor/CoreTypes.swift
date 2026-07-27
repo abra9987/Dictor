@@ -591,6 +591,9 @@ enum RecordingHUDPlacement: String, CaseIterable {
     case followsInput
     /// Всегда снизу по центру экрана с курсором.
     case bottomCenter
+    /// Всегда сверху по центру — там же, где капсула появлялась раньше,
+    /// когда поле ввода определить не удавалось.
+    case topCenter
 }
 
 enum RecordingHUDSize: String, CaseIterable {

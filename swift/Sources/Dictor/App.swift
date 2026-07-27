@@ -3152,8 +3152,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func recordingHUDFrame(size: NSSize) -> NSRect {
-        if settings.recordingHUDPlacement == .bottomCenter {
-            return recordingHUDFrameAtBottomCenter(size: size)
+        switch settings.recordingHUDPlacement {
+        case .bottomCenter:
+            return recordingHUDFrameAtScreenCenter(size: size, atBottom: true)
+        case .topCenter:
+            return recordingHUDFrameAtScreenCenter(size: size, atBottom: false)
+        case .followsInput:
+            break
         }
         if let targetFrame = recordingHUDInsertionTargetVisualFrame ?? recordingHUDInsertionTargetFrame {
             return recordingHUDFrameAboveTarget(targetFrame, size: size)
@@ -3169,13 +3174,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 
-    /// Снизу по центру того экрана, где сейчас курсор — на нём же
-    /// пользователь и печатает. 96 pt от края повторяют отступ, с
-    /// которым капсула висит сверху, когда поле ввода не нашлось.
-    private func recordingHUDFrameAtBottomCenter(size: NSSize) -> NSRect {
+    /// По центру того экрана, где сейчас курсор — на нём же пользователь
+    /// и печатает. 96 pt от края повторяют отступ, с которым капсула
+    /// висит сверху, когда поле ввода не нашлось.
+    private func recordingHUDFrameAtScreenCenter(size: NSSize, atBottom: Bool) -> NSRect {
         let visible = screenFor(point: NSEvent.mouseLocation).visibleFrame
         return NSRect(x: visible.midX - (size.width / 2),
-                      y: visible.minY + 96,
+                      y: atBottom ? visible.minY + 96 : visible.maxY - size.height - 96,
                       width: size.width,
                       height: size.height)
     }
