@@ -7,14 +7,15 @@ import AppKit
 // Тёмные пары поверхностей выведены (SDTheme.swift): тёрн 6 нарисован
 // только в светлой теме, тёмная стоит следующей задачей в макете.
 
-/// Макет 6a: окно 980×664, сайдбар 212, шапка раздела 52.
-let MAIN_WINDOW_SIZE = NSSize(width: 980, height: 664)
+/// Макеты 6a/7a: окно 980×720, сайдбар 212, шапка раздела 52.
+let MAIN_WINDOW_SIZE = NSSize(width: 980, height: 720)
 let MAIN_WINDOW_SIDEBAR_WIDTH: CGFloat = 212
 let MAIN_WINDOW_HEADER_HEIGHT: CGFloat = 52
 
 enum MainWindowSection: String, CaseIterable {
     case today
     case history
+    case stats
     case dictionary
     case settings
 
@@ -22,6 +23,7 @@ enum MainWindowSection: String, CaseIterable {
         switch self {
         case .today: return localizedText("Сегодня", "Today", language: language)
         case .history: return localizedText("История", "History", language: language)
+        case .stats: return localizedText("Статистика", "Statistics", language: language)
         case .dictionary: return localizedText("Словарь", "Dictionary", language: language)
         case .settings: return localizedText("Настройки", "Settings", language: language)
         }
@@ -32,6 +34,7 @@ enum MainWindowSection: String, CaseIterable {
         switch self {
         case .today: return nil
         case .history: return "≡"
+        case .stats: return "▨"
         case .dictionary: return "Aa"
         case .settings: return "⚙"
         }
