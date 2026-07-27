@@ -72,7 +72,7 @@ enum PendingDictationRecovery {
     private static let magic = Data("SDAR".utf8)
 
     static func directoryURL() throws -> URL {
-        let url = try superDictateApplicationSupportDirectory()
+        let url = try dictorApplicationSupportDirectory()
             .appendingPathComponent(directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: url,
                                                 withIntermediateDirectories: true,

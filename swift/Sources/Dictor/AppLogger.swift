@@ -48,7 +48,7 @@ final class Logger: @unchecked Sendable {
 
 func log(_ msg: String) { Logger.shared.log(msg) }
 
-func superDictateApplicationSupportDirectory() throws -> URL {
+func dictorApplicationSupportDirectory() throws -> URL {
     let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent(APP_SUPPORT_DIR_NAME, isDirectory: true)
     try FileManager.default.createDirectory(at: url,
@@ -74,7 +74,7 @@ struct AgentRuntimeState: Codable {
 
 enum AgentRuntimeStateStore {
     static var url: URL {
-        (try? superDictateApplicationSupportDirectory()
+        (try? dictorApplicationSupportDirectory()
             .appendingPathComponent(AGENT_STATUS_FILE_NAME)) ??
         FileManager.default.temporaryDirectory.appendingPathComponent(AGENT_STATUS_FILE_NAME)
     }
@@ -100,7 +100,7 @@ enum AgentRuntimeStateStore {
 
 enum DictorControlPanelRegistry {
     static var url: URL {
-        (try? superDictateApplicationSupportDirectory()
+        (try? dictorApplicationSupportDirectory()
             .appendingPathComponent(CONTROL_PANEL_PID_FILE_NAME)) ??
         FileManager.default.temporaryDirectory.appendingPathComponent(CONTROL_PANEL_PID_FILE_NAME)
     }

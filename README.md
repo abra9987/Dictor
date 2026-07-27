@@ -14,5 +14,5 @@
 ./scripts/build-app.sh        # → dist/Dictor.app (нужны только Xcode CLT)
 ```
 
-Личный проект. Основан на открытом коде SuperDictate/Parakey (MIT, см. LICENSE
-и NOTICE.md).
+Личный проект. Использует открытый код по лицензии MIT — атрибуция апстрима
+в LICENSE и NOTICE.md.

@@ -2204,7 +2204,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let backupURL = appURL.deletingLastPathComponent()
             .appendingPathComponent(".Dictor-update-backup-\(UUID().uuidString).app",
                                     isDirectory: true)
-        let script = superDictateDirectUpdateHelperScript(
+        let script = dictorDirectUpdateHelperScript(
             pid: getpid(),
             targetVersion: prepared.version,
             statePath: statePath,

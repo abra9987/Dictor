@@ -5,7 +5,7 @@ Please report a suspected vulnerability privately through GitHub's
 private transcript text, audio, credentials, or full diagnostic logs in a
 public issue.
 
-SuperDictate does not require an account or cloud transcription service. The
+Dictor does not require an account or cloud transcription service. The
 default installer downloads a version-pinned release bundle and verifies its
 SHA-256, version, bundle identifier, architecture, code signature, and required
 microphone entitlements. It does not disable Gatekeeper with `xattr`.
