@@ -98,6 +98,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var pendingSettingsApply: DispatchWorkItem?
     /// Выбранный период в «Статистике» (макет 7a).
     var statsPeriod: StatsPeriod = .month
+    /// Что сказать после записи сочетания — иначе тишина читается как «не сработало».
+    private var hotkeyNotice: String?
     private var historyShowsPinnedOnly = false
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
@@ -401,6 +403,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     @objc private func settingsTabClicked(_ sender: NSButton) {
         guard let id = sender.identifier?.rawValue else { return }
+        hotkeyNotice = nil
         settingsTab = id
         refresh(force: true)
     }
@@ -529,9 +532,16 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         ))
         // Кнопки «Сохранить» в макете нет: записанное сочетание применяется
         // само, служба перезапускается следом.
+        if let notice = hotkeyNotice {
+            let noticeLabel = panelLabel(notice, size: 11.5, weight: .medium, color: SD.C.voice)
+            noticeLabel.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
+                - MAIN_WINDOW_SIDEBAR_WIDTH - 100
+            root.setCustomSpacing(12, after: root.arrangedSubviews.last ?? noticeLabel)
+            root.addArrangedSubview(noticeLabel)
+        }
         let hint = panelLabel(
-            t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет. Новое сочетание применяется сразу: служба перезапустится за пару секунд.",
-              "Click “Change” and press the new combo. Esc cancels. It applies immediately — the service restarts in a couple of seconds."),
+            t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет. Новое сочетание начинает работать через секунду, перезапускать ничего не нужно.",
+              "Click “Change” and press the new combo. Esc cancels. It starts working a second later — nothing needs restarting."),
             size: 11, color: SD.C.graphite)
         hint.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
             - MAIN_WINDOW_SIDEBAR_WIDTH - 100
@@ -916,7 +926,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         dot.translatesAutoresizingMaskIntoConstraints = false
 
         let title: String
-        if !running {
+        if let operation = serviceOperation {
+            // Пока служба перезапускается, об этом надо сказать: иначе
+            // смена хоткея выглядит как «ничего не произошло».
+            dot.color = SD.C.voice
+            title = operationTitle(operation)
+        } else if !running {
             title = t("Служба остановлена", "Service stopped")
         } else if ready {
             title = t("Готово к диктовке", "Ready to dictate")
@@ -3287,10 +3302,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             case .history: draft.historyHotkey = selected
             }
             self.settingsDraft = draft
+            // Если записали ровно то, что уже стояло, менять нечего —
+            // но молчать об этом нельзя.
+            let unchanged = draft == ControlPanelSettingsDraft(settings: self.settings)
+            self.hotkeyNotice = unchanged
+                ? self.t("Это сочетание уже стояло — \(selected.name). Ничего не изменилось.",
+                         "That combination was already set — \(selected.name). Nothing changed.")
+                : self.t("Новое сочетание: \(selected.name).",
+                         "New combination: \(selected.name).")
             self.refreshSettingsWindow()
             // Записанное сочетание применяется сразу: агент подхватывает
             // хоткей только при старте, поэтому служба перезапускается сама.
-            self.scheduleSettingsApply(after: 0.15)
+            if !unchanged {
+                self.scheduleSettingsApply(after: 0.15)
+            }
         }
         hotkeyRecorder = recorder
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self, weak recorder] in
@@ -3377,7 +3402,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         settings.agentEnabled = true
         _ = settings.refreshFromDisk()
         settingsDraft = ControlPanelSettingsDraft(settings: settings)
-        beginServiceOperation(.applyingSettings)
+        // Служба перечитывает хоткеи сама раз в секунду, так что
+        // перезапуск нужен только когда её вообще нет.
+        if !DictorAgentService.isAgentRunning() {
+            beginServiceOperation(.starting)
+        } else {
+            refresh(force: true)
+        }
     }
 
     private func refreshSettingsWindow() {

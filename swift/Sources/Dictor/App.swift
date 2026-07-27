@@ -1788,6 +1788,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private var correctionSyncTimer: Timer?
+    /// Хоткеи агент раньше читал только при старте, поэтому их смена
+    /// требовала перезапуска службы. Таймер подхватывает их на лету.
+    private var settingsWatchTimer: Timer?
+    private var lastAppliedHotkeySignature = ""
     private var correctionSyncFileFingerprint: CorrectionSyncFileFingerprint?
     private var correctionSyncBaselineCorrections: [TranscriptCorrection] = []
     private var isApplyingCorrectionSyncFile = false
@@ -1932,12 +1936,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Configure hotkey listener up front so it picks up the user's
         // saved choice the moment the tap goes live.
-        hotkey.setHotkey(settings.configuredHotkey)
-        hotkey.setEnterHotkey(settings.configuredEnterHotkey)
-        hotkey.setAlternateCompletionEnabled(settings.alternateCompletionEnabled)
-        hotkey.setHistoryHotkey(settings.configuredHistoryHotkey)
-        hotkey.setTriggerMode(settings.triggerMode)
+        applyHotkeySettings(force: true)
         startStartup(reason: "launch")
+        startSettingsWatch()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -2622,6 +2623,49 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         lastPermissionReadinessMissingKey = key
         log("readiness retry waiting for permissions: \(missing.map(\.rawValue).joined(separator: ", "))")
         return true
+    }
+
+    /// Слежение за настройками хоткеев. Панель пишет их в UserDefaults,
+    /// агент подхватывает без перезапуска — «Сохранить и перезапустить»
+    /// пользователю больше не нужен.
+    private func startSettingsWatch() {
+        guard settingsWatchTimer == nil else { return }
+        settingsWatchTimer = Timer.scheduledTimer(timeInterval: 1.0,
+                                                  target: self,
+                                                  selector: #selector(settingsWatchTimerFired(_:)),
+                                                  userInfo: nil,
+                                                  repeats: true)
+        settingsWatchTimer?.tolerance = 0.3
+    }
+
+    @objc private func settingsWatchTimerFired(_ timer: Timer) {
+        guard !isRecording, !isBusy, !isTerminating else { return }
+        _ = settings.refreshFromDisk()
+        applyHotkeySettings(force: false)
+    }
+
+    private func hotkeySignature() -> String {
+        [settings.configuredHotkey.name,
+         settings.configuredEnterHotkey.name,
+         settings.configuredHistoryHotkey.name,
+         settings.alternateCompletionEnabled ? "1" : "0",
+         settings.triggerMode.rawValue].joined(separator: "|")
+    }
+
+    private func applyHotkeySettings(force: Bool) {
+        let signature = hotkeySignature()
+        guard force || signature != lastAppliedHotkeySignature else { return }
+        lastAppliedHotkeySignature = signature
+        hotkey.setHotkey(settings.configuredHotkey)
+        hotkey.setEnterHotkey(settings.configuredEnterHotkey)
+        hotkey.setAlternateCompletionEnabled(settings.alternateCompletionEnabled)
+        hotkey.setHistoryHotkey(settings.configuredHistoryHotkey)
+        hotkey.setTriggerMode(settings.triggerMode)
+        if !force {
+            log("hotkeys reloaded without restart → \(settings.configuredHotkey.name)")
+            rebuildMenu()
+            publishAgentState()
+        }
     }
 
     private func startPermissionReadinessMonitor(reason: String) {
