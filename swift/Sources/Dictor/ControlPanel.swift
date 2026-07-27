@@ -92,6 +92,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private let onboarding = OnboardingController()
     private var mainHistorySearch = ""
     private weak var mainHistorySearchField: NSSearchField?
+    /// Раздел главного окна (макет 6a): «Сегодня» открывается первым.
+    var mainSection: MainWindowSection = .today
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
 
@@ -157,15 +159,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
 
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 640),
-                              styleMask: [.titled, .closable, .miniaturizable],
+        // Макет 6a: окно 980×664, сайдбар уходит под тайтлбар, поэтому
+        // контент занимает всю высоту, а кнопки окна лежат поверх сайдбара.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0,
+                                                  width: MAIN_WINDOW_SIZE.width,
+                                                  height: MAIN_WINDOW_SIZE.height),
+                              styleMask: [.titled, .closable, .miniaturizable,
+                                          .fullSizeContentView],
                               backing: .buffered,
                               defer: false)
         window.title = "Dictor"
-        window.contentMinSize = NSSize(width: 620, height: 640)
-        window.contentMaxSize = NSSize(width: 620, height: 640)
+        window.contentMinSize = MAIN_WINDOW_SIZE
+        window.contentMaxSize = MAIN_WINDOW_SIZE
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = SD.C.settingsPaper
+        window.titleVisibility = .hidden
+        window.backgroundColor = SD.C.sidebarPaper
         window.isReleasedWhenClosed = false
         window.delegate = self
         self.window = window
@@ -195,10 +203,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let fingerprint = renderFingerprint()
         guard force || fingerprint != lastRenderFingerprint else { return }
         lastRenderFingerprint = fingerprint
-        // Главное окно — история (как в Wispr Flow); настройки живут
-        // в отдельном окне settingsWindow.
-        window.title = t("История Dictor", "Dictor History")
-        window.contentView = makeMainHistoryView()
+        // Главное окно по макету 6a: сайдбар + раздел. Настройки живут
+        // в отдельном окне settingsWindow (макет 2c/4b/6d).
+        window.title = "Dictor"
+        window.contentView = makeMainWindowView()
         restoreMainHistorySearchFocusIfNeeded(in: window)
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
@@ -233,6 +241,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         let newestHistory = settings.recentTranscriptEntries.first
         return [language.rawValue,
+                "section:\(mainSection.rawValue)",
                 "history:\(settings.recentTranscriptEntries.count):" +
                     "\(newestHistory?.createdAt?.timeIntervalSince1970 ?? 0)",
                 "search:\(mainHistorySearch)",
@@ -788,6 +797,635 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     func makeMainHistoryViewForPreview() -> NSView {
         makeMainHistoryView()
+    }
+
+    // MARK: - Каркас главного окна (макет 6a)
+
+    /// Сайдбар 212pt + раздел. Сайдбар уходит под тайтлбар, первые 52pt
+    /// оставлены под кнопки окна.
+    func makeMainWindowView() -> NSView {
+        let sidebar = makeSidebarView()
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+
+        let divider = SDHairlineView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+
+        let content: NSView
+        switch mainSection {
+        case .today:
+            content = makeTodayView()
+        case .history:
+            content = makeMainHistoryView()
+        case .dictionary:
+            content = makeDictionarySectionView()
+        case .settings:
+            // «Настройки» открываются отдельным окном (макет 2c/4b/6d),
+            // а раздел остаётся на «Сегодня».
+            content = makeTodayView()
+        }
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+        root.addSubview(sidebar)
+        root.addSubview(divider)
+        root.addSubview(content)
+
+        NSLayoutConstraint.activate([
+            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sidebar.widthAnchor.constraint(equalToConstant: MAIN_WINDOW_SIDEBAR_WIDTH),
+            divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: root.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            content.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            content.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            content.topAnchor.constraint(equalTo: root.topAnchor),
+            content.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        return root
+    }
+
+    /// Сайдбар: пустые 52pt под кнопки окна, навигация, статус службы внизу.
+    private func makeSidebarView() -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.sidebarPaper
+
+        let nav = NSStackView()
+        nav.orientation = .vertical
+        nav.alignment = .leading
+        nav.spacing = 3
+        nav.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        nav.translatesAutoresizingMaskIntoConstraints = false
+
+        let historyCount = settings.recentTranscriptEntries.count
+        let dictionaryCount = settings.transcriptCorrections.count
+        for section in MainWindowSection.allCases {
+            let count: Int?
+            switch section {
+            case .history: count = historyCount
+            case .dictionary: count = dictionaryCount
+            default: count = nil
+            }
+            let item = SDSidebarItemView(section: section,
+                                         title: section.title(language),
+                                         count: count,
+                                         isSelected: section == mainSection
+                                             && section != .settings,
+                                         target: self,
+                                         action: #selector(sidebarItemClicked(_:)))
+            item.translatesAutoresizingMaskIntoConstraints = false
+            nav.addArrangedSubview(item)
+            item.widthAnchor.constraint(equalTo: nav.widthAnchor, constant: -24).isActive = true
+        }
+
+        let status = makeSidebarStatusView()
+        status.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(nav)
+        root.addSubview(status)
+        NSLayoutConstraint.activate([
+            nav.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            nav.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            nav.topAnchor.constraint(equalTo: root.topAnchor,
+                                     constant: MAIN_WINDOW_HEADER_HEIGHT),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            status.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            status.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            status.topAnchor.constraint(greaterThanOrEqualTo: nav.bottomAnchor),
+        ])
+        return root
+    }
+
+    /// Низ сайдбара: зелёная точка + состояние службы, второй строкой — модель.
+    private func makeSidebarStatusView() -> NSView {
+        let state = AgentRuntimeStateStore.read()
+        let running = DictorAgentService.isAgentRunning()
+        let ready = running && state?.status == "ready"
+
+        let dot = SDStatusDotView()
+        dot.color = ready ? SD.C.positive : (running ? SD.C.voice : SD.C.subtle)
+        dot.translatesAutoresizingMaskIntoConstraints = false
+
+        let title: String
+        if !running {
+            title = t("Служба остановлена", "Service stopped")
+        } else if ready {
+            title = t("Готово к диктовке", "Ready to dictate")
+        } else {
+            title = state?.detail ?? t("Запускается…", "Starting…")
+        }
+        let titleLabel = panelLabel(title, size: 11.5, color: SD.C.inkSecondary)
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        let head = NSStackView(views: [dot, titleLabel])
+        head.orientation = .horizontal
+        head.alignment = .centerY
+        head.spacing = 8
+
+        let detail = panelLabel(
+            t("Parakeet · локально", "Parakeet · on-device"),
+            size: 11, color: SD.C.subtle)
+        detail.lineBreakMode = .byTruncatingTail
+
+        let hairline = SDHairlineView()
+        let column = NSStackView(views: [hairline, head, detail])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 5
+        column.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 14, right: 16)
+        column.setCustomSpacing(14, after: hairline)
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView()
+        container.addSubview(column)
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            column.topAnchor.constraint(equalTo: container.topAnchor),
+            column.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        hairline.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        return container
+    }
+
+    @objc private func sidebarItemClicked(_ sender: SDSidebarItemView) {
+        if sender.section == .settings {
+            openSettingsWindow()
+            return
+        }
+        guard sender.section != mainSection else { return }
+        mainSection = sender.section
+        refresh(force: true)
+    }
+
+    // MARK: - Подсказки «Сегодня» (правило макета 6e)
+
+    struct TodayHint {
+        let identifier: String
+        let text: String
+        let actionTitle: String?
+        let action: Selector?
+    }
+
+    /// Одна подсказка за раз и только когда есть настоящий повод.
+    /// Закрытые лежат в `settings.dismissedHints` и не возвращаются.
+    private func todayHint() -> TodayHint? {
+        let dismissed = Set(settings.dismissedHints)
+        let entryCount = settings.recentTranscriptEntries.count
+
+        if entryCount >= 3, !dismissed.contains("history-hotkey") {
+            let caps = inlineShortcutText(
+                keycapLabels(for: settings.configuredHistoryHotkey, language: language))
+            return TodayHint(
+                identifier: "history-hotkey",
+                text: t("Историю можно открыть поверх любого приложения — \(caps). Не нужно возвращаться в это окно.",
+                        "History opens on top of any app — \(caps). No need to come back to this window."),
+                actionTitle: t("Показать", "Show"),
+                action: #selector(showHistorySectionClicked(_:)))
+        }
+
+        if entryCount >= 5, !settings.removeFillerWords,
+           !dismissed.contains("filler-removal") {
+            return TodayHint(
+                identifier: "filler-removal",
+                text: t("«Эээ» и «ммм» пока попадают в текст. Включите очистку — они исчезнут ещё до вставки.",
+                        "Filler words still land in your text. Turn cleanup on and they go before the paste."),
+                actionTitle: t("Включить", "Turn on"),
+                action: #selector(enableFillerRemovalFromHint(_:)))
+        }
+        return nil
+    }
+
+    @objc private func dismissTodayHint(_ sender: NSButton) {
+        guard let hint = todayHint() else { return }
+        settings.dismissedHints.append(hint.identifier)
+        refresh(force: true)
+    }
+
+    @objc private func enableFillerRemovalFromHint(_ sender: NSButton) {
+        settings.removeFillerWords = true
+        settings.dismissedHints.append("filler-removal")
+        refresh(force: true)
+    }
+
+    @objc private func showHistorySectionClicked(_ sender: NSButton) {
+        mainSection = .history
+        refresh(force: true)
+    }
+
+    /// Кнопка «Диктовать» — само действие делает хоткей в агенте, поэтому
+    /// окно лишь напоминает, какую комбинацию зажать.
+    @objc private func todayDictateHintClicked(_ sender: NSControl) {
+        let caps = keycapLabels(for: settings.configuredHotkey, language: language)
+            .joined(separator: " + ")
+        let alert = NSAlert()
+        alert.messageText = t("Диктовка запускается с клавиатуры",
+                              "Dictation starts from the keyboard")
+        alert.informativeText = t(
+            "Поставьте курсор в любое поле ввода и зажмите \(caps). Текст появится там, где стоит курсор.",
+            "Put the cursor in any text field and hold \(caps). The text lands where your cursor is.")
+        alert.addButton(withTitle: t("Понятно", "Got it"))
+        alert.runModal()
+    }
+
+    @objc private func todayRecentRowClicked(_ sender: SDRecentEntryRowView) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(sender.transcript, forType: .string)
+    }
+
+    // MARK: - Раздел «Сегодня» (макет 6a)
+
+    private func makeTodayView() -> NSView {
+        let summary = TodaySummary.make(usage: settings.dailyDictationUsage)
+        let entries = settings.recentTranscriptEntries
+
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+
+        // Шапка раздела: заголовок + кнопка «Диктовать» с хоткеем.
+        let header = NSView()
+        let headerTitle = panelLabel(MainWindowSection.today.title(language),
+                                     size: 14, weight: .semibold)
+        let caps = keycapLabels(for: settings.configuredHotkey, language: language)
+        let dictateButton = SDPrimaryActionButton(
+            title: t("Диктовать", "Dictate"),
+            shortcut: caps.joined(separator: " "),
+            target: self,
+            action: #selector(todayDictateHintClicked(_:)))
+        for view in [headerTitle, dictateButton] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            header.addSubview(view)
+        }
+        let headerHairline = SDHairlineView()
+        headerHairline.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(headerHairline)
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: MAIN_WINDOW_HEADER_HEIGHT),
+            headerTitle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 28),
+            headerTitle.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            dictateButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -28),
+            dictateButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            headerHairline.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            headerHairline.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            headerHairline.bottomAnchor.constraint(equalTo: header.bottomAnchor),
+        ])
+
+        // Приветствие.
+        let greeting = panelLabel(t("С возвращением", "Welcome back"),
+                                  size: 22, weight: .semibold)
+        let subtitle = panelLabel(todayGreetingSubtitle(summary),
+                                  size: 13.5, color: SD.C.graphite)
+        subtitle.lineBreakMode = .byWordWrapping
+        subtitle.maximumNumberOfLines = 2
+        subtitle.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
+            - MAIN_WINDOW_SIDEBAR_WIDTH - 56
+
+        // Три карточки показателей.
+        let sparkline = QuickPanelStatBars(values: summary.dayBars)
+        sparkline.translatesAutoresizingMaskIntoConstraints = false
+        sparkline.widthAnchor.constraint(equalToConstant: 7 * 5 - 2).isActive = true
+        sparkline.heightAnchor.constraint(equalToConstant: 22).isActive = true
+
+        let wordsCard = SDStatCardView(
+            caption: t("Слов сегодня", "Words today"),
+            value: formattedUsageInteger(summary.words),
+            delta: summary.deltaPercent.map {
+                SDStatCardView.Delta(text: $0 >= 0 ? "+\($0)%" : "\($0)%",
+                                     isPositive: $0 >= 0)
+            },
+            accessory: sparkline)
+
+        let savedCard = SDStatCardView(
+            caption: t("Сэкономлено", "Time saved"),
+            value: "\(summary.savedMinutesToday)",
+            unit: t("мин", "min"),
+            footnote: todaySavedMonthText(summary))
+
+        let streakDots = SDStreakDotsView(intensities: summary.streakIntensities,
+                                          todayActive: summary.todayActive)
+        streakDots.translatesAutoresizingMaskIntoConstraints = false
+        streakDots.heightAnchor.constraint(equalToConstant: 15).isActive = true
+        let streakCard = SDStatCardView(
+            caption: t("Дней подряд", "Day streak"),
+            value: "\(summary.streakDays)",
+            accessory: streakDots)
+
+        let cards = NSStackView(views: [wordsCard, savedCard, streakCard])
+        cards.orientation = .horizontal
+        cards.distribution = .fillEqually
+        cards.spacing = 12
+        cards.translatesAutoresizingMaskIntoConstraints = false
+        // 16 + подпись 13 + 8 + число 36 + 10 + спарклайн 22 + 16 (макет 6a).
+        cards.heightAnchor.constraint(equalToConstant: 121).isActive = true
+
+        // «Последние диктовки».
+        let recentTitle = panelLabel(t("Последние диктовки", "Recent dictations"),
+                                     size: 13, weight: .semibold)
+        let allHistory = NSButton(title: t("Вся история", "All history"),
+                                  target: self,
+                                  action: #selector(showHistorySectionClicked(_:)))
+        allHistory.isBordered = false
+        allHistory.font = .systemFont(ofSize: 12)
+        allHistory.contentTintColor = SD.C.voice
+        let recentHeader = NSStackView(views: [recentTitle, allHistory])
+        recentHeader.orientation = .horizontal
+        recentHeader.alignment = .firstBaseline
+        recentHeader.spacing = 10
+
+        let recentCard = makeTodayRecentCard(entries: Array(entries.prefix(3)))
+
+        let column = NSStackView(views: [greeting, subtitle, cards,
+                                         recentHeader, recentCard])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.edgeInsets = NSEdgeInsets(top: 26, left: 28, bottom: 24, right: 28)
+        column.setCustomSpacing(5, after: greeting)
+        column.setCustomSpacing(20, after: subtitle)
+        column.setCustomSpacing(24, after: cards)
+        column.setCustomSpacing(11, after: recentHeader)
+
+        if let hint = todayHint() {
+            let banner = SDHintBannerView(text: hint.text,
+                                          actionTitle: hint.actionTitle,
+                                          target: self,
+                                          action: hint.action,
+                                          dismissAction: #selector(dismissTodayHint(_:)))
+            column.addArrangedSubview(banner)
+            column.setCustomSpacing(18, after: recentCard)
+        }
+
+        column.translatesAutoresizingMaskIntoConstraints = false
+        header.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(header)
+        root.addSubview(column)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            column.topAnchor.constraint(equalTo: header.bottomAnchor),
+            column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
+        ])
+        for view in [cards, recentHeader, recentCard] {
+            view.widthAnchor.constraint(equalTo: column.widthAnchor,
+                                        constant: -56).isActive = true
+        }
+        if let banner = column.arrangedSubviews.last as? SDHintBannerView {
+            banner.widthAnchor.constraint(equalTo: column.widthAnchor,
+                                          constant: -56).isActive = true
+        }
+        return root
+    }
+
+    // MARK: - Раздел «Словарь»
+
+    /// Словарь в окне (макет 5d). Пометки источника пока нет — провенанс
+    /// автозамен не сохраняется, поэтому все записи показаны как ручные.
+    private func makeDictionarySectionView() -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+
+        let addButton = NSButton(title: t("Добавить слово", "Add word"),
+                                 target: self,
+                                 action: #selector(addCorrectionFromPanel(_:)))
+        addButton.isBordered = false
+        addButton.font = .systemFont(ofSize: 12, weight: .semibold)
+        addButton.contentTintColor = SD.C.voice
+        let header = makeSectionHeader(title: MainWindowSection.dictionary.title(language),
+                                       accessory: addButton)
+
+        let corrections = settings.transcriptCorrections
+        let card = SDCardBackgroundView()
+        let list = NSStackView()
+        list.orientation = .vertical
+        list.alignment = .leading
+        list.spacing = 0
+        list.translatesAutoresizingMaskIntoConstraints = false
+
+        if corrections.isEmpty {
+            let empty = panelLabel(
+                t("Пока пусто. Добавьте термины, которые модель слышит неправильно.",
+                  "Empty so far. Add terms the model keeps mishearing."),
+                size: 12.5, color: SD.C.graphite)
+            let wrapper = NSStackView(views: [empty])
+            wrapper.orientation = .vertical
+            wrapper.edgeInsets = NSEdgeInsets(top: 22, left: 16, bottom: 22, right: 16)
+            list.addArrangedSubview(wrapper)
+            wrapper.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+        } else {
+            for (index, correction) in corrections.enumerated() {
+                if index > 0 {
+                    let hairline = SDHairlineView()
+                    list.addArrangedSubview(hairline)
+                    hairline.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+                }
+                let word = panelLabel(correction.replacement, size: 12.5, color: SD.C.ink)
+                let badge = SDBadgeLabel(text: t("вручную", "manual"))
+                let heard = panelLabel(t("слышится как «\(correction.source)»",
+                                         "heard as “\(correction.source)”"),
+                                       size: 11, color: SD.C.subtle)
+                let remove = NSButton(title: "✕", target: self,
+                                      action: #selector(removeCorrectionFromPanel(_:)))
+                remove.isBordered = false
+                remove.font = .systemFont(ofSize: 11)
+                remove.contentTintColor = SD.C.subtle
+                remove.tag = index
+
+                let row = NSStackView(views: [word, badge, heard, NSView(), remove])
+                row.orientation = .horizontal
+                row.alignment = .centerY
+                row.spacing = 10
+                row.edgeInsets = NSEdgeInsets(top: 10, left: 13, bottom: 10, right: 13)
+                list.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+            }
+        }
+
+        card.addSubview(list)
+        NSLayoutConstraint.activate([
+            list.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            list.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            list.topAnchor.constraint(equalTo: card.topAnchor),
+            list.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+
+        let column = NSStackView(views: [card])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.edgeInsets = NSEdgeInsets(top: 22, left: 28, bottom: 24, right: 28)
+        column.translatesAutoresizingMaskIntoConstraints = false
+        header.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(header)
+        root.addSubview(column)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            column.topAnchor.constraint(equalTo: header.bottomAnchor),
+            column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
+        ])
+        card.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -56).isActive = true
+        return root
+    }
+
+    /// Шапка раздела: заголовок 14/600 слева, произвольный контрол справа,
+    /// hairline снизу (макет 6a/6b).
+    private func makeSectionHeader(title: String, accessory: NSView?) -> NSView {
+        let header = NSView()
+        let titleLabel = panelLabel(title, size: 14, weight: .semibold, color: SD.C.ink)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(titleLabel)
+        let hairline = SDHairlineView()
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(hairline)
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: MAIN_WINDOW_HEADER_HEIGHT),
+            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 28),
+            titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            hairline.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            hairline.bottomAnchor.constraint(equalTo: header.bottomAnchor),
+        ])
+        if let accessory {
+            accessory.translatesAutoresizingMaskIntoConstraints = false
+            header.addSubview(accessory)
+            NSLayoutConstraint.activate([
+                accessory.trailingAnchor.constraint(equalTo: header.trailingAnchor,
+                                                    constant: -28),
+                accessory.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+                accessory.leadingAnchor.constraint(greaterThanOrEqualTo:
+                                                    titleLabel.trailingAnchor, constant: 12),
+            ])
+        }
+        return header
+    }
+
+    /// Карточка со списком последних диктовок (или пустое состояние 5f).
+    private func makeTodayRecentCard(entries: [TranscriptHistoryEntry]) -> NSView {
+        let card = SDCardBackgroundView()
+        let column = NSStackView()
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        if entries.isEmpty {
+            let empty = makeTodayEmptyState()
+            column.addArrangedSubview(empty)
+            empty.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        } else {
+            for (index, entry) in entries.enumerated() {
+                if index > 0 {
+                    let hairline = SDHairlineView()
+                    column.addArrangedSubview(hairline)
+                    hairline.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+                }
+                let row = SDRecentEntryRowView(
+                    transcript: entry.text,
+                    preview: entry.text.replacingOccurrences(of: "\n", with: " "),
+                    time: recentEntryTimeText(entry),
+                    copyTitle: t("Копировать", "Copy"),
+                    target: self,
+                    action: #selector(todayRecentRowClicked(_:)))
+                column.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+            }
+        }
+
+        card.addSubview(column)
+        NSLayoutConstraint.activate([
+            column.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            column.topAnchor.constraint(equalTo: card.topAnchor),
+            column.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+        return card
+    }
+
+    /// Пустое состояние по макету 5f: волна, заголовок, что нажать.
+    private func makeTodayEmptyState() -> NSView {
+        let wave = SDMiniWaveView(values: [0.09, 0.09, 0.09, 0.3, 0.09, 0.09, 0.09],
+                                  color: SD.C.subtle,
+                                  barWidth: 2,
+                                  gap: 2)
+        wave.translatesAutoresizingMaskIntoConstraints = false
+        wave.widthAnchor.constraint(equalToConstant: 26).isActive = true
+        wave.heightAnchor.constraint(equalToConstant: 14).isActive = true
+
+        let title = panelLabel(t("Здесь появятся ваши диктовки",
+                                 "Your dictations will show up here"),
+                               size: 13, weight: .semibold)
+        let caps = keycapLabels(for: settings.configuredHotkey, language: language)
+            .joined(separator: " + ")
+        let hint = panelLabel(
+            t("Откройте любое поле ввода, зажмите \(caps) и скажите пару слов.",
+              "Open any text field, hold \(caps) and say a few words."),
+            size: 11.5, color: SD.C.graphite)
+        hint.alignment = .center
+        hint.lineBreakMode = .byWordWrapping
+        hint.maximumNumberOfLines = 2
+        hint.preferredMaxLayoutWidth = 300
+
+        let column = NSStackView(views: [wave, title, hint])
+        column.orientation = .vertical
+        column.alignment = .centerX
+        column.spacing = 0
+        column.edgeInsets = NSEdgeInsets(top: 22, left: 20, bottom: 22, right: 20)
+        column.setCustomSpacing(10, after: wave)
+        column.setCustomSpacing(4, after: title)
+        return column
+    }
+
+    private func todayGreetingSubtitle(_ summary: TodaySummary) -> String {
+        guard summary.words > 0 else {
+            return t("Сегодня вы ещё не диктовали. Зажмите хоткей в любом поле ввода — текст появится там, где стоит курсор.",
+                     "No dictations today yet. Hold the hotkey in any text field and the text lands where your cursor is.")
+        }
+        let words = formattedUsageInteger(summary.words)
+        if summary.savedMinutesToday >= 1 {
+            let minutes = dictationMinutesLabel(summary.savedMinutesToday, language: language)
+            return t("За сегодня вы наговорили \(words) слов. Это примерно \(minutes), которые не ушли на клавиатуру.",
+                     "You dictated \(words) words today — about \(minutes) that never went to the keyboard.")
+        }
+        return t("За сегодня вы наговорили \(words) слов.",
+                 "You dictated \(words) words today.")
+    }
+
+    private func todaySavedMonthText(_ summary: TodaySummary) -> String {
+        guard summary.savedHoursMonth >= 0.1 else {
+            return t("за месяц пока немного", "not much this month yet")
+        }
+        let hours = String(format: "%.1f", summary.savedHoursMonth)
+            .replacingOccurrences(of: ".", with: language == .russian ? "," : ".")
+        return t("\(hours) часа за месяц", "\(hours) hours this month")
+    }
+
+    private func recentEntryTimeText(_ entry: TranscriptHistoryEntry) -> String {
+        guard let createdAt = entry.createdAt else {
+            return t("ранее", "earlier")
+        }
+        let elapsed = Date().timeIntervalSince(createdAt)
+        if elapsed < 60 {
+            return t("только что", "just now")
+        }
+        if elapsed < 3600 {
+            let minutes = Int(elapsed / 60)
+            return t("\(minutes) мин назад", "\(minutes) min ago")
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .russian ? "ru_RU" : "en_US")
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: createdAt)
     }
 
     private func makeMainHistoryView() -> NSView {
@@ -2005,6 +2643,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     @objc private func openSettingsClicked(_ sender: NSButton) {
+        openSettingsWindow()
+    }
+
+    func openSettingsWindow() {
         if let settingsWindow {
             settingsWindow.contentView = makeSettingsContentView()
             settingsWindow.makeKeyAndOrderFront(nil)
@@ -2307,6 +2949,15 @@ func exportHistoryPanelPreviews(to directory: URL) throws {
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     let now = Date()
     let settings = Settings.shared
+    // Превью подменяет историю и статистику сэмплами. Раньше подмена была
+    // безвозвратной: запуск ключа у установленного .app стирал реальные
+    // диктовки пользователя. Снимаем состояние и возвращаем его на выходе.
+    let savedEntries = settings.recentTranscriptEntries
+    let savedUsage = settings.dailyDictationUsage
+    defer {
+        settings.recentTranscriptEntries = savedEntries
+        settings.dailyDictationUsage = savedUsage
+    }
     settings.recentTranscriptEntries = [
         TranscriptHistoryEntry(text: "Привет! По итогам звонка присылаю короткое резюме и три следующих шага, посмотри до пятницы",
                                transcriptionDurationSeconds: 1.2,
@@ -2335,32 +2986,37 @@ func exportHistoryPanelPreviews(to directory: URL) throws {
     settings.dailyDictationUsage = usage
 
     let panel = DictorControlPanelApp()
-    let size = NSSize(width: 620, height: 640)
+    let size = MAIN_WINDOW_SIZE
     let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                           styleMask: [.borderless],
                           backing: .buffered,
                           defer: false)
     window.colorSpace = .sRGB
     var exported = 0
-    for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
-                                     ("dark", NSAppearance.Name.darkAqua)] {
-        window.appearance = NSAppearance(named: appearanceName)
-        let view = panel.makeMainHistoryViewForPreview()
-        view.frame = NSRect(origin: .zero, size: size)
-        window.contentView = view
-        view.layoutSubtreeIfNeeded()
-        window.layoutIfNeeded()
-        window.displayIfNeeded()
-        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-            throw SettingsPreviewExportError(message: "no bitmap rep for history-\(suffix)")
+    // Каждый раздел окна (макет 6a/6b) в обеих темах.
+    for section in [MainWindowSection.today, .history, .dictionary] {
+        for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                         ("dark", NSAppearance.Name.darkAqua)] {
+            window.appearance = NSAppearance(named: appearanceName)
+            panel.mainSection = section
+            let name = "\(section.rawValue)-\(suffix)"
+            let view = panel.makeMainWindowView()
+            view.frame = NSRect(origin: .zero, size: size)
+            window.contentView = view
+            view.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                throw SettingsPreviewExportError(message: "no bitmap rep for \(name)")
+            }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            guard let png = rep.representation(using: .png, properties: [:]) else {
+                throw SettingsPreviewExportError(message: "PNG encode failed for \(name)")
+            }
+            try png.write(to: directory.appendingPathComponent("\(name).png"),
+                          options: .atomic)
+            exported += 1
         }
-        view.cacheDisplay(in: view.bounds, to: rep)
-        guard let png = rep.representation(using: .png, properties: [:]) else {
-            throw SettingsPreviewExportError(message: "PNG encode failed for history-\(suffix)")
-        }
-        try png.write(to: directory.appendingPathComponent("history-\(suffix).png"),
-                      options: .atomic)
-        exported += 1
     }
     window.contentView = nil
     guard exported > 0 else {
