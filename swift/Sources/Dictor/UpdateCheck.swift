@@ -606,7 +606,7 @@ func updateHelperScript(pid: pid_t,
     """#
 }
 
-func superDictateDirectUpdateHelperScript(pid: pid_t,
+func dictorDirectUpdateHelperScript(pid: pid_t,
                                            targetVersion: String,
                                            statePath: String,
                                            stagedAppPath: String,

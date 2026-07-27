@@ -2880,7 +2880,7 @@ enum DictorSelfTest {
             }
         }
 
-        let directScript = superDictateDirectUpdateHelperScript(
+        let directScript = dictorDirectUpdateHelperScript(
             pid: 123,
             targetVersion: "9.8.7",
             statePath: "/tmp/dictor-update.state",
@@ -3086,7 +3086,7 @@ enum DictorSelfTest {
         try Data("starting\tStarting update…\n".utf8).write(to: statePath)
         defer { try? fileManager.removeItem(at: root) }
 
-        let script = superDictateDirectUpdateHelperScript(
+        let script = dictorDirectUpdateHelperScript(
             pid: Int32.max,
             targetVersion: "9.8.7",
             statePath: statePath.path,

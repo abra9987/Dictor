@@ -9,7 +9,7 @@ Before opening a pull request, run:
 ```bash
 ./scripts/check.sh
 swift run -c debug --package-path swift Parakey --self-test all
-./scripts/build-app.sh ./dist/SuperDictate.app
+./scripts/build-app.sh ./dist/Dictor.app
 ```
 
 The release version in `swift/Info.plist` and `install.sh` must match. Release
