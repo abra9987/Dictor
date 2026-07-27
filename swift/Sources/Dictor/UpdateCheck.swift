@@ -614,7 +614,15 @@ func dictorDirectUpdateHelperScript(pid: pid_t,
                                            backupAppPath: String,
                                            appPath: String,
                                            language: InterfaceLanguage,
-                                           relaunch: Bool = true) -> String {
+                                           relaunch: Bool = true,
+                                           // Parameterised for one reason: the self-test runs this
+                                           // script for real against a temporary bundle, and a
+                                           // hard-coded label made it boot out the live agent —
+                                           // running the tests uninstalled the user's dictation
+                                           // service. Everything else in the script is already
+                                           // addressed by path, so the label was the last thing
+                                           // reaching outside the sandbox.
+                                           agentLabel: String = AGENT_LABEL) -> String {
     let preparing = localizedText("Подготавливаю замену приложения…",
                                   "Preparing to replace the application…",
                                   language: language)
@@ -650,7 +658,7 @@ func dictorDirectUpdateHelperScript(pid: pid_t,
     SHOULD_RELAUNCH=\#(relaunch ? "1" : "0")
     APP_PARENT="$(/usr/bin/dirname "$APP_PATH")"
     INFO_PLIST="$APP_PATH/Contents/Info.plist"
-    SERVICE="gui/$(/usr/bin/id -u)/\#(AGENT_LABEL)"
+    SERVICE="gui/$(/usr/bin/id -u)/\#(agentLabel)"
 
     timestamp() {
         /bin/date -u '+%Y-%m-%dT%H:%M:%SZ'

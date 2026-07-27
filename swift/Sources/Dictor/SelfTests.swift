@@ -2987,6 +2987,7 @@ enum DictorSelfTest {
             "STAGED_APP='/tmp/work/release/Dictor.app'",
             "BACKUP_APP='/Applications/.Dictor-update-backup-test.app'",
             "wait_for_panel_exit || rollback",
+            "SERVICE=\"gui/$(/usr/bin/id -u)/\(AGENT_LABEL)\"",
             "launchctl bootout \"$SERVICE\"",
             "/bin/mv \"$APP_PATH\" \"$BACKUP_APP\" || rollback",
             "/usr/bin/ditto \"$STAGED_APP\" \"$APP_PATH\" || rollback",
@@ -3186,7 +3187,16 @@ enum DictorSelfTest {
             backupAppPath: backupApp.path,
             appPath: currentApp.path,
             language: .english,
-            relaunch: false
+            relaunch: false,
+            // Never the real label: this script is executed, not just
+            // parsed, and its bootout line would otherwise uninstall the
+            // dictation service of whoever is running the tests.
+            agentLabel: "com.raul.dictor.self-test-\(UUID().uuidString)"
+        )
+        try expect(
+            script.contains(AGENT_LABEL),
+            equals: false,
+            "an update helper script that the tests actually execute must not name the real launchd service"
         )
         try script.write(to: helperPath, atomically: true, encoding: .utf8)
         let process = Process()
