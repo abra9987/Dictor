@@ -3991,7 +3991,61 @@ enum DictorSelfTest {
         )
     }
 
+    /// Cmd+Tab переставал переключать приложения, стоило назначить
+    /// диктовку на «Command + правый Option»: перехватчик глотал каждое
+    /// событие Command, потому что Command входит в сочетание.
+    /// Cmd+C при этом работал и сбивал с толку — обычные сочетания
+    /// читают флаг из самого события клавиши, а переключатель приложений
+    /// живёт на удержании Command.
+    private static func testCompanionModifierReachesTheSystem() throws {
+        var state = HotkeyTransitionState()
+        let shortcut = hotkeyChoice(forKeycode: RIGHT_OPTION_KEYCODE,
+                                    modifiers: .maskCommand)
+        let unrelatedEnter = hotkeyChoice(forKeycode: 80)
+        let unrelatedHistory = hotkeyChoice(forKeycode: 81)
+        let command = CGEventFlags.maskCommand.rawValue
+
+        func send(keycode: CGKeyCode, flags: UInt64) -> HotkeyTransitionResult {
+            state.transition(for: event(.flagsChanged, keycode: keycode, flags: flags),
+                             hotkey: shortcut,
+                             enterHotkey: unrelatedEnter,
+                             historyHotkey: unrelatedHistory,
+                             triggerMode: .toggle,
+                             isRecording: false)
+        }
+
+        try expect(
+            send(keycode: LEFT_COMMAND_KEYCODE, flags: command),
+            equals: .pass,
+            "holding Command alone must reach the system, or Cmd+Tab never opens"
+        )
+        try expect(
+            send(keycode: LEFT_COMMAND_KEYCODE, flags: 0),
+            equals: .pass,
+            "releasing Command must reach the system, or it stays stuck down"
+        )
+
+        // Само сочетание при этом продолжает работать.
+        _ = send(keycode: LEFT_COMMAND_KEYCODE, flags: command)
+        try expect(
+            send(keycode: RIGHT_OPTION_KEYCODE,
+                 flags: command | CGEventFlags.maskAlternate.rawValue),
+            equals: HotkeyTransitionResult(suppress: true, actions: [.press]),
+            "the assigned key still starts dictation and is still swallowed"
+        )
+        // И отпускание Command после сочетания тоже обязано дойти:
+        // иначе система остаётся уверенной, что Command всё ещё зажат.
+        _ = send(keycode: RIGHT_OPTION_KEYCODE, flags: command)
+        try expect(
+            send(keycode: LEFT_COMMAND_KEYCODE, flags: 0).suppress,
+            equals: false,
+            "the trailing Command release must reach the system too"
+        )
+    }
+
     private static func testModifierOnlyChordMatching() throws {
+        try testCompanionModifierReachesTheSystem()
+
         var state = HotkeyTransitionState()
         let shortcut = hotkeyChoice(forKeycode: RIGHT_COMMAND_KEYCODE,
                                     modifiers: [.maskAlternate, .maskCommand])
@@ -4007,8 +4061,11 @@ enum DictorSelfTest {
                              enterHotkey: unrelatedEnterShortcut,
                              triggerMode: .toggle,
                              isRecording: false),
-            equals: .suppressOnly,
-            "the first modifier in a configured chord should be reserved"
+            equals: .pass,
+            // Раньше здесь стояло «первый модификатор аккорда
+            // зарезервирован» — и это утверждение и было багом: пока
+            // сочетание не набрано, модификатор принадлежит системе.
+            "a companion modifier on its own belongs to the system, not to us"
         )
         try expect(
             state.transition(for: event(.flagsChanged,
@@ -4049,7 +4106,10 @@ enum DictorSelfTest {
                              enterHotkey: unrelatedEnterShortcut,
                              triggerMode: .toggle,
                              isRecording: true),
-            equals: HotkeyTransitionResult(suppress: true, actions: [.release]),
+            // Аккорд замкнулся на клавише-спутнике, а не на назначенной,
+            // поэтому событие уходит системе: диктовка останавливается,
+            // но модификатор остаётся её собственностью.
+            equals: HotkeyTransitionResult(suppress: false, actions: [.release]),
             "the same modifier chord should stop dictation on its next activation"
         )
     }
@@ -4146,8 +4206,8 @@ enum DictorSelfTest {
                                   hotkey: rightCommand,
                                   triggerMode: .toggle,
                                   isRecording: false),
-            equals: .suppressOnly,
-            "the first key of the history chord should be reserved until the chord completes"
+            equals: .pass,
+            "a lone Shift belongs to the system even though the history chord starts with it"
         )
         try expect(
             shiftFirst.transition(for: event(.flagsChanged,
@@ -4176,8 +4236,10 @@ enum DictorSelfTest {
                                   hotkey: rightCommand,
                                   triggerMode: .toggle,
                                   isRecording: false),
-            equals: .suppressOnly,
-            "history chord should suppress the paired right shift release"
+            // Нажатие Shift система видела — значит обязана увидеть и
+            // отпускание, иначе он для неё остаётся зажатым.
+            equals: .pass,
+            "the paired shift release must reach the system, unlike the assigned key's"
         )
 
         var requiredModifierReleasedFirst = HotkeyTransitionState()
@@ -4206,8 +4268,8 @@ enum DictorSelfTest {
                 triggerMode: .toggle,
                 isRecording: false
             ),
-            equals: .suppressOnly,
-            "releasing Shift first should begin suppressing the history chord release"
+            equals: .pass,
+            "releasing Shift first still hands the system its own modifier back"
         )
         try expect(
             requiredModifierReleasedFirst.transition(
@@ -4242,7 +4304,9 @@ enum DictorSelfTest {
                 triggerMode: .toggle,
                 isRecording: false
             ),
-            equals: .suppressOnly,
+            // Смысл проверки прежний — история не открывается; изменилось
+            // только то, что чужой Shift мы больше не съедаем.
+            equals: .pass,
             "left Command plus Shift must not trigger right Command history"
         )
 
@@ -4264,7 +4328,9 @@ enum DictorSelfTest {
                                     hotkey: rightCommand,
                                     triggerMode: .toggle,
                                     isRecording: true),
-            equals: HotkeyTransitionResult(suppress: true, actions: [.showHistory]),
+            // Аккорд замкнулся на Shift, а не на назначенном Right
+            // Command, поэтому Shift уходит системе.
+            equals: HotkeyTransitionResult(suppress: false, actions: [.showHistory]),
             "history chord should show history without canceling active dictation"
         )
         try expect(
@@ -4284,8 +4350,10 @@ enum DictorSelfTest {
                                     hotkey: rightCommand,
                                     triggerMode: .toggle,
                                     isRecording: true),
-            equals: .suppressOnly,
-            "history chord should suppress the paired right shift release"
+            // Нажатие Shift система видела — значит обязана увидеть и
+            // отпускание, иначе он для неё остаётся зажатым.
+            equals: .pass,
+            "the paired shift release must reach the system, unlike the assigned key's"
         )
         try expect(
             commandFirst.transition(for: event(.flagsChanged,
@@ -4341,8 +4409,8 @@ enum DictorSelfTest {
                              hotkey: rightCommand,
                              triggerMode: .toggle,
                              isRecording: true),
-            equals: .suppressOnly,
-            "right option should be held for the enter chord while recording"
+            equals: .pass,
+            "right option opens the enter chord but stays the system's key"
         )
         try expect(
             state.transition(for: event(.flagsChanged,
@@ -4371,8 +4439,8 @@ enum DictorSelfTest {
                              hotkey: rightCommand,
                              triggerMode: .toggle,
                              isRecording: false),
-            equals: .suppressOnly,
-            "enter chord should suppress the paired right option release"
+            equals: .pass,
+            "the paired right option release goes back to the system, not swallowed"
         )
 
     }

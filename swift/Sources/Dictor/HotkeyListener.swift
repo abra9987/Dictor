@@ -583,6 +583,7 @@ struct HotkeyTransitionState {
         }
 
         let edge = standardShortcutState.consume(event, shortcut: hotkey)
+        let claims = claimsEvent(event, shortcut: hotkey)
 
         switch triggerMode {
         case .hold:
@@ -590,15 +591,17 @@ struct HotkeyTransitionState {
             if edge == .press { actions.append(.press) }
             if edge == .release { actions.append(.release) }
             guard edge != .pass else { return .pass }
-            return HotkeyTransitionResult(suppress: true, actions: actions)
+            return HotkeyTransitionResult(suppress: claims, actions: actions)
         case .toggle:
             // Toggle mode: every press flips between "start recording"
             // and "stop recording". Releases are no-ops.
             guard edge != .pass else { return .pass }
-            guard edge == .press else { return .suppressOnly }
+            guard edge == .press else {
+                return HotkeyTransitionResult(suppress: claims, actions: [])
+            }
             if toggleActive {
                 toggleActive = false
-                return HotkeyTransitionResult(suppress: true, actions: [.release])
+                return HotkeyTransitionResult(suppress: claims, actions: [.release])
             }
             // A press the app will reject (model loading, a
             // transcription in flight, terminating) must not flip the
@@ -611,11 +614,24 @@ struct HotkeyTransitionState {
             // flipping toggle state — handlePress() is never reached
             // in toggle mode because the state machine gates it here.
             guard canStartRecording else {
-                return HotkeyTransitionResult(suppress: true, actions: [.rejectedBusyPress])
+                return HotkeyTransitionResult(suppress: claims, actions: [.rejectedBusyPress])
             }
             toggleActive = true
-            return HotkeyTransitionResult(suppress: true, actions: [.press])
+            return HotkeyTransitionResult(suppress: claims, actions: [.press])
         }
+    }
+
+    /// Может ли перехватчик съесть само событие.
+    ///
+    /// Только событие той клавиши, которую пользователь назначил. Клавиши
+    /// -спутники в аккорде (Command в «Command + правый Option») система
+    /// обязана видеть: сочетание набирают на них же. Проглоченное нажатие
+    /// Command ломает переключатель приложений — он живёт на удержании
+    /// Command, а не на флаге в событии клавиши, поэтому Cmd+C работал, а
+    /// Cmd+Tab нет. Проглоченное отпускание ещё хуже: система остаётся
+    /// уверенной, что модификатор всё ещё зажат.
+    private func claimsEvent(_ event: HotkeyEventSnapshot, shortcut: HotkeyChoice) -> Bool {
+        event.keycode == shortcut.keycode
     }
 
     private mutating func transitionHistoryShortcut(
@@ -623,6 +639,7 @@ struct HotkeyTransitionState {
         isRecording: Bool,
         historyHotkey: HotkeyChoice
     ) -> HotkeyTransitionResult? {
+        let claims = claimsEvent(event, shortcut: historyHotkey)
         switch historyShortcutState.consume(event, shortcut: historyHotkey) {
         case .press:
             standardShortcutState.reset()
@@ -630,9 +647,9 @@ struct HotkeyTransitionState {
             if !isRecording {
                 toggleActive = false
             }
-            return HotkeyTransitionResult(suppress: true, actions: [.showHistory])
+            return HotkeyTransitionResult(suppress: claims, actions: [.showHistory])
         case .release, .suppress:
-            return .suppressOnly
+            return HotkeyTransitionResult(suppress: claims, actions: [])
         case .pass:
             return nil
         }
@@ -644,13 +661,14 @@ struct HotkeyTransitionState {
         enterHotkey: HotkeyChoice
     ) -> HotkeyTransitionResult? {
         guard isRecording || enterShortcutState.isEngaged else { return nil }
+        let claims = claimsEvent(event, shortcut: enterHotkey)
         switch enterShortcutState.consume(event, shortcut: enterHotkey) {
         case .press where isRecording:
             standardShortcutState.reset()
             toggleActive = false
-            return HotkeyTransitionResult(suppress: true, actions: [.releaseAlternate])
+            return HotkeyTransitionResult(suppress: claims, actions: [.releaseAlternate])
         case .press, .release, .suppress:
-            return .suppressOnly
+            return HotkeyTransitionResult(suppress: claims, actions: [])
         case .pass:
             return nil
         }
