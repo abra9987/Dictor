@@ -337,6 +337,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             addDictTabRows(to: root)
         case "look":
             addLookTabRows(to: root, draft: draft)
+        case "advanced":
+            addAdvancedTabRows(to: root)
         case "privacy":
             addPrivacyTabRows(to: root)
         default:
@@ -388,6 +390,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                     ("model", t("Модель", "Model")),
                     ("dict", t("Словарь", "Dictionary")),
                     ("look", t("Внешний вид", "Appearance")),
+                    ("advanced", t("Продвинутые", "Advanced")),
                     ("privacy", t("Приватность", "Privacy"))]
         // Макет: таб padding 5px 12px, радиус 7, шрифт 12; активный —
         // 600, ink, пилюля rgba(0,0,0,.08)/rgba(255,255,255,.1);
@@ -2472,6 +2475,162 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
 
 
+    // MARK: - Вкладка «Продвинутые» (макет 6d)
+    //
+    // Из макета сюда сознательно не перенесены четыре элемента, под
+    // которыми нет ни данных, ни поведения:
+    //
+    // • «В покое» (прозрачность) и «Прятать капсулу» — управляют
+    //   капсулой, которой между диктовками не существует. Обе строки
+    //   требуют постоянной плавающей капсулы из макета 6c.
+    // • «Перетащите капсулу мышью» — то же самое: тащить нечего.
+    // • «Предлагать слова в словарь» — такой функции в приложении нет,
+    //   тумблер включал бы пустоту.
+    //
+    // «Системные уведомления» и «Держать модель в памяти» остались, но
+    // как факты, а не тумблеры: уведомлений приложение не шлёт вообще,
+    // а модель и так никогда не выгружается, кроме смены модели. Тумблер,
+    // который ничего не переключает, врёт убедительнее отсутствующего.
+    private func addAdvancedTabRows(to root: NSStackView) {
+        root.addArrangedSubview(advancedSectionHeader(t("Капсула", "Capsule")))
+
+        let placementPills = SDPills(options: [
+            .init(title: t("У поля ввода", "At the text field"),
+                  value: RecordingHUDPlacement.followsInput.rawValue),
+            .init(title: t("Снизу по центру", "Bottom center"),
+                  value: RecordingHUDPlacement.bottomCenter.rawValue),
+        ], selected: settings.recordingHUDPlacement.rawValue)
+        placementPills.onSelect = { [weak self] raw in
+            guard let placement = RecordingHUDPlacement(rawValue: raw) else { return }
+            self?.settings.recordingHUDPlacement = placement
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Положение", "Position"),
+            subtitle: t("Размер капсулы — во вкладке «Внешний вид»",
+                        "Capsule size lives in the Appearance tab"),
+            control: placementPills,
+            verticalPadding: 12
+        ))
+
+        root.addArrangedSubview(advancedSectionHeader(t("Тишина", "Silence")))
+        let silenceNote = panelLabel(
+            t("По умолчанию приложение молчит: ни баннеров, ни звуков. Всё, что нужно сказать, показывает сама капсула.",
+              "The app stays quiet by default: no banners, no sounds. Anything worth saying, the capsule says itself."),
+            size: 11.5, color: SD.C.graphite)
+        silenceNote.maximumNumberOfLines = 2
+        silenceNote.preferredMaxLayoutWidth = 470
+        let noteRow = NSStackView(views: [silenceNote])
+        noteRow.orientation = .vertical
+        noteRow.alignment = .leading
+        noteRow.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 10, right: 0)
+        root.addArrangedSubview(noteRow)
+
+        root.addArrangedSubview(SDRowView(
+            title: t("Системные уведомления", "System notifications"),
+            control: panelLabel(t("Не отправляются", "Never sent"), size: 12, weight: .medium),
+            verticalPadding: 12
+        ))
+
+        let soundToggle = SDToggle()
+        soundToggle.isOn = settings.playFeedbackSounds
+        soundToggle.onToggle = { [weak self] isOn in
+            self?.settings.playFeedbackSounds = isOn
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Звук старта и остановки", "Start and stop sound"),
+            control: soundToggle,
+            verticalPadding: 12
+        ))
+
+        root.addArrangedSubview(advancedSectionHeader(t("Производительность", "Performance")))
+        root.addArrangedSubview(performanceTilesRow())
+
+        root.addArrangedSubview(SDRowView(
+            title: t("Модель в памяти", "Model in memory"),
+            subtitle: t("Выгружается только при смене модели — первая диктовка без задержки",
+                        "Unloaded only when the model changes — the first dictation has no warm-up"),
+            control: panelLabel(t("Всегда", "Always"), size: 12, weight: .medium),
+            hairline: false,
+            verticalPadding: 12
+        ))
+    }
+
+    private func advancedSectionHeader(_ title: String) -> NSView {
+        let label = historySectionLabel(title)
+        let wrapper = NSStackView(views: [label])
+        wrapper.orientation = .vertical
+        wrapper.alignment = .leading
+        // Макет: секция отбита сверху заметно сильнее, чем строки между
+        // собой — 20px против 13px внутри строки.
+        wrapper.edgeInsets = NSEdgeInsets(top: 20, left: 0, bottom: 4, right: 0)
+        return wrapper
+    }
+
+    private func performanceTilesRow() -> NSView {
+        let entries = settings.recentTranscriptEntries
+        let recognition = medianRecognitionSeconds(entries: entries)
+        let agentPID = AgentRuntimeStateStore.read()?.pid ?? 0
+        let sample = processResourceSample(pid: agentPID)
+
+        let recognitionTile = SDMetricTile(
+            value: recognition.map { recognitionDurationLabel($0, language: language) } ?? "—",
+            caption: recognition == nil
+                ? t("распознайте что-нибудь, и здесь появится цифра",
+                    "dictate something and a number shows up here")
+                : t("от отпускания клавиши до текста, медиана",
+                    "from key release to text, median")
+        )
+        let memoryTile = SDMetricTile(
+            value: sample.map { memoryFootprintLabel($0.physicalFootprintBytes, language: language) } ?? "—",
+            caption: sample == nil
+                ? t("служба не запущена", "the service is not running")
+                : t("памяти у службы", "memory used by the service")
+        )
+        // Процессорное время имеет смысл только как разница двух замеров,
+        // поэтому плитка сначала честно пустая и заполняется через секунду.
+        let cpuTile = SDMetricTile(value: "…", caption: t("CPU, пока молчите", "CPU while you are silent"))
+        if let sample, agentPID > 0 {
+            scheduleCPUTileUpdate(tile: cpuTile, baseline: sample, pid: agentPID)
+        } else {
+            cpuTile.update(value: "—", caption: t("служба не запущена", "the service is not running"))
+        }
+
+        let row = NSStackView(views: [recognitionTile, memoryTile, cpuTile])
+        row.orientation = .horizontal
+        row.spacing = 10
+        row.distribution = .fillEqually
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let wrapper = NSView()
+        wrapper.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            row.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 8),
+            row.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor, constant: -14),
+        ])
+        return wrapper
+    }
+
+    private func scheduleCPUTileUpdate(tile: SDMetricTile,
+                                       baseline: ProcessResourceSample,
+                                       pid: Int32) {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak tile] _ in
+            MainActor.assumeIsolated {
+                // weak tile: вкладка пересобирается на каждом refresh, и
+                // к моменту выстрела эта плитка может быть уже не на экране.
+                guard let tile, tile.window != nil else { return }
+                guard let later = processResourceSample(pid: pid) else { return }
+                let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+                guard let percent = cpuLoadPercent(from: baseline,
+                                                   to: later,
+                                                   elapsedSeconds: elapsed) else { return }
+                tile.update(value: percent < 0.5 ? "0%" : String(format: "%.0f%%", percent),
+                            caption: nil)
+            }
+        }
+    }
+
     private func compactPermissionsCard() -> NSView {
         let missing = Permission.allCases.filter { !Permissions.isGranted($0) }
         let card = compactCard()
@@ -3500,7 +3659,7 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
                           defer: false)
     window.colorSpace = .sRGB
     var exported = 0
-    for tab in ["general", "hotkeys", "model", "dict", "look", "privacy"] {
+    for tab in ["general", "hotkeys", "model", "dict", "look", "advanced", "privacy"] {
         panel.settingsTab = tab
         for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                          ("dark", NSAppearance.Name.darkAqua)] {
