@@ -94,6 +94,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private weak var mainHistorySearchField: NSSearchField?
     /// Раздел главного окна (макет 6a): «Сегодня» открывается первым.
     var mainSection: MainWindowSection = .today
+    /// Выбранная запись в «Истории» и фильтр «Закреплённые» (макет 6b).
+    private var historySelectionKey: String?
+    private var historyShowsPinnedOnly = false
 
     private var language: InterfaceLanguage { settings.interfaceLanguage }
 
@@ -203,11 +206,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let fingerprint = renderFingerprint()
         guard force || fingerprint != lastRenderFingerprint else { return }
         lastRenderFingerprint = fingerprint
+        // Вид пересобирается целиком, поэтому фокус и каретку поиска
+        // приходится снимать до замены и возвращать после.
+        let focusState = capturedSearchFocusState(in: window)
         // Главное окно по макету 6a: сайдбар + раздел. Настройки живут
         // в отдельном окне settingsWindow (макет 2c/4b/6d).
         window.title = "Dictor"
         window.contentView = makeMainWindowView()
-        restoreMainHistorySearchFocusIfNeeded(in: window)
+        restoreSearchFocus(focusState, in: window)
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
             settingsWindow.contentView = makeSettingsContentView()
@@ -217,10 +223,34 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    private func restoreMainHistorySearchFocusIfNeeded(in window: NSWindow) {
-        guard !mainHistorySearch.isEmpty, let field = mainHistorySearchField else { return }
+    /// Было ли поле поиска в фокусе и где стояла каретка. Раньше фокус
+    /// возвращался только при непустом запросе, поэтому стирание последнего
+    /// символа выбрасывало из поля, а каретка всегда прыгала в конец.
+    private struct SearchFocusState {
+        let hadFocus: Bool
+        let selectedRange: NSRange?
+    }
+
+    private func capturedSearchFocusState(in window: NSWindow) -> SearchFocusState {
+        guard let field = mainHistorySearchField,
+              let editor = field.currentEditor(),
+              window.firstResponder === editor else {
+            return SearchFocusState(hadFocus: false, selectedRange: nil)
+        }
+        return SearchFocusState(hadFocus: true, selectedRange: editor.selectedRange)
+    }
+
+    private func restoreSearchFocus(_ state: SearchFocusState, in window: NSWindow) {
+        guard state.hadFocus, let field = mainHistorySearchField else { return }
         window.makeFirstResponder(field)
-        field.currentEditor()?.moveToEndOfLine(nil)
+        guard let editor = field.currentEditor() else { return }
+        let length = (field.stringValue as NSString).length
+        if let range = state.selectedRange,
+           range.location + range.length <= length {
+            editor.selectedRange = range
+        } else {
+            editor.selectedRange = NSRange(location: length, length: 0)
+        }
     }
 
 
@@ -1428,22 +1458,62 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return formatter.string(from: createdAt)
     }
 
+    // MARK: - Раздел «История» (макет 6b)
+
+    /// Три колонки: сайдбар (снаружи), список результатов 328pt и
+    /// детальный просмотр. Аудио и «как было сказано» из макета не
+    /// показываем — запись удаляется сразу, сырой текст не сохраняется.
     private func makeMainHistoryView() -> NSView {
+        let entries = filteredMainHistory()
+        let selected = selectedHistoryEntry(among: entries)
+
+        let list = makeHistoryListColumn(entries: entries, selected: selected)
+        list.translatesAutoresizingMaskIntoConstraints = false
+        let divider = SDHairlineView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        let detail = makeHistoryDetailPane(selected: selected)
+        detail.translatesAutoresizingMaskIntoConstraints = false
+
         let root = PaperBackgroundView()
         root.fill = SD.C.settingsPaper
+        root.addSubview(list)
+        root.addSubview(divider)
+        root.addSubview(detail)
+        NSLayoutConstraint.activate([
+            list.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            list.topAnchor.constraint(equalTo: root.topAnchor),
+            list.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            list.widthAnchor.constraint(equalToConstant: 328),
+            divider.leadingAnchor.constraint(equalTo: list.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: root.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            detail.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            detail.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            detail.topAnchor.constraint(equalTo: root.topAnchor),
+            detail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        return root
+    }
 
-        // Шапка: пилюля поиска + шестерёнка настроек (padding 12px 16px).
-        let searchPill = NSView()
-        searchPill.wantsLayer = true
-        searchPill.layer?.cornerRadius = 7
-        searchPill.layer?.backgroundColor = root.resolvedCGColor(NSColor(name: nil) { appearance in
-            appearance.isDark
-                ? NSColor.white.withAlphaComponent(0.07)
-                : NSColor.black.withAlphaComponent(0.05)
-        })
+    /// Средняя колонка: поиск, фильтры, счётчик совпадений, список.
+    private func makeHistoryListColumn(entries: [(Int, TranscriptHistoryEntry)],
+                                       selected: (Int, TranscriptHistoryEntry)?) -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.listPaper
+
+        // Поиск: белое поле 30pt, радиус 8, рамка rgba(0,0,0,.1).
+        let searchBox = SDCardBackgroundView()
+        searchBox.layer?.cornerRadius = 8
+        let magnifier = NSImageView()
+        magnifier.image = NSImage(systemSymbolName: "magnifyingglass",
+                                  accessibilityDescription: nil)
+        magnifier.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11,
+                                                                    weight: .regular)
+        magnifier.contentTintColor = SD.C.subtle
         let search = NSSearchField()
         search.placeholderString = t("Искать в истории…", "Search history…")
-        search.font = .systemFont(ofSize: 12)
+        search.font = .systemFont(ofSize: 12.5)
         search.isBordered = false
         search.drawsBackground = false
         search.focusRingType = .none
@@ -1453,97 +1523,90 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         search.sendsSearchStringImmediately = true
         search.translatesAutoresizingMaskIntoConstraints = false
         mainHistorySearchField = search
-        searchPill.addSubview(search)
-        searchPill.translatesAutoresizingMaskIntoConstraints = false
+        // Системная лупа-кнопка не нужна: значок нарисован слева по макету.
+        (search.cell as? NSSearchFieldCell)?.searchButtonCell = nil
+        magnifier.translatesAutoresizingMaskIntoConstraints = false
+        searchBox.addSubview(magnifier)
+        searchBox.addSubview(search)
         NSLayoutConstraint.activate([
-            searchPill.heightAnchor.constraint(equalToConstant: 28),
-            search.leadingAnchor.constraint(equalTo: searchPill.leadingAnchor, constant: 6),
-            search.trailingAnchor.constraint(equalTo: searchPill.trailingAnchor, constant: -6),
-            search.centerYAnchor.constraint(equalTo: searchPill.centerYAnchor),
+            searchBox.heightAnchor.constraint(equalToConstant: 30),
+            magnifier.leadingAnchor.constraint(equalTo: searchBox.leadingAnchor, constant: 11),
+            magnifier.centerYAnchor.constraint(equalTo: searchBox.centerYAnchor),
+            search.leadingAnchor.constraint(equalTo: magnifier.trailingAnchor, constant: 8),
+            search.trailingAnchor.constraint(equalTo: searchBox.trailingAnchor, constant: -10),
+            search.centerYAnchor.constraint(equalTo: searchBox.centerYAnchor),
         ])
 
-        let gear = NSButton(title: t("Настройки", "Settings"),
-                            target: self,
-                            action: #selector(openSettingsClicked(_:)))
-        gear.isBordered = false
-        gear.font = .systemFont(ofSize: 12, weight: .medium)
-        gear.contentTintColor = SD.C.ink
+        // Фильтры. Пилюль по приложениям из макета нет: источник диктовки
+        // не сохраняется, поэтому остаются «Все» и «Закреплённые».
+        let filters = SDPills(options: [
+            .init(title: t("Все", "All"), value: "all"),
+            .init(title: t("Закреплённые", "Pinned"), value: "pinned"),
+        ], selected: historyShowsPinnedOnly ? "pinned" : "all")
+        filters.onSelect = { [weak self] value in
+            self?.historyShowsPinnedOnly = value == "pinned"
+            self?.refresh(force: true)
+        }
 
-        let header = NSStackView(views: [searchPill, NSView(), gear])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 10
-        header.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
-        searchPill.widthAnchor.constraint(equalTo: header.widthAnchor,
-                                          constant: -140).isActive = true
+        let header = NSStackView(views: [searchBox, filters])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 9
+        header.edgeInsets = NSEdgeInsets(top: 11, left: 14, bottom: 11, right: 14)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        searchBox.translatesAutoresizingMaskIntoConstraints = false
 
-        // Список: весь архив с группировкой по дням, прокрутка.
-        let entries = filteredMainHistory()
+        let countLabel = NSTextField(labelWithString: "")
+        countLabel.attributedStringValue = NSAttributedString(
+            string: historyMatchesCaption(count: entries.count).uppercased(),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+                .foregroundColor: SD.C.subtle,
+                .kern: 0.5,
+            ])
+        let countRow = NSStackView(views: [countLabel])
+        countRow.orientation = .vertical
+        countRow.alignment = .leading
+        countRow.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 6, right: 14)
+
         let listStack = NSStackView()
         listStack.orientation = .vertical
         listStack.alignment = .leading
-        listStack.spacing = 0
-        listStack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 12, right: 12)
+        listStack.spacing = 3
+        listStack.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 12, right: 8)
+        listStack.translatesAutoresizingMaskIntoConstraints = false
 
         if entries.isEmpty {
-            listStack.alignment = .centerX
-            listStack.edgeInsets = NSEdgeInsets(top: 48, left: 24, bottom: 48, right: 24)
-            let wave = QuickPanelWaveView()
-            wave.isActive = false
-            wave.alphaValue = 0.45
-            wave.translatesAutoresizingMaskIntoConstraints = false
-            wave.widthAnchor.constraint(equalToConstant: 48).isActive = true
-            wave.heightAnchor.constraint(equalToConstant: 16).isActive = true
-            listStack.addArrangedSubview(wave)
-            listStack.setCustomSpacing(10, after: wave)
-            let title = panelLabel(mainHistorySearch.isEmpty
-                                       ? t("Пока тихо", "Quiet so far")
-                                       : t("Ничего не нашлось", "No matches"),
-                                   size: 13, weight: .semibold)
-            listStack.addArrangedSubview(title)
-            listStack.setCustomSpacing(3, after: title)
-            if mainHistorySearch.isEmpty {
-                let caps = keycapLabels(for: settings.configuredHotkey, language: language)
-                    .joined(separator: " + ")
-                let hint = panelLabel(
-                    t("Зажмите \(caps) в любом поле ввода — первая диктовка появится здесь.",
-                      "Hold \(caps) in any text field — your first dictation will show up here."),
-                    size: 11.5, color: SD.C.graphite)
-                hint.alignment = .center
-                hint.preferredMaxLayoutWidth = 280
-                listStack.addArrangedSubview(hint)
-            }
-        } else {
-            var lastHeader: String?
-            for (index, entry) in entries {
-                let header = historyDayHeaderText(for: entry.createdAt, language: language)
-                if header != lastHeader {
-                    lastHeader = header
-                    let label = historySectionLabel(header)
-                    let wrapper = NSStackView(views: [label])
-                    wrapper.orientation = .vertical
-                    wrapper.alignment = .leading
-                    wrapper.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 4, right: 0)
-                    listStack.addArrangedSubview(wrapper)
-                }
-                let row = HistoryTranscriptItemView(
-                    transcript: entry.text,
-                    preview: entry.text.replacingOccurrences(of: "\n", with: " "),
-                    meta: historyEntryMetaText(entry, language: language),
-                    asrTiming: entry.asrTiming,
-                    historyIndex: index,
-                    target: self,
-                    action: #selector(mainHistoryRowClicked(_:)),
-                    onDelete: { [weak self] index in
-                        self?.deleteMainHistoryEntry(at: index)
-                    })
-                listStack.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalTo: listStack.widthAnchor,
-                                           constant: -24).isActive = true
-            }
+            let empty = panelLabel(
+                mainHistorySearch.isEmpty
+                    ? t("Пока пусто", "Nothing here yet")
+                    : t("Ничего не нашлось", "No matches"),
+                size: 12.5, color: SD.C.graphite)
+            let wrapper = NSStackView(views: [empty])
+            wrapper.orientation = .vertical
+            wrapper.alignment = .centerX
+            wrapper.edgeInsets = NSEdgeInsets(top: 28, left: 12, bottom: 28, right: 12)
+            listStack.addArrangedSubview(wrapper)
+            wrapper.widthAnchor.constraint(equalTo: listStack.widthAnchor,
+                                           constant: -16).isActive = true
+        }
+        let pinned = Set(settings.pinnedTranscripts)
+        for (index, entry) in entries {
+            let row = SDHistoryResultRow(
+                entryIndex: index,
+                meta: historyRowMetaText(entry),
+                time: recentEntryTimeText(entry),
+                text: entry.text.replacingOccurrences(of: "\n", with: " "),
+                highlight: mainHistorySearch,
+                isPinned: pinned.contains(entry.text),
+                isSelected: index == selected?.0,
+                target: self,
+                action: #selector(historyResultRowClicked(_:)))
+            listStack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: listStack.widthAnchor,
+                                       constant: -16).isActive = true
         }
 
-        listStack.translatesAutoresizingMaskIntoConstraints = false
         let documentView = SDFlippedView()
         documentView.addSubview(listStack)
         NSLayoutConstraint.activate([
@@ -1561,14 +1624,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         documentView.translatesAutoresizingMaskIntoConstraints = false
         documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
 
-        let column = NSStackView(views: [
-            header,
-            SDHairlineView(),
-            historyMonthStatsRowView(usage: settings.dailyDictationUsage,
-                                     language: language),
-            SDHairlineView(),
-            scroll,
-        ])
+        let headerHairline = SDHairlineView()
+        let column = NSStackView(views: [header, headerHairline, countRow, scroll])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 0
@@ -1577,7 +1634,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         NSLayoutConstraint.activate([
             column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            column.topAnchor.constraint(equalTo: root.topAnchor),
+            column.topAnchor.constraint(equalTo: root.topAnchor,
+                                        constant: MAIN_WINDOW_HEADER_HEIGHT - 11),
             column.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         for view in column.arrangedSubviews {
@@ -1586,11 +1644,211 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return root
     }
 
+    /// Правая колонка: действия сверху, мета и полный текст диктовки.
+    private func makeHistoryDetailPane(selected: (Int, TranscriptHistoryEntry)?) -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+
+        guard let (index, entry) = selected else {
+            let empty = makeTodayEmptyState()
+            empty.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(empty)
+            NSLayoutConstraint.activate([
+                empty.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+                empty.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+                empty.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor),
+            ])
+            return root
+        }
+
+        let isPinned = settings.pinnedTranscripts.contains(entry.text)
+        let copyButton = SDPrimaryActionButton(title: t("Копировать", "Copy"),
+                                               shortcut: "⌘C",
+                                               target: self,
+                                               action: #selector(copySelectedHistoryEntry(_:)))
+        let pinButton = SDSecondaryButton(
+            title: isPinned ? t("Открепить", "Unpin") : t("Закрепить", "Pin"),
+            target: self,
+            action: #selector(togglePinSelectedHistoryEntry(_:)))
+        let deleteButton = SDSecondaryButton(title: t("Удалить", "Delete"),
+                                             target: self,
+                                             action: #selector(deleteSelectedHistoryEntry(_:)))
+        deleteButton.tag = index
+
+        let actions = NSStackView(views: [copyButton, pinButton, NSView(), deleteButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 10
+        actions.edgeInsets = NSEdgeInsets(top: 0, left: 22, bottom: 0, right: 22)
+        actions.translatesAutoresizingMaskIntoConstraints = false
+        let headerHairline = SDHairlineView()
+        headerHairline.translatesAutoresizingMaskIntoConstraints = false
+        let header = NSView()
+        header.addSubview(actions)
+        header.addSubview(headerHairline)
+        header.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            header.heightAnchor.constraint(equalToConstant: MAIN_WINDOW_HEADER_HEIGHT),
+            actions.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            actions.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            actions.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            headerHairline.leadingAnchor.constraint(equalTo: header.leadingAnchor),
+            headerHairline.trailingAnchor.constraint(equalTo: header.trailingAnchor),
+            headerHairline.bottomAnchor.constraint(equalTo: header.bottomAnchor),
+        ])
+
+        let badge = SDMiniWaveView(values: [0.35, 0.8, 0.5, 0.6],
+                                   color: SD.C.subtle,
+                                   barWidth: 1.5,
+                                   gap: 1.5)
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.widthAnchor.constraint(equalToConstant: 10.5).isActive = true
+        badge.heightAnchor.constraint(equalToConstant: 14).isActive = true
+        let meta = panelLabel(historyDetailMetaText(entry), size: 12, color: SD.C.graphite)
+        let metaRow = NSStackView(views: [badge, meta])
+        metaRow.orientation = .horizontal
+        metaRow.alignment = .centerY
+        metaRow.spacing = 9
+
+        // Полный текст: 16/1.6, выделяемый — его забирают мышью.
+        let body = NSTextField(wrappingLabelWithString: entry.text)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = 1.6
+        body.attributedStringValue = NSAttributedString(
+            string: entry.text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 16),
+                .foregroundColor: SD.C.ink,
+                .paragraphStyle: paragraph,
+            ])
+        body.isSelectable = true
+        body.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
+            - MAIN_WINDOW_SIDEBAR_WIDTH - 328 - 44
+
+        let column = NSStackView(views: [metaRow, body])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.edgeInsets = NSEdgeInsets(top: 22, left: 22, bottom: 22, right: 22)
+        column.setCustomSpacing(14, after: metaRow)
+        column.translatesAutoresizingMaskIntoConstraints = false
+
+        root.addSubview(header)
+        root.addSubview(column)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            column.topAnchor.constraint(equalTo: header.bottomAnchor),
+            column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
+        ])
+        return root
+    }
+
+    private func historyMatchesCaption(count: Int) -> String {
+        guard !mainHistorySearch.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return historyShowsPinnedOnly
+                ? t("Закреплённые", "Pinned")
+                : t("Все диктовки", "All dictations")
+        }
+        if language == .russian {
+            let mod100 = count % 100
+            let mod10 = count % 10
+            let noun: String
+            if (11...14).contains(mod100) {
+                noun = "совпадений"
+            } else if mod10 == 1 {
+                noun = "совпадение"
+            } else if (2...4).contains(mod10) {
+                noun = "совпадения"
+            } else {
+                noun = "совпадений"
+            }
+            return "\(count) \(noun)"
+        }
+        return count == 1 ? "1 match" : "\(count) matches"
+    }
+
+    /// Мета строки списка: длительность распознавания и число слов.
+    private func historyRowMetaText(_ entry: TranscriptHistoryEntry) -> String {
+        let words = entry.text.split(whereSeparator: { $0.isWhitespace }).count
+        return dictatedWordsLabel(words, language: language)
+    }
+
+    private func historyDetailMetaText(_ entry: TranscriptHistoryEntry) -> String {
+        var parts: [String] = []
+        if let createdAt = entry.createdAt {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: language == .russian ? "ru_RU" : "en_US")
+            formatter.dateFormat = language == .russian ? "d MMMM, HH:mm" : "MMMM d, h:mm a"
+            parts.append(formatter.string(from: createdAt))
+        } else {
+            parts.append(t("время не сохранилось", "time not recorded"))
+        }
+        let words = entry.text.split(whereSeparator: { $0.isWhitespace }).count
+        parts.append(dictatedWordsLabel(words, language: language))
+        if let duration = entry.transcriptionDurationSeconds {
+            parts.append(String(format: "%.1f %@", duration,
+                                localizedText("с", "s", language: language)))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Ключ выбора переживает пересборку вида и сдвиг индексов.
+    private func historyEntryKey(_ entry: TranscriptHistoryEntry) -> String {
+        "\(entry.createdAt?.timeIntervalSince1970 ?? 0)|\(entry.text.prefix(64))"
+    }
+
+    private func selectedHistoryEntry(among entries: [(Int, TranscriptHistoryEntry)])
+        -> (Int, TranscriptHistoryEntry)? {
+        if let key = historySelectionKey,
+           let match = entries.first(where: { historyEntryKey($0.1) == key }) {
+            return match
+        }
+        return entries.first
+    }
+
+    @objc private func historyResultRowClicked(_ sender: SDHistoryResultRow) {
+        let entries = settings.recentTranscriptEntries
+        guard entries.indices.contains(sender.entryIndex) else { return }
+        historySelectionKey = historyEntryKey(entries[sender.entryIndex])
+        refresh(force: true)
+    }
+
+    @objc private func copySelectedHistoryEntry(_ sender: NSControl) {
+        guard let (_, entry) = selectedHistoryEntry(among: filteredMainHistory()) else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(entry.text, forType: .string)
+    }
+
+    @objc private func togglePinSelectedHistoryEntry(_ sender: NSControl) {
+        guard let (_, entry) = selectedHistoryEntry(among: filteredMainHistory()) else { return }
+        var pinned = settings.pinnedTranscripts
+        if let existing = pinned.firstIndex(of: entry.text) {
+            pinned.remove(at: existing)
+        } else {
+            pinned.insert(entry.text, at: 0)
+        }
+        settings.pinnedTranscripts = pinned
+        refresh(force: true)
+    }
+
+    @objc private func deleteSelectedHistoryEntry(_ sender: NSControl) {
+        deleteMainHistoryEntry(at: sender.tag)
+    }
+
     private func filteredMainHistory() -> [(Int, TranscriptHistoryEntry)] {
         let query = mainHistorySearch
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        let indexed = Array(settings.recentTranscriptEntries.enumerated())
+        var indexed = Array(settings.recentTranscriptEntries.enumerated())
+        if historyShowsPinnedOnly {
+            let pinned = Set(settings.pinnedTranscripts)
+            indexed = indexed.filter { pinned.contains($0.1.text) }
+        }
         guard !query.isEmpty else { return indexed }
         return indexed.filter { $0.1.text.lowercased().contains(query) }
     }
@@ -1600,17 +1858,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refresh(force: true)
     }
 
-    @objc private func mainHistoryRowClicked(_ sender: HistoryTranscriptItemView) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(sender.transcript, forType: .string)
-    }
-
     private func deleteMainHistoryEntry(at index: Int) {
         var entries = settings.recentTranscriptEntries
         guard entries.indices.contains(index) else { return }
-        entries.remove(at: index)
+        let removed = entries.remove(at: index)
         settings.recentTranscriptEntries = entries
+        if historySelectionKey == historyEntryKey(removed) {
+            historySelectionKey = nil
+        }
         refresh(force: true)
     }
 
