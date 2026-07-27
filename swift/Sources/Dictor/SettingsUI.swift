@@ -331,7 +331,14 @@ func keycapLabels(for choice: HotkeyChoice, language: InterfaceLanguage) -> [Str
     if flags.contains(.maskCommand) { labels.append("⌘") }
     if choice.isModifier {
         let side: String
-        let lower = choice.name.lowercased()
+        // Not choice.name — that is the whole chord ("Command + Right
+        // Option"), and scanning it for a modifier word finds the
+        // *required* modifier before the key itself, so «Command +
+        // правый Option» drew itself as «⌘ прав.». The keycode names
+        // exactly one physical key, so ask it rather than parse prose.
+        let lower = (MODIFIER_HOTKEY_CHOICES.first { $0.keycode == choice.keycode }?.name
+            ?? choice.name.components(separatedBy: " + ").last
+            ?? choice.name).lowercased()
         if lower.contains("right") {
             side = language == .russian ? " прав." : " R"
         } else if lower.contains("left") {
