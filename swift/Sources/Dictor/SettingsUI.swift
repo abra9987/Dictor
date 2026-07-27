@@ -915,3 +915,165 @@ final class SDMetricTile: NSView {
         restyle()
     }
 }
+
+/// Сегментированный переключатель из макета 6d: дорожка rgba(0,0,0,.055)
+/// радиусом 8 с полями 3, сегменты 4×13 радиусом 6, выбранный — белая
+/// плашка с тенью и ink 600, остальные graphite.
+///
+/// Не SDPills: у тех выбранный сегмент — тёмная пилюля, и рядом с живым
+/// превью капсулы получались две конкурирующие чёрные плашки.
+final class SDSegmented: NSView {
+    private let values: [String]
+    private(set) var selectedValue: String
+    var onSelect: ((String) -> Void)?
+    private var buttons: [NSButton] = []
+
+    init(titles: [String], values: [String], selected: String) {
+        self.values = values
+        self.selectedValue = selected
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -3),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+        ])
+
+        for (title, value) in zip(titles, values) {
+            let button = NSButton(title: title, target: self,
+                                  action: #selector(segmentClicked(_:)))
+            button.isBordered = false
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 6
+            button.identifier = NSUserInterfaceItemIdentifier(value)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.heightAnchor.constraint(equalToConstant: 22).isActive = true
+            let textWidth = ceil(title.size(withAttributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
+            ]).width)
+            button.widthAnchor.constraint(equalToConstant: max(28, textWidth + 26)).isActive = true
+            stack.addArrangedSubview(button)
+            buttons.append(button)
+        }
+        restyle()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func select(_ value: String) {
+        guard values.contains(value) else { return }
+        selectedValue = value
+        restyle()
+    }
+
+    @objc private func segmentClicked(_ sender: NSButton) {
+        guard let value = sender.identifier?.rawValue else { return }
+        selectedValue = value
+        restyle()
+        onSelect?(value)
+    }
+
+    private func restyle() {
+        let dark = effectiveAppearance.isDark
+        layer?.backgroundColor = (dark ? NSColor.white.withAlphaComponent(0.07)
+                                       : NSColor.black.withAlphaComponent(0.055)).cgColor
+        for button in buttons {
+            let selected = button.identifier?.rawValue == selectedValue
+            button.font = .systemFont(ofSize: 12, weight: selected ? .semibold : .regular)
+            if selected {
+                button.layer?.backgroundColor = (dark ? NSColor(hex: 0x3A3835) : .white).cgColor
+                button.layer?.shadowColor = NSColor.black.cgColor
+                button.layer?.shadowOpacity = dark ? 0.4 : 0.12
+                button.layer?.shadowOffset = NSSize(width: 0, height: -1)
+                button.layer?.shadowRadius = 1.5
+                button.contentTintColor = SD.C.ink
+            } else {
+                button.layer?.backgroundColor = .clear
+                button.layer?.shadowOpacity = 0
+                button.contentTintColor = SD.C.graphite
+            }
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+}
+
+/// Живое превью капсулы для выбранного размера: тёмная пилюля, коралловая
+/// волна, mono-таймер. Пропорции берутся у настоящей капсулы, поэтому
+/// переключение S/M/L видно сразу — в макете превью нарисованы статикой,
+/// но статичная картинка рядом с переключателем ничего не сообщает.
+final class SDCapsulePreview: NSView {
+    private var size: RecordingHUDSize
+
+    init(size: RecordingHUDSize) {
+        self.size = size
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 34).isActive = true
+        widthAnchor.constraint(equalToConstant: 132).isActive = true
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func setSize(_ newSize: RecordingHUDSize) {
+        size = newSize
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let dark = effectiveAppearance.isDark
+        // Пилюля той же высоты, что и настоящая капсула, ужатая под строку.
+        let height = min(bounds.height, size.capsuleHeight * 0.72)
+        let width = bounds.width * (size == .compact ? 0.66 : (size == .standard ? 0.84 : 1))
+        let rect = NSRect(x: bounds.maxX - width,
+                          y: bounds.midY - height / 2,
+                          width: width,
+                          height: height)
+        (dark ? NSColor(hex: 0x111111) : NSColor(hex: 0x1C1B19)).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2).fill()
+
+        // Волна: пять полос разной высоты, как в записи.
+        let heights: [CGFloat] = [0.35, 0.7, 1, 0.55, 0.8]
+        let barWidth: CGFloat = 2.5
+        let gap: CGFloat = 2.5
+        let waveHeight = height * 0.45
+        var x = rect.minX + height / 2
+        SD.C.voiceDark.setFill()
+        for factor in heights {
+            let barHeight = max(2, waveHeight * factor)
+            NSBezierPath(roundedRect: NSRect(x: x,
+                                             y: rect.midY - barHeight / 2,
+                                             width: barWidth,
+                                             height: barHeight),
+                         xRadius: 1.25, yRadius: 1.25).fill()
+            x += barWidth + gap
+        }
+
+        let timer = "0:14"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: max(9, height * 0.32), weight: .regular),
+            .foregroundColor: NSColor(hex: 0xF2F1EE),
+        ]
+        let timerSize = timer.size(withAttributes: attrs)
+        if x + timerSize.width + height / 2 <= rect.maxX {
+            timer.draw(at: NSPoint(x: x + 4, y: rect.midY - timerSize.height / 2),
+                       withAttributes: attrs)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}

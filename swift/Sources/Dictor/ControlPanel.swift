@@ -2402,44 +2402,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        // Макет: секция «Размер капсулы» — заголовок 13px + три карточки
-        // с мини-превью (padding 14px 0 10px, hairline снизу).
-        let sizeTitle = panelLabel(t("Размер капсулы", "Capsule size"), size: 13)
-        sizeTitle.textColor = SD.C.ink
-        let sizeNames: [(RecordingHUDSize, String)] = [
-            (.compact, t("Компактный", "Compact")),
-            (.standard, t("Обычный", "Standard")),
-            (.large, t("Крупный", "Large")),
-        ]
-        var sizeCards: [SDCapsuleSizeCard] = []
-        for (size, name) in sizeNames {
-            let card = SDCapsuleSizeCard(title: name,
-                                         kind: size.rawValue,
-                                         selected: settings.recordingHUDSize == size)
-            card.onSelect = { [weak self] raw in
-                guard let self, let size = RecordingHUDSize(rawValue: raw) else { return }
-                self.settings.recordingHUDSize = size
-                for other in sizeCards {
-                    other.setSelected(false)
-                }
-                card.setSelected(true)
-            }
-            sizeCards.append(card)
-        }
-        let cardsRow = NSStackView(views: sizeCards)
-        cardsRow.orientation = .horizontal
-        cardsRow.spacing = 10
-        cardsRow.distribution = .fillEqually
-        let sizeSection = NSStackView(views: [sizeTitle, cardsRow])
-        sizeSection.orientation = .vertical
-        sizeSection.alignment = .leading
-        sizeSection.spacing = 10
-        sizeSection.edgeInsets = NSEdgeInsets(top: 14, left: 0, bottom: 10, right: 0)
-        cardsRow.translatesAutoresizingMaskIntoConstraints = false
-        root.addArrangedSubview(sizeSection)
-        cardsRow.widthAnchor.constraint(equalTo: sizeSection.widthAnchor).isActive = true
-        root.addArrangedSubview(SDHairlineView())
-
+        // Размер капсулы переехал в «Продвинутые» — там он стоит рядом с
+        // положением и живым превью, как в макете 6d. Два места для одной
+        // настройки неизбежно начинают расходиться.
         let backgroundPills = SDPills(options: RecordingHUDBackgroundStyle.allCases.map {
             .init(title: localizedBackgroundName($0), value: $0.rawValue)
         }, selected: settings.recordingHUDBackgroundStyle.rawValue)
@@ -2494,23 +2459,47 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private func addAdvancedTabRows(to root: NSStackView) {
         root.addArrangedSubview(advancedSectionHeader(t("Капсула", "Capsule")))
 
-        let placementPills = SDPills(options: [
-            .init(title: t("У поля ввода", "At the text field"),
-                  value: RecordingHUDPlacement.followsInput.rawValue),
-            .init(title: t("Снизу по центру", "Bottom center"),
-                  value: RecordingHUDPlacement.bottomCenter.rawValue),
-        ], selected: settings.recordingHUDPlacement.rawValue)
-        placementPills.onSelect = { [weak self] raw in
-            guard let placement = RecordingHUDPlacement(rawValue: raw) else { return }
-            self?.settings.recordingHUDPlacement = placement
+        // Размер — с живым превью справа: переключение S/M/L видно сразу,
+        // не открывая диктовку.
+        let preview = SDCapsulePreview(size: settings.recordingHUDSize)
+        let sizes: [RecordingHUDSize] = [.compact, .standard, .large]
+        let sizeSegmented = SDSegmented(titles: ["S", "M", "L"],
+                                        values: sizes.map(\.rawValue),
+                                        selected: settings.recordingHUDSize.rawValue)
+        sizeSegmented.onSelect = { [weak self, weak preview] raw in
+            guard let size = RecordingHUDSize(rawValue: raw) else { return }
+            self?.settings.recordingHUDSize = size
+            preview?.setSize(size)
         }
-        root.addArrangedSubview(SDRowView(
-            title: t("Положение", "Position"),
-            subtitle: t("Размер капсулы — во вкладке «Внешний вид»",
-                        "Capsule size lives in the Appearance tab"),
-            control: placementPills,
-            verticalPadding: 12
-        ))
+        root.addArrangedSubview(advancedCapsuleRow(title: t("Размер", "Size"),
+                                                   control: sizeSegmented,
+                                                   trailing: preview))
+
+        let placement = NSPopUpButton()
+        placement.isBordered = false
+        placement.font = .systemFont(ofSize: 12.5)
+        placement.contentTintColor = SD.C.ink
+        let placements: [(RecordingHUDPlacement, String)] = [
+            (.followsInput, t("У поля ввода", "At the text field")),
+            (.bottomCenter, t("Снизу по центру", "Bottom center")),
+            (.topCenter, t("Сверху по центру", "Top center")),
+        ]
+        for (value, title) in placements {
+            placement.addItem(withTitle: title)
+            placement.lastItem?.identifier = NSUserInterfaceItemIdentifier(value.rawValue)
+        }
+        placement.selectItem(at: placements.firstIndex { $0.0 == settings.recordingHUDPlacement } ?? 0)
+        placement.target = self
+        placement.action = #selector(capsulePlacementChanged(_:))
+        // Макет предлагал ещё и «перетащите капсулу мышью». Тащить нечего:
+        // между диктовками капсулы не существует, это макет 6c. Вместо
+        // выдуманной подсказки — правда о запасном варианте.
+        let placementHint = panelLabel(t("Если поле ввода не найдено — сверху по центру",
+                                         "If no text field is found — top center"),
+                                       size: 11.5, color: SD.C.subtle)
+        root.addArrangedSubview(advancedCapsuleRow(title: t("Положение", "Position"),
+                                                   control: placement,
+                                                   trailing: placementHint))
 
         root.addArrangedSubview(advancedSectionHeader(t("Тишина", "Silence")))
         let silenceNote = panelLabel(
@@ -2553,6 +2542,52 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             hairline: false,
             verticalPadding: 12
         ))
+    }
+
+    @objc private func capsulePlacementChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.identifier?.rawValue,
+              let placement = RecordingHUDPlacement(rawValue: raw) else { return }
+        settings.recordingHUDPlacement = placement
+    }
+
+    /// Строка секции «Капсула» из макета: подпись фиксированной ширины 96,
+    /// сразу за ней контрол, а всё остальное прижато вправо.
+    private func advancedCapsuleRow(title: String,
+                                    control: NSView,
+                                    trailing: NSView) -> NSView {
+        let row = NSView()
+        let label = panelLabel(title, size: 12.5)
+        label.textColor = SD.C.ink
+        for view in [label, control, trailing] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(view)
+        }
+        let hairline = SDHairlineView()
+        hairline.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(hairline)
+
+        let squeeze = row.heightAnchor.constraint(equalToConstant: 0)
+        squeeze.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            squeeze,
+            label.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            label.widthAnchor.constraint(equalToConstant: 96),
+            label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            control.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 16),
+            control.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 10),
+            trailing.leadingAnchor.constraint(greaterThanOrEqualTo: control.trailingAnchor,
+                                              constant: 16),
+            trailing.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            trailing.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            trailing.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 10),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor, constant: 10),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: trailing.bottomAnchor, constant: 10),
+            hairline.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            hairline.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
     }
 
     private func advancedSectionHeader(_ title: String) -> NSView {
