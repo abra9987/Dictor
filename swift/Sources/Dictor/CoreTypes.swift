@@ -77,6 +77,10 @@ let RECORDING_HUD_RECORDING_LEVEL_PHASE_SPEED: CGFloat = 10.08
 let RECORDING_HUD_TRANSCRIBING_PHASE_SPEED: CGFloat = 10.2
 let HOTKEY_CAPTURE_BEGIN_NOTIFICATION = Notification.Name("com.raul.dictor.hotkey-capture-begin")
 let HOTKEY_CAPTURE_END_NOTIFICATION = Notification.Name("com.raul.dictor.hotkey-capture-end")
+/// Поповер просит окно открыть конкретный раздел (макет 6a): «История»
+/// и «Настройки» ведут в приложение, а не открывают ещё одно окно.
+let CONTROL_PANEL_SECTION_NOTIFICATION = Notification.Name("com.raul.dictor.open-section")
+let CONTROL_PANEL_SECTION_ARGUMENT = "--section"
 let HOTKEY_CAPTURE_FAILSAFE_SECONDS: TimeInterval = 45
 let DICTATION_ERROR_FLASH_SECONDS: TimeInterval = 1.5  // how long the menu-bar icon flags a dropped dictation before returning to idle
 let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]
