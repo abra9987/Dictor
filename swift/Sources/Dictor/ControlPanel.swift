@@ -755,19 +755,44 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             verticalPadding: 12
         ))
 
-        let limitPills = SDPills(options: RecentTranscriptLimit.allCases.map {
-            .init(title: localizedTranscriptLimitName($0), value: $0.rawValue)
-        }, selected: settings.recentTranscriptLimit.rawValue)
-        limitPills.onSelect = { [weak self] raw in
-            guard let limit = RecentTranscriptLimit(rawValue: raw) else { return }
-            self?.settings.recentTranscriptLimit = limit
+        // Раньше здесь стоял один переключатель «Выкл / 1 / 5 / 10» с
+        // подписью «Хранить историю», и он врал: цифры никогда не были
+        // объёмом хранилища — архив держит до 10 000 диктовок, а 1/5/10
+        // ограничивают только список в меню-баре. Во вкладке про
+        // приватность это худший из возможных обманов, поэтому теперь
+        // две отдельные строки, каждая про своё.
+        let historyToggle = SDToggle()
+        historyToggle.isOn = settings.recentTranscriptLimit != .off
+        historyToggle.onToggle = { [weak self] isOn in
+            guard let self else { return }
+            self.settings.recentTranscriptLimit = isOn ? self.settings.preferredRecentTranscriptLimit : .off
+            self.refresh(force: true)
         }
         root.addArrangedSubview(SDRowView(
             title: t("Хранить историю", "Keep history"),
-            subtitle: t("Локальный список последних диктовок", "A local list of recent dictations"),
-            control: limitPills,
+            subtitle: t("Локально, до \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .russian)) диктовок. Выключить — стереть и больше не записывать",
+                        "Locally, up to \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .english)) dictations. Switching off erases them and stops recording"),
+            control: historyToggle,
             verticalPadding: 12
         ))
+
+        if settings.recentTranscriptLimit != .off {
+            let menuLimits: [RecentTranscriptLimit] = [.last1, .last5, .last10]
+            let limitPills = SDPills(options: menuLimits.map {
+                .init(title: $0.rawValue, value: $0.rawValue)
+            }, selected: settings.recentTranscriptLimit.rawValue)
+            limitPills.onSelect = { [weak self] raw in
+                guard let limit = RecentTranscriptLimit(rawValue: raw) else { return }
+                self?.settings.recentTranscriptLimit = limit
+            }
+            root.addArrangedSubview(SDRowView(
+                title: t("Показывать в меню-баре", "Show in the menu bar"),
+                subtitle: t("Сколько последних диктовок в меню. Окно «История» показывает все",
+                            "How many recent dictations the menu lists. The History window shows all of them"),
+                control: limitPills,
+                verticalPadding: 12
+            ))
+        }
 
         // Макет: значение здесь обычным шрифтом 12/500, не mono.
         let audioRow = SDRowView(

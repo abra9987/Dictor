@@ -892,3 +892,15 @@ func recognitionDurationLabel(_ seconds: Double, language: InterfaceLanguage) ->
         .replacingOccurrences(of: ".", with: language == .russian ? "," : ".")
     return "\(formatted) \(localizedText("с", "s", language: language))"
 }
+
+/// «10 000» — разряды через узкий неразрывный пробел, как принято в
+/// русской типографике; в английском — запятая. Не системная локаль:
+/// разряды должны следовать языку интерфейса, а не языку macOS.
+func groupedNumberLabel(_ value: Int, language: InterfaceLanguage) -> String {
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.groupingSize = 3
+    formatter.groupingSeparator = language == .russian ? "\u{202F}" : ","
+    return formatter.string(from: NSNumber(value: value)) ?? String(value)
+}
