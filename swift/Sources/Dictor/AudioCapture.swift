@@ -6,6 +6,7 @@ import CoreGraphics
 import CryptoKit
 import Darwin
 import ApplicationServices
+import DictorObjCSupport
 import FluidAudio
 import IOKit
 import QuartzCore
@@ -27,21 +28,69 @@ import UniformTypeIdentifiers
 // Locking discipline: `lock` protects ALL mutable state shared with
 // the render thread — `samples`, `_isRunning`, `latestLevel`,
 // `latestLevelSequence`, `recordingGeneration`, the engine-open flag,
-// AND the converter trio (`converter`, `converterInputFormat`,
-// `manuallyMixInputToMono`). The trio is written on the main thread
-// in startEngine/stopEngine and read in handleTap on AVFoundation's
-// render thread; removeTap(onBus:) does NOT wait for in-flight tap
-// callbacks, so an unlocked read could race stopEngine nil-ing the
-// converter (an unsynchronised ARC pointer read — potential
-// use-after-free). handleTap snapshots the trio once, inside the
-// same lock acquisition that reads `_isRunning`, and works off the
-// snapshots; a straggler callback then keeps the old converter
-// alive through its own strong reference, which is safe.
+// AND the converter set (`converter`, `converterInputFormat`,
+// `tapInputFormat`, `manuallyMixInputToMono`). The set is normally
+// written on the main thread in startEngine/stopEngine and read in
+// handleTap on AVFoundation's render thread; removeTap(onBus:) does
+// NOT wait for in-flight tap callbacks, so an unlocked read could
+// race stopEngine nil-ing the converter (an unsynchronised ARC
+// pointer read — potential use-after-free). handleTap snapshots the
+// set once, inside the same lock acquisition that reads
+// `_isRunning`, and works off the snapshots; a straggler callback
+// then keeps the old converter alive through its own strong
+// reference, which is safe. The one case where the render thread
+// *writes* the set is a buffer arriving in a format the converter
+// was not built for — configureConverter(onlyWhileRunning: true)
+// re-checks the running flag under the lock before publishing.
 // `configurationObserver` and `onConfigurationChange` are
 // main-thread-only: the observer is registered with queue: .main so
 // the notification callback runs on the same thread that installs
 // the observer and that clears `onConfigurationChange` at
 // termination.
+
+/// Runs `body`, reporting an Objective-C exception raised inside it as
+/// a thrown Swift error. AVFoundation still raises for invalid audio
+/// formats, and an uncaught raise on a worker thread does not crash —
+/// AppKit swallows it and suspends the thread, which is how audio
+/// startup once hung forever on "Starting audio input…" with nothing
+/// in the log to show for it.
+func withObjCExceptionsAsErrors(_ body: () throws -> Void) throws {
+    var thrown: Error?
+    try DictorExceptionTrap.perform {
+        do {
+            try body()
+        } catch {
+            thrown = error
+        }
+    }
+    if let thrown { throw thrown }
+}
+
+/// A format CoreAudio can actually be asked to deliver. Zero on either
+/// field means the device is busy elsewhere or has just gone away, and
+/// every downstream call would raise rather than fail politely.
+func audioFormatIsUsable(_ format: AVAudioFormat) -> Bool {
+    format.sampleRate > 0 && format.channelCount > 0
+}
+
+/// Whether a converter built for `rhs` can be fed buffers of `lhs`.
+/// Only the two properties the conversion maths depends on matter;
+/// AVAudioEngine node taps always hand over non-interleaved Float32.
+func audioFormatsInterchangeable(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat?) -> Bool {
+    guard let rhs else { return false }
+    return abs(lhs.sampleRate - rhs.sampleRate) < 0.5
+        && lhs.channelCount == rhs.channelCount
+}
+
+func audioInputFormatUnusableError(_ format: AVAudioFormat) -> NSError {
+    NSError(domain: "Dictor", code: -2, userInfo: [
+        NSLocalizedDescriptionKey: """
+        The microphone reported an unusable format (\(format.sampleRate) Hz, \
+        \(format.channelCount) ch). CoreAudio reports this when the input device \
+        is held by another app or has just been disconnected.
+        """,
+    ])
+}
 
 struct CapturedAudioSegments {
     let segments: [[Float]]
@@ -301,10 +350,23 @@ func writeMonoMix(channels: UnsafePointer<UnsafeMutablePointer<Float>>,
     }
 }
 
+/// What handleTap needs to convert a buffer, kept together so a
+/// rebuild can hand all three back at once.
+struct ConverterSetup {
+    let converter: AVAudioConverter?
+    let monoFormat: AVAudioFormat?
+    let mixToMono: Bool
+}
+
 final class AudioCapture: @unchecked Sendable {
     private var engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
+    /// The raw format the tap was last configured for, before any mono
+    /// mixing. Compared against every incoming buffer so a device that
+    /// changes rate under us is noticed instead of silently resampled
+    /// by the wrong ratio.
+    private var tapInputFormat: AVAudioFormat?
     private var manuallyMixInputToMono = false
     private let lock = NSLock()
     var samples = AudioSampleAccumulator()
@@ -314,6 +376,9 @@ final class AudioCapture: @unchecked Sendable {
     private var recordingGeneration: UInt64 = 0
     private var recoveryJournal: PendingDictationJournal?
     private var engineStarted = false
+    /// Whether the last open attempt pinned the audio unit to a specific
+    /// device. Main-thread only, like the rest of startEngine.
+    private var lastOpenPinnedInputDevice = false
     private var configurationObserver: NSObjectProtocol?
 
     var onConfigurationChange: (@Sendable () -> Void)?
@@ -338,9 +403,40 @@ final class AudioCapture: @unchecked Sendable {
             return
         }
 
+        do {
+            try openEngine(inputDevicePreference: inputDevicePreference,
+                           recordingImmediately: recordingImmediately,
+                           recoveryJournal: recoveryJournal)
+            return
+        } catch {
+            // Pinning the audio unit to one device is the only thing
+            // worth surrendering here: it is what makes CoreAudio refuse
+            // the unit outright (-10868) when the current output device
+            // runs at a different sample rate. Dictating through the
+            // system default microphone beats not dictating at all, and
+            // both the log and the failure detail name what happened.
+            guard lastOpenPinnedInputDevice else {
+                clearStoppedCaptureState()
+                throw error
+            }
+            log("AudioCapture: chosen input device rejected by CoreAudio (\(singleLineLogDetail(audioStartupErrorDescription(error)))); retrying with the system default input")
+        }
+
+        do {
+            try openEngine(inputDevicePreference: "",
+                           recordingImmediately: recordingImmediately,
+                           recoveryJournal: recoveryJournal)
+        } catch {
+            clearStoppedCaptureState()
+            throw error
+        }
+    }
+
+    private func openEngine(inputDevicePreference: String,
+                            recordingImmediately: Bool,
+                            recoveryJournal: PendingDictationJournal?) throws {
         let input = engine.inputNode
-        applyInputDevicePreference(inputDevicePreference, to: input)
-        let inputFormat = input.outputFormat(forBus: 0)
+        lastOpenPinnedInputDevice = applyInputDevicePreference(inputDevicePreference, to: input)
 
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -349,42 +445,58 @@ final class AudioCapture: @unchecked Sendable {
             interleaved: false
         ) else { throw NSError(domain: "Dictor", code: -1) }
 
-        let sourceFormat = converterSourceFormat(for: inputFormat)
-        let mixToMono = inputFormat.channelCount > 1 && sourceFormat.channelCount == 1
-        let newConverter = AVAudioConverter(from: sourceFormat, to: targetFormat)
-        // Publish the converter trio under the lock — handleTap reads
-        // them on the render thread (see the locking-discipline note
-        // on the class comment).
-        lock.lock()
-        converterInputFormat = sourceFormat
-        manuallyMixInputToMono = mixToMono
-        converter = newConverter
+        // Only the opening guess at what the tap will deliver. The node
+        // is allowed to disagree: switching the input device through the
+        // HAL updates it asynchronously, so right after the switch it can
+        // still report the rate of a completely different device. With a
+        // Bluetooth speaker at 44.1 kHz as the default output and the
+        // built-in mic at 48 kHz, that is exactly what happened — and
+        // handing the stale rate to installTap raised an Objective-C
+        // exception that froze startup outright.
+        let inputFormat = input.outputFormat(forBus: 0)
+        guard audioFormatIsUsable(inputFormat) else {
+            resetEngineInstance()
+            throw audioInputFormatUnusableError(inputFormat)
+        }
+
+        let prepared = configureConverter(rawInputFormat: inputFormat, target: targetFormat)
         if recordingImmediately {
+            lock.lock()
             recordingGeneration &+= 1
             samples.removeAll(keepingCapacity: true)
             latestLevel = 0
             latestLevelSequence &+= 1
             _isRunning = true
             self.recoveryJournal = recoveryJournal
+            lock.unlock()
         }
-        lock.unlock()
-        let mixLabel = mixToMono ? " via manual mono mix" : ""
+        let mixLabel = prepared.mixToMono ? " via manual mono mix" : ""
         log("AudioCapture: input \(inputFormat.sampleRate) Hz \(inputFormat.channelCount)ch\(mixLabel) → \(targetFormat.sampleRate) Hz mono")
 
+        // format: nil, deliberately. An explicit format that differs
+        // from the bus's own raises rather than returns an error, and
+        // nil means "whatever this bus actually produces" — a mismatch
+        // becomes impossible by construction. handleTap reconciles the
+        // converter with the first buffer if the guess above was wrong.
+        //
         // Capture targetFormat by value into the closure. self is
         // weak so the engine doesn't keep AudioCapture alive past
         // its owner. The closure runs on AVFoundation's audio
         // thread — handleTap is non-isolated and uses NSLock for
         // any shared-state access.
-        input.installTap(onBus: 0, bufferSize: 512, format: inputFormat) { [weak self] buffer, _ in
-            self?.handleTap(buffer: buffer, target: targetFormat)
-        }
-
         do {
-            try engine.start()
+            try withObjCExceptionsAsErrors {
+                input.installTap(onBus: 0, bufferSize: 512, format: nil) { [weak self] buffer, _ in
+                    self?.handleTap(buffer: buffer, target: targetFormat)
+                }
+                try engine.start()
+            }
         } catch {
+            // No clearStoppedCaptureState() here — startEngine may still
+            // retry without the device pin, and clearing would finish the
+            // crash-recovery journal of a recording that is about to
+            // carry on. The fresh engine drops the tap with it anyway.
             input.removeTap(onBus: 0)
-            clearStoppedCaptureState()
             resetEngineInstance()
             throw error
         }
@@ -392,7 +504,48 @@ final class AudioCapture: @unchecked Sendable {
         engineStarted = true
         lock.unlock()
         installConfigurationObserver()
+
+        // Now that the engine is running the node reports the truth.
+        // Reconciling here keeps the rebuild off the audio thread in
+        // the case where the guess above was stale.
+        let settledFormat = input.outputFormat(forBus: 0)
+        if audioFormatIsUsable(settledFormat),
+           !audioFormatsInterchangeable(settledFormat, inputFormat) {
+            log("AudioCapture: input settled at \(settledFormat.sampleRate) Hz \(settledFormat.channelCount)ch after start")
+            configureConverter(rawInputFormat: settledFormat, target: targetFormat)
+        }
         log("AudioCapture: engine started")
+    }
+
+    /// Builds the converter trio for `rawInputFormat` and publishes it
+    /// under the lock — handleTap reads these on the render thread (see
+    /// the locking-discipline note on the class comment).
+    @discardableResult
+    private func configureConverter(rawInputFormat: AVAudioFormat,
+                                    target: AVAudioFormat,
+                                    onlyWhileRunning: Bool = false) -> ConverterSetup {
+        let sourceFormat = converterSourceFormat(for: rawInputFormat)
+        let mixToMono = rawInputFormat.channelCount > 1 && sourceFormat.channelCount == 1
+        let newConverter = AVAudioConverter(from: sourceFormat, to: target)
+        lock.lock()
+        // Re-checked under the lock for the render-thread caller: it
+        // decided to rebuild from a snapshot that a concurrent stop may
+        // have invalidated since, and publishing then would leave a live
+        // converter sitting behind state that stop had just cleared. The
+        // returned setup is still handed back either way — the buffer in
+        // flight belongs to the recording that was running when the
+        // snapshot was taken, and the generation token drops it later if
+        // that recording is already over.
+        if !onlyWhileRunning || _isRunning {
+            tapInputFormat = rawInputFormat
+            converterInputFormat = sourceFormat
+            manuallyMixInputToMono = mixToMono
+            converter = newConverter
+        }
+        lock.unlock()
+        return ConverterSetup(converter: newConverter,
+                              monoFormat: sourceFormat,
+                              mixToMono: mixToMono)
     }
 
     func startRecording(inputDevicePreference: String = "",
@@ -434,6 +587,7 @@ final class AudioCapture: @unchecked Sendable {
         // strong reference, which is safe.
         converter = nil
         converterInputFormat = nil
+        tapInputFormat = nil
         manuallyMixInputToMono = false
         lock.unlock()
         recoveryJournal?.finish()
@@ -527,11 +681,31 @@ final class AudioCapture: @unchecked Sendable {
         lock.lock()
         let running = _isRunning
         let generation = recordingGeneration
-        let converter = self.converter
-        let monoMixFormat = converterInputFormat
-        let mixToMono = manuallyMixInputToMono
+        var converter = self.converter
+        var monoMixFormat = converterInputFormat
+        var mixToMono = manuallyMixInputToMono
+        let configuredFormat = tapInputFormat
         lock.unlock()
-        guard running, let converter else { return }
+        guard running else { return }
+
+        // The tap is installed with a nil format, so the engine picks
+        // the bus's real one and it can differ from what the node
+        // advertised before it was running. Rebuilding costs one
+        // allocation on the first buffer of a recording; feeding the
+        // old converter a rate it was not built for would resample by
+        // the wrong ratio and pitch-shift the speech into gibberish.
+        // Only while running — a straggler callback after a stop must
+        // not resurrect the state that stop just cleared.
+        if !audioFormatsInterchangeable(buffer.format, configuredFormat) {
+            log("AudioCapture: tap delivering \(buffer.format.sampleRate) Hz \(buffer.format.channelCount)ch, rebuilding converter")
+            let rebuilt = configureConverter(rawInputFormat: buffer.format,
+                                             target: target,
+                                             onlyWhileRunning: true)
+            converter = rebuilt.converter
+            monoMixFormat = rebuilt.monoFormat
+            mixToMono = rebuilt.mixToMono
+        }
+        guard let converter else { return }
 
         let converterInput = preparedConverterInputBuffer(from: buffer,
                                                           mixToMono: mixToMono,
@@ -631,18 +805,36 @@ final class AudioCapture: @unchecked Sendable {
         return out
     }
 
-    private func applyInputDevicePreference(_ preference: String, to input: AVAudioInputNode) {
+    /// Returns whether the engine's audio unit was actually pinned to a
+    /// device. Worth knowing because pinning is the one thing startEngine
+    /// can give up on when CoreAudio refuses to open the unit.
+    @discardableResult
+    private func applyInputDevicePreference(_ preference: String, to input: AVAudioInputNode) -> Bool {
         let trimmed = preference.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard !isDefaultAggregateAudioInputPreference(trimmed) else { return }
+        guard !trimmed.isEmpty else { return false }
+        guard !isDefaultAggregateAudioInputPreference(trimmed) else { return false }
 
         guard let device = audioInputDevice(matching: trimmed) else {
             log("AudioCapture: saved input device unavailable, using system default")
-            return
+            return false
+        }
+        // Pinning the shared audio unit to a device makes it refuse to
+        // initialise whenever the current *output* device runs at another
+        // sample rate — a Bluetooth speaker at 44.1 kHz against the
+        // built-in mic at 48 kHz was enough to kill audio startup
+        // outright. Left alone, AVAudioEngine reconciles the two itself.
+        // So when the wanted device is the one CoreAudio would choose
+        // anyway, ask for nothing. If the system default later moves
+        // elsewhere, the route-change observer restarts the engine and
+        // this check no longer matches, so the preference is still
+        // honoured — it just stops being asserted for free.
+        guard device.id != defaultAudioInputDeviceID() else {
+            log("AudioCapture: \(device.name) is already the system default input")
+            return false
         }
         guard let unit = input.audioUnit else {
             log("AudioCapture: input audio unit unavailable, using system default")
-            return
+            return false
         }
 
         var deviceID = device.id
@@ -654,9 +846,10 @@ final class AudioCapture: @unchecked Sendable {
                                           UInt32(MemoryLayout<AudioDeviceID>.size))
         guard status == noErr else {
             log("AudioCapture: input device switch failed (\(formattedOSStatus(status))), using system default")
-            return
+            return false
         }
         log("AudioCapture: selected input \(device.name)")
+        return true
     }
 }
 
