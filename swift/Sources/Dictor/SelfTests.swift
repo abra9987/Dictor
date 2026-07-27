@@ -452,6 +452,39 @@ enum DictorSelfTest {
         try testToggleGatedPressDoesNotFlipToggleState()
         try testEscapePassesThroughWhenNotRecording()
         try testEscapeSuppressesCancelRepeatAndKeyUpWhileRecording()
+        try testKeycapLabels()
+    }
+
+    /// The settings row drew «Command + правый Option» as «⌘ прав.»:
+    /// the label was derived from the chord's whole name, so the
+    /// required modifier was mistaken for the key. Chords whose key
+    /// really is Command hid the bug by coming out right anyway.
+    private static func testKeycapLabels() throws {
+        func labels(keycode: CGKeyCode, modifiers: CGEventFlags) -> [String] {
+            keycapLabels(for: hotkeyChoice(forKeycode: keycode, modifiers: modifiers),
+                         language: .russian)
+        }
+
+        try expect(
+            labels(keycode: 61, modifiers: .maskCommand),
+            equals: ["⌘", "⌥ прав."],
+            "Command with the right Option should draw the Option key, not a second Command"
+        )
+        try expect(
+            labels(keycode: 54, modifiers: .maskShift),
+            equals: ["⇧", "⌘ прав."],
+            "Shift with the right Command should draw the Command key"
+        )
+        try expect(
+            labels(keycode: 62, modifiers: .maskShift),
+            equals: ["⇧", "⌃ прав."],
+            "Shift with the right Control should draw the Control key"
+        )
+        try expect(
+            labels(keycode: 58, modifiers: []),
+            equals: ["⌥ лев."],
+            "a bare modifier shortcut should draw its own side"
+        )
     }
 
     private static func testHotkeyPreferenceNormalization() throws {
