@@ -1429,6 +1429,97 @@ enum DictorSelfTest {
               converted.frameLength > 0 else {
             throw SelfTestFailure.failed("audio conversion should produce 16 kHz mono samples")
         }
+
+        try testAudioInputFormatReconciliation()
+    }
+
+    /// Guards the fix for a freeze that had no symptom other than a
+    /// status line stuck on "Starting audio input…": the input node
+    /// advertised the default *output* device's 44.1 kHz while the mic
+    /// ran at 48 kHz, that stale format went into installTap, and the
+    /// Objective-C exception it raised suspended the startup thread.
+    private static func testAudioInputFormatReconciliation() throws {
+        guard let mic48k = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                         sampleRate: 48_000,
+                                         channels: 1,
+                                         interleaved: false),
+              let speaker44k = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                             sampleRate: 44_100,
+                                             channels: 1,
+                                             interleaved: false),
+              let stereo48k = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                            sampleRate: 48_000,
+                                            channels: 2,
+                                            interleaved: false) else {
+            throw SelfTestFailure.failed("could not create input format reconciliation test formats")
+        }
+
+        try expect(
+            audioFormatsInterchangeable(mic48k, mic48k),
+            equals: true,
+            "a format should be interchangeable with itself"
+        )
+        try expect(
+            audioFormatsInterchangeable(mic48k, speaker44k),
+            equals: false,
+            "a 48 kHz buffer must not be fed to a converter built for 44.1 kHz"
+        )
+        try expect(
+            audioFormatsInterchangeable(mic48k, stereo48k),
+            equals: false,
+            "channel count difference should force a converter rebuild"
+        )
+        try expect(
+            audioFormatsInterchangeable(mic48k, nil),
+            equals: false,
+            "an unconfigured tap format should always force a rebuild"
+        )
+        try expect(
+            audioFormatIsUsable(mic48k),
+            equals: true,
+            "a 48 kHz mono format should be usable"
+        )
+
+        // The trap itself: without it the raise below would suspend
+        // this thread instead of failing, and the whole reason the
+        // freeze went undiagnosed for a session is that nothing
+        // reported it.
+        var ranPastRaise = false
+        var trapped: Error?
+        do {
+            try withObjCExceptionsAsErrors {
+                NSException(name: .invalidArgumentException,
+                            reason: "self-test raise",
+                            userInfo: nil).raise()
+                ranPastRaise = true
+            }
+        } catch {
+            trapped = error
+        }
+        try expect(
+            ranPastRaise,
+            equals: false,
+            "an Objective-C exception should abort the trapped block"
+        )
+        try expect(
+            (trapped as NSError?)?.localizedDescription,
+            equals: "self-test raise",
+            "a trapped Objective-C exception should surface its reason as an error"
+        )
+
+        var swiftErrorPropagated = false
+        do {
+            try withObjCExceptionsAsErrors {
+                throw SelfTestFailure.failed("swift error")
+            }
+        } catch {
+            swiftErrorPropagated = true
+        }
+        try expect(
+            swiftErrorPropagated,
+            equals: true,
+            "the exception trap should still propagate ordinary Swift errors"
+        )
     }
 
     private static func testTranscriptCorrections() throws {

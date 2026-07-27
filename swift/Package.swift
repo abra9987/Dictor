@@ -25,10 +25,17 @@ let package = Package(
                  revision: "313feb4bd692780a9a5b5fa9048fdb119486dde8"),
     ],
     targets: [
+        // A separate target only because SwiftPM cannot mix languages
+        // inside one. It holds a single @try/@catch bridge: AVFoundation
+        // reports invalid audio formats by raising NSException, which
+        // Swift cannot catch, and an uncaught one suspends the thread
+        // instead of crashing — a frozen app with no diagnostics.
+        .target(name: "DictorObjCSupport"),
         .executableTarget(
             name: "Dictor",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
+                "DictorObjCSupport",
             ]
             // No `resources:` here on purpose. SwiftPM bundles them as
             // a `<Package>_<Target>.bundle` directory next to the
