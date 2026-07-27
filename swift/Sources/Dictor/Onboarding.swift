@@ -52,15 +52,22 @@ final class OnboardingController {
     func showIfNeeded(force: Bool = false) {
         let snapshot = currentSnapshot()
         let permissionsMissing = snapshot.granted.count < Permission.allCases.count
+        log("onboarding check: force=\(force) completed=\(settings.onboardingCompleted) " +
+            "granted=\(snapshot.granted.count)/\(Permission.allCases.count) " +
+            "modelReady=\(snapshot.modelReady) entries=\(settings.recentTranscriptEntries.count)")
         // Онбординг нельзя «пройти навсегда». Если разрешений нет, приложение
         // не работает вообще, и человек остаётся наедине с молчащим хоткеем —
         // так было после переустановки, когда macOS сбросил TCC из-за смены
         // подписи. В этом случае возвращаемся независимо от флага.
-        guard force || !settings.onboardingCompleted || permissionsMissing else { return }
+        guard force || !settings.onboardingCompleted || permissionsMissing else {
+            log("onboarding: skipped (already completed, nothing missing)")
+            return
+        }
         if !force && !permissionsMissing
             && snapshot.modelReady
             && !settings.recentTranscriptEntries.isEmpty {
             // Всё уже настроено (обновление с прошлой версии) — не мешаем.
+            log("onboarding: marked complete without showing (everything already set up)")
             settings.onboardingCompleted = true
             return
         }
@@ -74,6 +81,7 @@ final class OnboardingController {
         } else {
             step = firstIncompleteStep(snapshot)
         }
+        log("onboarding: presenting at step \(step)")
         presentWindow()
         startTimer()
     }
