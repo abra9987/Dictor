@@ -78,7 +78,6 @@ enum ControlPanelUpdateState: Equatable, Sendable {
 @MainActor
 final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
-    private var settingsWindow: NSWindow?
     private var refreshTimer: Timer?
     private var serviceOperation: ControlPanelServiceOperation?
     private var updateTask: Task<Void, Never>?
@@ -136,16 +135,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
-        if closingWindow === settingsWindow {
+        if closingWindow === window {
             hotkeyRecorder?.cancel()
             hotkeyRecorder = nil
-            settingsWindow = nil
-            settingsDraft = nil
-            return
-        }
-        if closingWindow === window {
-            settingsWindow?.orderOut(nil)
-            settingsWindow = nil
             NSApp.terminate(nil)
         }
     }
@@ -209,18 +201,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // Вид пересобирается целиком, поэтому фокус и каретку поиска
         // приходится снимать до замены и возвращать после.
         let focusState = capturedSearchFocusState(in: window)
-        // Главное окно по макету 6a: сайдбар + раздел. Настройки живут
-        // в отдельном окне settingsWindow (макет 2c/4b/6d).
+        // Главное окно по макету 6a: сайдбар + раздел, включая настройки.
         window.title = "Dictor"
         window.contentView = makeMainWindowView()
         restoreSearchFocus(focusState, in: window)
-        if let settingsWindow, settingsWindow.isVisible {
-            settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
-            settingsWindow.contentView = makeSettingsContentView()
-            if let contentView = settingsWindow.contentView {
-                resizeSettingsWindowToFit(settingsWindow, contentView: contentView)
-            }
-        }
     }
 
     /// Было ли поле поиска в фокусе и где стояла каретка. Раньше фокус
@@ -370,19 +354,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let fitting = root.fittingSize.height
         widthPin.isActive = false
         return max(404, ceil(fitting))
-    }
-
-    private func resizeSettingsWindowToFit(_ window: NSWindow, contentView: NSView) {
-        let height = Self.settingsContentHeight(for: contentView)
-        let size = NSSize(width: 620, height: height)
-        guard window.contentView?.frame.size.height != height else { return }
-        let topY = window.frame.maxY
-        window.contentMinSize = size
-        window.contentMaxSize = size
-        window.setContentSize(size)
-        var frame = window.frame
-        frame.origin.y = topY - frame.height
-        window.setFrame(frame, display: true)
     }
 
     // MARK: - Вкладки настроек (дизайн 2c, адаптировано)
@@ -849,9 +820,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         case .dictionary:
             content = makeDictionarySectionView()
         case .settings:
-            // «Настройки» открываются отдельным окном (макет 2c/4b/6d),
-            // а раздел остаётся на «Сегодня».
-            content = makeTodayView()
+            content = makeSettingsSectionView()
         }
         content.translatesAutoresizingMaskIntoConstraints = false
 
@@ -902,8 +871,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             let item = SDSidebarItemView(section: section,
                                          title: section.title(language),
                                          count: count,
-                                         isSelected: section == mainSection
-                                             && section != .settings,
+                                         isSelected: section == mainSection,
                                          target: self,
                                          action: #selector(sidebarItemClicked(_:)))
             item.translatesAutoresizingMaskIntoConstraints = false
@@ -982,11 +950,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     @objc private func sidebarItemClicked(_ sender: SDSidebarItemView) {
-        if sender.section == .settings {
-            openSettingsWindow()
-            return
-        }
         guard sender.section != mainSection else { return }
+        if sender.section == .settings {
+            settingsDraft = ControlPanelSettingsDraft(settings: settings)
+        } else {
+            hotkeyRecorder?.cancel()
+            hotkeyRecorder = nil
+            settingsDraft = nil
+        }
         mainSection = sender.section
         refresh(force: true)
     }
@@ -1210,6 +1181,55 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             banner.widthAnchor.constraint(equalTo: column.widthAnchor,
                                           constant: -56).isActive = true
         }
+        return root
+    }
+
+    // MARK: - Раздел «Настройки» (макет 2c/4b/6d внутри окна 6a)
+
+    /// Настройки — такой же раздел окна, как «Сегодня» и «История».
+    /// Отдельного окна больше нет: в макете 6a это пункт сайдбара.
+    private func makeSettingsSectionView() -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+        let header = makeSectionHeader(title: MainWindowSection.settings.title(language),
+                                       accessory: nil)
+
+        let content = makeSettingsContentView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        let paneWidth = MAIN_WINDOW_SIZE.width - MAIN_WINDOW_SIDEBAR_WIDTH - 1
+        let contentHeight = Self.settingsContentHeight(for: content, width: paneWidth)
+
+        let documentView = SDFlippedView()
+        documentView.addSubview(content)
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+            content.topAnchor.constraint(equalTo: documentView.topAnchor),
+            content.heightAnchor.constraint(equalToConstant: contentHeight),
+            documentView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.verticalScroller?.controlSize = .small
+        scroll.documentView = documentView
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
+
+        header.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(header)
+        root.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
         return root
     }
 
@@ -2897,59 +2917,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         beginServiceOperation(.stopping)
     }
 
-    @objc private func openSettingsClicked(_ sender: NSButton) {
-        openSettingsWindow()
-    }
-
-    func openSettingsWindow() {
-        if let settingsWindow {
-            settingsWindow.contentView = makeSettingsContentView()
-            settingsWindow.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        settingsDraft = ControlPanelSettingsDraft(settings: settings)
-
-        let settingsWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 560),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        settingsWindow.title = t("Настройки Dictor", "Dictor Settings")
-        settingsWindow.titlebarAppearsTransparent = true
-        settingsWindow.backgroundColor = SD.C.settingsPaper
-        settingsWindow.isReleasedWhenClosed = false
-        settingsWindow.delegate = self
-        settingsWindow.contentView = makeSettingsContentView()
-        if let contentView = settingsWindow.contentView {
-            resizeSettingsWindowToFit(settingsWindow, contentView: contentView)
-        }
-        if let mainWindow = window, let visibleFrame = mainWindow.screen?.visibleFrame {
-            let mainFrame = mainWindow.frame
-            let preferredRight = mainFrame.maxX + 14
-            let preferredLeft = mainFrame.minX - settingsWindow.frame.width - 14
-            let x = preferredRight + settingsWindow.frame.width <= visibleFrame.maxX
-                ? preferredRight
-                : max(visibleFrame.minX, preferredLeft)
-            let y = min(max(visibleFrame.minY,
-                            mainFrame.maxY - settingsWindow.frame.height),
-                        visibleFrame.maxY - settingsWindow.frame.height)
-            settingsWindow.setFrameOrigin(NSPoint(x: x, y: y))
-        } else {
-            settingsWindow.center()
-        }
-        self.settingsWindow = settingsWindow
-        settingsWindow.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
     @objc private func recordDictationShortcutClicked(_ sender: NSButton) {
         guard serviceOperation == nil,
               let kind = ControlPanelShortcutKind(rawValue: sender.tag) else { return }
         if let hotkeyRecorder {
-            hotkeyRecorder.present(relativeTo: settingsWindow)
+            hotkeyRecorder.present(relativeTo: window)
             return
         }
         let state = AgentRuntimeStateStore.read()
@@ -3008,7 +2980,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         hotkeyRecorder = recorder
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self, weak recorder] in
             guard self?.hotkeyRecorder === recorder else { return }
-            recorder?.present(relativeTo: self?.settingsWindow)
+            recorder?.present(relativeTo: self?.window)
         }
     }
 
@@ -3103,8 +3075,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func refreshSettingsWindow() {
-        guard let settingsWindow else { return }
-        settingsWindow.contentView = makeSettingsContentView()
+        refresh(force: true)
     }
 
     @objc private func grantPermissionClicked(_ sender: NSButton) {
@@ -3249,7 +3220,7 @@ func exportHistoryPanelPreviews(to directory: URL) throws {
     window.colorSpace = .sRGB
     var exported = 0
     // Каждый раздел окна (макет 6a/6b) в обеих темах.
-    for section in [MainWindowSection.today, .history, .dictionary] {
+    for section in [MainWindowSection.today, .history, .dictionary, .settings] {
         for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                          ("dark", NSAppearance.Name.darkAqua)] {
             window.appearance = NSAppearance(named: appearanceName)

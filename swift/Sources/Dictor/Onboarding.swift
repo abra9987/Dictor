@@ -50,9 +50,14 @@ final class OnboardingController {
     // MARK: - Жизненный цикл
 
     func showIfNeeded(force: Bool = false) {
-        guard force || !settings.onboardingCompleted else { return }
         let snapshot = currentSnapshot()
-        if !force && snapshot.granted.count == Permission.allCases.count
+        let permissionsMissing = snapshot.granted.count < Permission.allCases.count
+        // Онбординг нельзя «пройти навсегда». Если разрешений нет, приложение
+        // не работает вообще, и человек остаётся наедине с молчащим хоткеем —
+        // так было после переустановки, когда macOS сбросил TCC из-за смены
+        // подписи. В этом случае возвращаемся независимо от флага.
+        guard force || !settings.onboardingCompleted || permissionsMissing else { return }
+        if !force && !permissionsMissing
             && snapshot.modelReady
             && !settings.recentTranscriptEntries.isEmpty {
             // Всё уже настроено (обновление с прошлой версии) — не мешаем.
@@ -60,7 +65,15 @@ final class OnboardingController {
             return
         }
         historyBaseline = settings.recentTranscriptEntries.count
-        step = force ? .welcome : firstIncompleteStep(snapshot)
+        if force {
+            step = .welcome
+        } else if settings.onboardingCompleted && permissionsMissing {
+            // Возвращающийся человек уже знает, что это за приложение —
+            // ведём сразу к разрешениям, а не к приветствию.
+            step = .permissions
+        } else {
+            step = firstIncompleteStep(snapshot)
+        }
         presentWindow()
         startTimer()
     }
