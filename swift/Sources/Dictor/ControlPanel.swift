@@ -109,6 +109,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
         DictorControlPanelRegistry.claimCurrentPanel()
+        installMainMenu()
         // Раздел, запрошенный поповером (макет 6a: «История» и «Настройки»
         // ведут в окно, а не открывают отдельные окна).
         if let index = CommandLine.arguments.firstIndex(of: CONTROL_PANEL_SECTION_ARGUMENT),
@@ -162,6 +163,51 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func t(_ russian: String, _ english: String) -> String {
         localizedText(russian, english, language: language)
+    }
+
+    /// Без этого меню ⌘C в окне только пищит. Приложение живёт в меню-баре
+    /// (LSUIElement), окно поднимает политику до .regular — и остаётся без
+    /// NSApp.mainMenu, а стандартные ⌘C/⌘V/⌘A ходят через пункты меню
+    /// «Правки»: их keyEquivalent и рассылает copy: по цепочке отклика.
+    /// Нет пунктов — некому рассылать, и текст не забрать ни из истории,
+    /// ни из поля поиска, ни из словаря.
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: t("Скрыть Dictor", "Hide Dictor"),
+                        action: #selector(NSApplication.hide(_:)),
+                        keyEquivalent: "h")
+        appMenu.addItem(.separator())
+        // Закрывает окно, а не диктовку: служба живёт отдельным процессом
+        // и продолжает слушать хоткей.
+        appMenu.addItem(withTitle: t("Закрыть окно", "Close Window"),
+                        action: #selector(NSWindow.performClose(_:)),
+                        keyEquivalent: "w")
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: t("Правка", "Edit"))
+        editMenu.addItem(withTitle: t("Отменить", "Undo"),
+                         action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: t("Повторить", "Redo"),
+                                    action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: t("Вырезать", "Cut"),
+                         action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: t("Копировать", "Copy"),
+                         action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: t("Вставить", "Paste"),
+                         action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: t("Выбрать все", "Select All"),
+                         action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
+        NSApp.mainMenu = mainMenu
     }
 
     private func showWindow() {
@@ -2364,10 +2410,17 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     @objc private func copySelectedHistoryEntry(_ sender: NSControl) {
-        guard let (_, entry) = selectedHistoryEntry(among: filteredMainHistory()) else { return }
+        guard let (_, entry) = selectedHistoryEntry(among: filteredMainHistory()) else {
+            log("history copy from window: nothing selected")
+            return
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(entry.text, forType: .string)
+        log("history entry copied from window (\(entry.text.count) chars)")
+        (sender as? SDPrimaryActionButton)?.flashTitle(
+            t("Скопировано", "Copied"),
+            revertingTo: t("Копировать", "Copy"))
     }
 
     @objc private func togglePinSelectedHistoryEntry(_ sender: NSControl) {
