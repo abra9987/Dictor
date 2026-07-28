@@ -974,6 +974,84 @@ final class SDHintBannerView: NSView {
     }
 }
 
+// MARK: - Полный текст диктовки
+
+/// Текст диктовки в правой колонке «Истории». Настоящий NSTextView, а не
+/// подпись: диктовку разбирают по кускам — выделяют слово двойным щелчком,
+/// строку тройным, копируют выделенное на ⌘C или через контекстное меню.
+/// Подпись отдавала только всё целиком, кнопкой «Копировать».
+final class SDSelectableTranscriptView: NSScrollView {
+    let textView = NSTextView()
+
+    init(text: String, font: NSFont, color: NSColor, lineHeightMultiple: CGFloat) {
+        super.init(frame: .zero)
+        drawsBackground = false
+        hasVerticalScroller = true
+        verticalScroller?.controlSize = .small
+        autohidesScrollers = true
+        borderType = .noBorder
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = lineHeightMultiple
+
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        // Перенос по ширине колонки: контейнер тянется за вью, вью — за
+        // шириной скролла. Без этого длинная диктовка уезжает в одну строку.
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0,
+                                                       height: CGFloat.greatestFiniteMagnitude)
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                  height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textStorage?.setAttributedString(NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: color,
+                .paragraphStyle: paragraph,
+            ]))
+        documentView = textView
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// Пока в тексте что-то выделено, окно не имеет права пересобираться:
+    /// пересборка заменит вью и выделение исчезнет прямо под курсором.
+    var hasSelection: Bool { textView.selectedRange().length > 0 }
+
+    /// ⌘C на кнопке «Копировать» обещает копию всей диктовки, а NSTextView
+    /// без выделения по ⌘C не копирует ничего. Пустое выделение — значит
+    /// пользователь просил запись целиком; непустое обрабатывает сам
+    /// NSTextView. Чужой текст (поле поиска в фокусе) не трогаем.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              event.charactersIgnoringModifiers?.lowercased() == "c",
+              !hasSelection,
+              !someoneElseIsEditing else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let text = textView.string
+        guard !text.isEmpty else { return super.performKeyEquivalent(with: event) }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        return true
+    }
+
+    private var someoneElseIsEditing: Bool {
+        guard let responder = window?.firstResponder else { return false }
+        if responder === textView { return false }
+        return responder is NSText || responder is NSTextView
+    }
+}
+
 // MARK: - Сводка «Сегодня»
 
 /// Числа для экрана «Сегодня», посчитанные из локальной статистики.

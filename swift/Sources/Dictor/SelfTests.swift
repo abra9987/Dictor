@@ -444,8 +444,6 @@ enum DictorSelfTest {
         try testConfigurableEnterShortcut()
         try testFKeyAutoRepeatSuppressesWithoutAction()
         try testRightModifierReleaseWithLeftFlagStillSet()
-        try testHistoryChordShowsOverlay()
-        try testConfigurableHistoryShortcut()
         try testOptionCommandEnterChordStopsWithEnter()
         try testEnterShortcutModeSelection()
         try testTogglePressFlipsOnceAndReleaseIsNoOp()
@@ -1088,62 +1086,6 @@ enum DictorSelfTest {
             transcriptHistoryArchive(archivedEntries, removing: 99),
             equals: archivedEntries,
             "an invalid history deletion index should leave the archive unchanged"
-        )
-
-        let historyRowHitTargets = MainActor.assumeIsolated { () -> (delete: Bool, row: Bool, deleteAction: Bool, copyAction: Bool) in
-            let row = HistoryTranscriptItemView(
-                transcript: "test",
-                preview: "test",
-                meta: "0,1 с",
-                asrTiming: nil,
-                historyIndex: 0,
-                target: nil,
-                action: NSSelectorFromString("noop:"),
-                onDelete: { _ in }
-            )
-            row.frame = NSRect(x: 0, y: 0, width: 600, height: 56)
-            guard let deleteButton = row.subviews.compactMap({ $0 as? HistoryDeleteButton }).first else {
-                return (false, false, false, false)
-            }
-            deleteButton.frame = NSRect(x: 560, y: 14, width: 28, height: 28)
-            let deleteAction: Bool
-            if case .delete(0) = row.hitAction(atWindowPoint: NSPoint(x: 574, y: 28)) {
-                deleteAction = true
-            } else {
-                deleteAction = false
-            }
-            let copyAction: Bool
-            if case .copy("test") = row.hitAction(atWindowPoint: NSPoint(x: 200, y: 28)) {
-                copyAction = true
-            } else {
-                copyAction = false
-            }
-            return (
-                row.hitTest(NSPoint(x: 574, y: 28)) === row,
-                row.hitTest(NSPoint(x: 200, y: 28)) === row,
-                deleteAction,
-                copyAction
-            )
-        }
-        try expect(
-            historyRowHitTargets.delete,
-            equals: true,
-            "history rows should own delete-zone clicks"
-        )
-        try expect(
-            historyRowHitTargets.row,
-            equals: true,
-            "history rows should keep transcript clicks on the copy action"
-        )
-        try expect(
-            historyRowHitTargets.deleteAction,
-            equals: true,
-            "history delete zones should resolve to deletion"
-        )
-        try expect(
-            historyRowHitTargets.copyAction,
-            equals: true,
-            "history transcript bodies should resolve to clipboard copy"
         )
         try expect(
             transcriptionDurationLabel(0.1234),
@@ -4013,14 +3955,12 @@ enum DictorSelfTest {
         let shortcut = hotkeyChoice(forKeycode: RIGHT_OPTION_KEYCODE,
                                     modifiers: .maskCommand)
         let unrelatedEnter = hotkeyChoice(forKeycode: 80)
-        let unrelatedHistory = hotkeyChoice(forKeycode: 81)
         let command = CGEventFlags.maskCommand.rawValue
 
         func send(keycode: CGKeyCode, flags: UInt64) -> HotkeyTransitionResult {
             state.transition(for: event(.flagsChanged, keycode: keycode, flags: flags),
                              hotkey: shortcut,
                              enterHotkey: unrelatedEnter,
-                             historyHotkey: unrelatedHistory,
                              triggerMode: .toggle,
                              isRecording: false)
         }
@@ -4202,208 +4142,6 @@ enum DictorSelfTest {
                                    isRecording: true),
             equals: HotkeyTransitionResult(suppress: true, actions: [.release]),
             "right Option should stop instead of being swallowed by the Enter chord"
-        )
-    }
-
-    private static func testHistoryChordShowsOverlay() throws {
-        let rightCommand = hotkeyChoice(forKeycode: RIGHT_COMMAND_KEYCODE)
-        let commandShift = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
-
-        var shiftFirst = HotkeyTransitionState()
-        try expect(
-            shiftFirst.transition(for: event(.flagsChanged,
-                                             keycode: RIGHT_SHIFT_KEYCODE,
-                                             flags: CGEventFlags.maskShift.rawValue),
-                                  hotkey: rightCommand,
-                                  triggerMode: .toggle,
-                                  isRecording: false),
-            equals: .pass,
-            "a lone Shift belongs to the system even though the history chord starts with it"
-        )
-        try expect(
-            shiftFirst.transition(for: event(.flagsChanged,
-                                             keycode: RIGHT_COMMAND_KEYCODE,
-                                             flags: commandShift),
-                                  hotkey: rightCommand,
-                                  triggerMode: .toggle,
-                                  isRecording: false),
-            equals: HotkeyTransitionResult(suppress: true, actions: [.showHistory]),
-            "right shift then right command should show history without starting dictation"
-        )
-        try expect(
-            shiftFirst.transition(for: event(.flagsChanged,
-                                             keycode: RIGHT_COMMAND_KEYCODE,
-                                             flags: CGEventFlags.maskShift.rawValue),
-                                  hotkey: rightCommand,
-                                  triggerMode: .toggle,
-                                  isRecording: false),
-            equals: .suppressOnly,
-            "history chord should suppress the paired right command release"
-        )
-        try expect(
-            shiftFirst.transition(for: event(.flagsChanged,
-                                             keycode: RIGHT_SHIFT_KEYCODE,
-                                             flags: 0),
-                                  hotkey: rightCommand,
-                                  triggerMode: .toggle,
-                                  isRecording: false),
-            // Нажатие Shift система видела — значит обязана увидеть и
-            // отпускание, иначе он для неё остаётся зажатым.
-            equals: .pass,
-            "the paired shift release must reach the system, unlike the assigned key's"
-        )
-
-        var requiredModifierReleasedFirst = HotkeyTransitionState()
-        _ = requiredModifierReleasedFirst.transition(
-            for: event(.flagsChanged,
-                       keycode: RIGHT_SHIFT_KEYCODE,
-                       flags: CGEventFlags.maskShift.rawValue),
-            hotkey: rightCommand,
-            triggerMode: .toggle,
-            isRecording: false
-        )
-        _ = requiredModifierReleasedFirst.transition(
-            for: event(.flagsChanged,
-                       keycode: RIGHT_COMMAND_KEYCODE,
-                       flags: commandShift),
-            hotkey: rightCommand,
-            triggerMode: .toggle,
-            isRecording: false
-        )
-        try expect(
-            requiredModifierReleasedFirst.transition(
-                for: event(.flagsChanged,
-                           keycode: RIGHT_SHIFT_KEYCODE,
-                           flags: CGEventFlags.maskCommand.rawValue),
-                hotkey: rightCommand,
-                triggerMode: .toggle,
-                isRecording: false
-            ),
-            equals: .pass,
-            "releasing Shift first still hands the system its own modifier back"
-        )
-        try expect(
-            requiredModifierReleasedFirst.transition(
-                for: event(.flagsChanged,
-                           keycode: RIGHT_COMMAND_KEYCODE,
-                           flags: 0),
-                hotkey: rightCommand,
-                triggerMode: .toggle,
-                isRecording: false
-            ),
-            equals: .suppressOnly,
-            "releasing right Command last should clear the history chord state"
-        )
-        try expect(
-            requiredModifierReleasedFirst.transition(
-                for: event(.flagsChanged,
-                           keycode: LEFT_COMMAND_KEYCODE,
-                           flags: CGEventFlags.maskCommand.rawValue),
-                hotkey: rightCommand,
-                triggerMode: .toggle,
-                isRecording: false
-            ),
-            equals: .pass,
-            "left Command must not reuse stale right Command state"
-        )
-        try expect(
-            requiredModifierReleasedFirst.transition(
-                for: event(.flagsChanged,
-                           keycode: RIGHT_SHIFT_KEYCODE,
-                           flags: commandShift),
-                hotkey: rightCommand,
-                triggerMode: .toggle,
-                isRecording: false
-            ),
-            // Смысл проверки прежний — история не открывается; изменилось
-            // только то, что чужой Shift мы больше не съедаем.
-            equals: .pass,
-            "left Command plus Shift must not trigger right Command history"
-        )
-
-        var commandFirst = HotkeyTransitionState()
-        try expect(
-            commandFirst.transition(for: event(.flagsChanged,
-                                               keycode: RIGHT_COMMAND_KEYCODE,
-                                               flags: CGEventFlags.maskCommand.rawValue),
-                                    hotkey: rightCommand,
-                                    triggerMode: .toggle,
-                                    isRecording: false),
-            equals: HotkeyTransitionResult(suppress: true, actions: [.press]),
-            "right command alone should still start toggle dictation"
-        )
-        try expect(
-            commandFirst.transition(for: event(.flagsChanged,
-                                               keycode: RIGHT_SHIFT_KEYCODE,
-                                               flags: commandShift),
-                                    hotkey: rightCommand,
-                                    triggerMode: .toggle,
-                                    isRecording: true),
-            // Аккорд замкнулся на Shift, а не на назначенном Right
-            // Command, поэтому Shift уходит системе.
-            equals: HotkeyTransitionResult(suppress: false, actions: [.showHistory]),
-            "history chord should show history without canceling active dictation"
-        )
-        try expect(
-            commandFirst.transition(for: event(.flagsChanged,
-                                               keycode: RIGHT_COMMAND_KEYCODE,
-                                               flags: CGEventFlags.maskShift.rawValue),
-                                    hotkey: rightCommand,
-                                    triggerMode: .toggle,
-                                    isRecording: true),
-            equals: .suppressOnly,
-            "history chord should suppress the paired right command release while recording"
-        )
-        try expect(
-            commandFirst.transition(for: event(.flagsChanged,
-                                               keycode: RIGHT_SHIFT_KEYCODE,
-                                               flags: 0),
-                                    hotkey: rightCommand,
-                                    triggerMode: .toggle,
-                                    isRecording: true),
-            // Нажатие Shift система видела — значит обязана увидеть и
-            // отпускание, иначе он для неё остаётся зажатым.
-            equals: .pass,
-            "the paired shift release must reach the system, unlike the assigned key's"
-        )
-        try expect(
-            commandFirst.transition(for: event(.flagsChanged,
-                                               keycode: RIGHT_COMMAND_KEYCODE,
-                                               flags: CGEventFlags.maskCommand.rawValue),
-                                    hotkey: rightCommand,
-                                    triggerMode: .toggle,
-                                    isRecording: true),
-            equals: HotkeyTransitionResult(suppress: true, actions: [.release]),
-            "right command after the history chord should still stop active dictation"
-        )
-    }
-
-    private static func testConfigurableHistoryShortcut() throws {
-        var state = HotkeyTransitionState()
-        let standard = hotkeyChoice(forKeycode: 96)
-        let history = hotkeyChoice(forKeycode: 40,
-                                   modifiers: [.maskCommand, .maskShift])
-        let commandShift = CGEventFlags.maskCommand.rawValue | CGEventFlags.maskShift.rawValue
-
-        try expect(
-            state.transition(for: event(.keyDown,
-                                        keycode: 40,
-                                        flags: commandShift),
-                             hotkey: standard,
-                             historyHotkey: history,
-                             triggerMode: .toggle,
-                             isRecording: true),
-            equals: HotkeyTransitionResult(suppress: true, actions: [.showHistory]),
-            "a user-configured history shortcut should open history without stopping recording"
-        )
-        try expect(
-            state.transition(for: event(.keyUp, keycode: 40),
-                             hotkey: standard,
-                             historyHotkey: history,
-                             triggerMode: .toggle,
-                             isRecording: true),
-            equals: .suppressOnly,
-            "a configurable history shortcut should suppress its paired release"
         )
     }
 

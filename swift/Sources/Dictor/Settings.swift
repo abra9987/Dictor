@@ -25,8 +25,6 @@ final class Settings: @unchecked Sendable {
     private static let keyHotkeyModifiers = "hotkey_modifiers"
     private static let keyEnterHotkeyKeycode = "enter_hotkey_keycode"
     private static let keyEnterHotkeyModifiers = "enter_hotkey_modifiers"
-    private static let keyHistoryHotkeyKeycode = "history_hotkey_keycode"
-    private static let keyHistoryHotkeyModifiers = "history_hotkey_modifiers"
     private static let keyPrimaryCompletionBehavior = "primary_completion_behavior_v1"
     private static let keyAlternateCompletionEnabled = "alternate_completion_enabled_v1"
     private static let keyInterfaceLanguage = "interface_language"
@@ -184,40 +182,6 @@ final class Settings: @unchecked Sendable {
             return max(0, min(500, defaults.integer(forKey: Self.keyEnterDelayMilliseconds)))
         }
         set { defaults.set(max(0, min(500, newValue)), forKey: Self.keyEnterDelayMilliseconds) }
-    }
-
-    var historyHotkeyKeycode: CGKeyCode {
-        get {
-            normalizedHotkeyKeycode(storedValue: defaults.object(forKey: Self.keyHistoryHotkeyKeycode))
-                ?? RIGHT_COMMAND_KEYCODE
-        }
-        set {
-            let normalized = normalizedHotkeyKeycode(storedValue: NSNumber(value: Int(newValue)))
-                ?? RIGHT_COMMAND_KEYCODE
-            defaults.set(Int(normalized), forKey: Self.keyHistoryHotkeyKeycode)
-        }
-    }
-
-    var historyHotkeyModifiers: CGEventFlags {
-        get {
-            let raw = defaults.object(forKey: Self.keyHistoryHotkeyModifiers) as? NSNumber
-            if raw == nil { return .maskShift }
-            return CGEventFlags(rawValue: raw?.uint64Value ?? 0)
-                .intersection(HOTKEY_SHORTCUT_MODIFIER_MASK)
-        }
-        set {
-            defaults.set(NSNumber(value: newValue.intersection(HOTKEY_SHORTCUT_MODIFIER_MASK).rawValue),
-                         forKey: Self.keyHistoryHotkeyModifiers)
-        }
-    }
-
-    var configuredHistoryHotkey: HotkeyChoice {
-        hotkeyChoice(forKeycode: historyHotkeyKeycode, modifiers: historyHotkeyModifiers)
-    }
-
-    func setConfiguredHistoryHotkey(_ choice: HotkeyChoice) {
-        historyHotkeyKeycode = choice.keycode
-        historyHotkeyModifiers = choice.requiredModifiers
     }
 
     var interfaceLanguage: InterfaceLanguage {
