@@ -421,7 +421,6 @@ enum HotkeyTransitionAction: Equatable, Sendable {
     case release
     case releaseAlternate
     case cancel
-    case showHistory
     /// Toggle mode: the press was suppressed because the app is busy
     /// (transcription in flight). Does NOT flip toggle state. Lets the
     /// app play feedback so the user knows the press was received.
@@ -530,14 +529,12 @@ struct HotkeyShortcutState {
 struct HotkeyTransitionState {
     private var standardShortcutState = HotkeyShortcutState()
     private var enterShortcutState = HotkeyShortcutState()
-    private var historyShortcutState = HotkeyShortcutState()
     private var toggleActive = false
     private var suppressEscapeKeyUp = false
 
     mutating func resetAll() {
         standardShortcutState.reset()
         enterShortcutState.reset()
-        historyShortcutState.reset()
         toggleActive = false
         suppressEscapeKeyUp = false
     }
@@ -557,20 +554,12 @@ struct HotkeyTransitionState {
         enterHotkey: HotkeyChoice = hotkeyChoice(forKeycode: RIGHT_COMMAND_KEYCODE,
                                                  modifiers: .maskAlternate),
         alternateCompletionEnabled: Bool = true,
-        historyHotkey: HotkeyChoice = hotkeyChoice(forKeycode: RIGHT_COMMAND_KEYCODE,
-                                                   modifiers: .maskShift),
         triggerMode: TriggerMode,
         isRecording: Bool,
         canStartRecording: Bool = true
     ) -> HotkeyTransitionResult {
         if event.keycode == ESCAPE_KEYCODE {
             return transitionEscape(for: event, isRecording: isRecording)
-        }
-
-        if let history = transitionHistoryShortcut(for: event,
-                                                    isRecording: isRecording,
-                                                    historyHotkey: historyHotkey) {
-            return history
         }
 
         if alternateCompletionEnabled,
@@ -634,27 +623,6 @@ struct HotkeyTransitionState {
         event.keycode == shortcut.keycode
     }
 
-    private mutating func transitionHistoryShortcut(
-        for event: HotkeyEventSnapshot,
-        isRecording: Bool,
-        historyHotkey: HotkeyChoice
-    ) -> HotkeyTransitionResult? {
-        let claims = claimsEvent(event, shortcut: historyHotkey)
-        switch historyShortcutState.consume(event, shortcut: historyHotkey) {
-        case .press:
-            standardShortcutState.reset()
-            enterShortcutState.reset()
-            if !isRecording {
-                toggleActive = false
-            }
-            return HotkeyTransitionResult(suppress: claims, actions: [.showHistory])
-        case .release, .suppress:
-            return HotkeyTransitionResult(suppress: claims, actions: [])
-        case .pass:
-            return nil
-        }
-    }
-
     private mutating func transitionEnterShortcut(
         for event: HotkeyEventSnapshot,
         isRecording: Bool,
@@ -710,8 +678,6 @@ final class HotkeyListener {
     var enterHotkey: HotkeyChoice = hotkeyChoice(forKeycode: RIGHT_COMMAND_KEYCODE,
                                                  modifiers: .maskAlternate)
     var alternateCompletionEnabled = true
-    var historyHotkey: HotkeyChoice = hotkeyChoice(forKeycode: RIGHT_COMMAND_KEYCODE,
-                                                   modifiers: .maskShift)
     var triggerMode: TriggerMode = .hold
 
     /// onPress fires when a recording should start (press in hold mode,
@@ -722,7 +688,6 @@ final class HotkeyListener {
     var onRelease: ((TimeInterval) -> Void)?
     var onReleaseAlternate: ((TimeInterval) -> Void)?
     var onCancel: (() -> Void)?
-    var onShowHistory: (() -> Void)?
     /// Toggle mode: a press arrived while the app is busy (transcription
     /// in flight). The toggle did NOT flip. Play feedback so the user
     /// knows the press was received but rejected.
@@ -814,12 +779,6 @@ final class HotkeyListener {
         log("HotkeyListener: alternate completion → \(enabled ? "enabled" : "disabled")")
     }
 
-    func setHistoryHotkey(_ choice: HotkeyChoice) {
-        historyHotkey = choice
-        transitionState.resetAll()
-        log("HotkeyListener: history hotkey changed → \(choice.name)")
-    }
-
     func setTriggerMode(_ mode: TriggerMode) {
         // Reset toggle state when switching modes so we don't get
         // stuck in mid-toggle from a previous session.
@@ -842,7 +801,6 @@ final class HotkeyListener {
                                                 hotkey: hotkey,
                                                 enterHotkey: enterHotkey,
                                                 alternateCompletionEnabled: alternateCompletionEnabled,
-                                                historyHotkey: historyHotkey,
                                                 triggerMode: triggerMode,
                                                 isRecording: isRecordingActive?() ?? false,
                                                 canStartRecording: canStartRecording?() ?? true)
@@ -866,7 +824,6 @@ final class HotkeyListener {
             case .release: onRelease?(detectedAt)
             case .releaseAlternate: onReleaseAlternate?(detectedAt)
             case .cancel: onCancel?()
-            case .showHistory: onShowHistory?()
             case .rejectedBusyPress: onRejectedBusyPress?()
             }
         }

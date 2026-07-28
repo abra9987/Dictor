@@ -23,13 +23,11 @@ enum ControlPanelServiceOperation: String, Sendable {
 enum ControlPanelShortcutKind: Int {
     case dictation = 0
     case alternateCompletion = 1
-    case history = 2
 }
 
 struct ControlPanelSettingsDraft: Equatable {
     var dictationHotkey: HotkeyChoice
     var alternateCompletionHotkey: HotkeyChoice
-    var historyHotkey: HotkeyChoice
     var primaryCompletionBehavior: DictationCompletionBehavior
     var alternateCompletionEnabled: Bool
     var enterDelayMilliseconds: Int
@@ -41,7 +39,6 @@ struct ControlPanelSettingsDraft: Equatable {
     init(settings: Settings) {
         dictationHotkey = settings.configuredHotkey
         alternateCompletionHotkey = settings.configuredEnterHotkey
-        historyHotkey = settings.configuredHistoryHotkey
         primaryCompletionBehavior = settings.primaryCompletionBehavior
         alternateCompletionEnabled = settings.alternateCompletionEnabled
         enterDelayMilliseconds = settings.enterDelayMilliseconds
@@ -91,6 +88,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private let onboarding = OnboardingController()
     private var mainHistorySearch = ""
     private weak var mainHistorySearchField: NSSearchField?
+    private weak var historyDetailTranscriptView: SDSelectableTranscriptView?
     /// Раздел главного окна (макет 6a): «Сегодня» открывается первым.
     var mainSection: MainWindowSection = .today
     /// Выбранная запись в «Истории» и фильтр «Закреплённые» (макет 6b).
@@ -214,6 +212,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func refresh(force: Bool = false) {
         guard let window else { return }
+        // Выделение в тексте диктовки живёт ровно до следующей пересборки
+        // вида, а таймер тикает каждые 0.75 с. Пока пользователь держит
+        // выделение в активном окне, фон подождёт — иначе копировать кусок
+        // невозможно. Ушёл в другое приложение — окно снова живое, иначе
+        // забытое выделение заморозило бы счётчики и список навсегда.
+        if !force, window.isKeyWindow,
+           historyDetailTranscriptView?.hasSelection == true { return }
         _ = settings.refreshFromDisk()
         let fingerprint = renderFingerprint()
         guard force || fingerprint != lastRenderFingerprint else { return }
@@ -286,7 +291,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 permissions,
                 settings.configuredHotkey.name,
                 settings.configuredEnterHotkey.name,
-                settings.configuredHistoryHotkey.name,
                 settings.primaryCompletionBehavior.rawValue,
                 settings.alternateCompletionEnabled ? "alternate-on" : "alternate-off",
                 settings.triggerMode.rawValue,
@@ -537,10 +541,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.addArrangedSubview(SDRowView(
             title: t("Начать / остановить диктовку", "Start / stop dictation"),
             control: hotkeyControl(shortcut: draft.dictationHotkey, kind: .dictation)
-        ))
-        root.addArrangedSubview(SDRowView(
-            title: t("Открыть историю", "Open history"),
-            control: hotkeyControl(shortcut: draft.historyHotkey, kind: .history)
         ))
         root.addArrangedSubview(SDRowView(
             title: t("Альтернативное завершение", "Alternative finish"),
@@ -1057,13 +1057,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let dismissed = Set(settings.dismissedHints)
         let entryCount = settings.recentTranscriptEntries.count
 
-        if entryCount >= 3, !dismissed.contains("history-hotkey") {
-            let caps = inlineShortcutText(
-                keycapLabels(for: settings.configuredHistoryHotkey, language: language))
+        if entryCount >= 3, !dismissed.contains("history-section") {
             return TodayHint(
-                identifier: "history-hotkey",
-                text: t("Историю можно открыть поверх любого приложения — \(caps). Не нужно возвращаться в это окно.",
-                        "History opens on top of any app — \(caps). No need to come back to this window."),
+                identifier: "history-section",
+                text: t("Каждая диктовка остаётся в истории — её можно найти и скопировать целиком или по кусочку.",
+                        "Every dictation stays in History — find it there and copy all of it or just a piece."),
                 actionTitle: t("Показать", "Show"),
                 action: #selector(showHistorySectionClicked(_:)))
         }
@@ -2267,39 +2265,30 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         metaRow.alignment = .centerY
         metaRow.spacing = 9
 
-        // Полный текст: 16/1.6, выделяемый — его забирают мышью.
-        let body = NSTextField(wrappingLabelWithString: entry.text)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = 1.6
-        body.attributedStringValue = NSAttributedString(
-            string: entry.text,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 16),
-                .foregroundColor: SD.C.ink,
-                .paragraphStyle: paragraph,
-            ])
-        body.isSelectable = true
-        body.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
-            - MAIN_WINDOW_SIDEBAR_WIDTH - 328 - 44
+        // Полный текст: 16/1.6, выделяемый — его забирают мышью, по слову
+        // и по строке, а не только целиком кнопкой «Копировать».
+        let body = SDSelectableTranscriptView(text: entry.text,
+                                              font: .systemFont(ofSize: 16),
+                                              color: SD.C.ink,
+                                              lineHeightMultiple: 1.6)
+        body.translatesAutoresizingMaskIntoConstraints = false
+        historyDetailTranscriptView = body
 
-        let column = NSStackView(views: [metaRow, body])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = 0
-        column.edgeInsets = NSEdgeInsets(top: 22, left: 22, bottom: 22, right: 22)
-        column.setCustomSpacing(14, after: metaRow)
-        column.translatesAutoresizingMaskIntoConstraints = false
-
+        metaRow.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(header)
-        root.addSubview(column)
+        root.addSubview(metaRow)
+        root.addSubview(body)
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             header.topAnchor.constraint(equalTo: root.topAnchor),
-            column.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            column.topAnchor.constraint(equalTo: header.bottomAnchor),
-            column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
+            metaRow.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 22),
+            metaRow.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -22),
+            metaRow.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 22),
+            body.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 22),
+            body.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -22),
+            body.topAnchor.constraint(equalTo: metaRow.bottomAnchor, constant: 14),
+            body.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -22),
         ])
         return root
     }
@@ -3147,15 +3136,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func settingsValidationMessage(_ draft: ControlPanelSettingsDraft) -> String? {
         let shortcuts = draft.alternateCompletionEnabled
-            ? [draft.dictationHotkey, draft.alternateCompletionHotkey, draft.historyHotkey]
-            : [draft.dictationHotkey, draft.historyHotkey]
+            ? [draft.dictationHotkey, draft.alternateCompletionHotkey]
+            : [draft.dictationHotkey]
         for firstIndex in shortcuts.indices {
             for secondIndex in shortcuts.indices where secondIndex > firstIndex {
                 let first = shortcuts[firstIndex]
                 let second = shortcuts[secondIndex]
                 if hotkeysConflict(first, second) {
-                    return t("Сочетания для диктовки, завершения и истории должны отличаться.",
-                             "Dictation, finish, and history shortcuts must be different.")
+                    return t("Сочетания для диктовки и завершения должны отличаться.",
+                             "Dictation and finish shortcuts must be different.")
                 }
                 if hotkeyIsModifierPrefix(first, of: second)
                     || hotkeyIsModifierPrefix(second, of: first) {
@@ -3529,8 +3518,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             recorderTitle = t("Новое сочетание для диктовки", "New Dictation Shortcut")
         case .alternateCompletion:
             recorderTitle = t("Дополнительное сочетание завершения", "Alternative Finish Shortcut")
-        case .history:
-            recorderTitle = t("Новое сочетание для истории", "New History Shortcut")
         }
         let recorder = HotkeyRecorderController(language: language,
                                                 titleOverride: recorderTitle) { [weak self] selected in
@@ -3547,7 +3534,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             switch kind {
             case .dictation: draft.dictationHotkey = selected
             case .alternateCompletion: draft.alternateCompletionHotkey = selected
-            case .history: draft.historyHotkey = selected
             }
             self.settingsDraft = draft
             // Если записали ровно то, что уже стояло, менять нечего —
@@ -3639,7 +3625,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private func applySettings(_ draft: ControlPanelSettingsDraft) {
         settings.setConfiguredHotkey(draft.dictationHotkey)
         settings.setConfiguredEnterHotkey(draft.alternateCompletionHotkey)
-        settings.setConfiguredHistoryHotkey(draft.historyHotkey)
         settings.primaryCompletionBehavior = draft.primaryCompletionBehavior
         settings.alternateCompletionEnabled = draft.alternateCompletionEnabled
         settings.enterDelayMilliseconds = draft.enterDelayMilliseconds
