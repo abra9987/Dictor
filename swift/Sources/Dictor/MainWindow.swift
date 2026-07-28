@@ -458,8 +458,11 @@ final class SDStreakDotsView: NSView {
 /// подпись 12.5/600 + моно-хоткей rgba(255,255,255,.72).
 final class SDPrimaryActionButton: NSControl {
     private let background = NSView()
+    private let titleLabel: NSTextField
+    private var revertWorkItem: DispatchWorkItem?
 
     init(title: String, shortcut: String?, target: AnyObject?, action: Selector) {
+        titleLabel = NSTextField(labelWithString: title)
         super.init(frame: .zero)
         self.target = target
         self.action = action
@@ -469,7 +472,6 @@ final class SDPrimaryActionButton: NSControl {
         background.translatesAutoresizingMaskIntoConstraints = false
         addSubview(background)
 
-        let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
         titleLabel.textColor = .white
 
@@ -500,6 +502,21 @@ final class SDPrimaryActionButton: NSControl {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// Кнопка, которая молча кладёт текст в буфер, читается как сломанная:
+    /// буфер не видно. Подтверждение живёт на самой кнопке и возвращается
+    /// к обычной надписи само — окно при этом не пересобирается, иначе
+    /// подтверждение стёрло бы выделение в тексте рядом.
+    func flashTitle(_ text: String, revertingTo original: String,
+                    after seconds: TimeInterval = 1.4) {
+        revertWorkItem?.cancel()
+        titleLabel.stringValue = text
+        let revert = DispatchWorkItem { [weak self] in
+            self?.titleLabel.stringValue = original
+        }
+        revertWorkItem = revert
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: revert)
+    }
 
     private func restyle() {
         background.layer?.backgroundColor = resolvedCGColor(SD.C.voice)
