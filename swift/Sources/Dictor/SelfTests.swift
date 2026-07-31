@@ -51,6 +51,10 @@ enum DictorSelfTest {
             return runSuite("audio-input", testAudioInputDeviceFiltering)
         case "model-status":
             return runSuite("model-status", testSpeechModelStartupStatus)
+        case "service-status":
+            return runSuite("service-status", testServiceStatusHold)
+        case "search-clear":
+            return runSuite("search-clear", testHistorySearchClearButton)
         case "audio-route":
             return runSuite("audio-route", testAudioRouteChangeDecision)
         case "recording-lifecycle":
@@ -106,6 +110,8 @@ enum DictorSelfTest {
         try testAudioConversion()
         try testAudioInputDeviceFiltering()
         try testSpeechModelStartupStatus()
+        try testServiceStatusHold()
+        try testHistorySearchClearButton()
         try testAudioRouteChangeDecision()
         try testRecordingLifecycle()
         try testPowerStateRecoveryDecision()
@@ -4385,6 +4391,109 @@ enum DictorSelfTest {
             flagsRawValue: flags,
             isAutoRepeat: isAutoRepeat
         )
+    }
+
+    /// Крестик очистки поиска по истории.
+    ///
+    /// Системный крестик NSSearchField в этом окне не работал вовсе: поле без
+    /// рамки (`isBordered = false`) кладёт редактор текста на всю свою площадь
+    /// и ещё на пару точек за края — замерено. Кнопка при этом честно
+    /// рисовалась, но попадание мыши доставалось NSTextView, и нажатий она не
+    /// видела ни одного. Нарисованная и мёртвая кнопка хуже отсутствующей,
+    /// поэтому крестик теперь свой — и лежит за пределами поля.
+    ///
+    /// Тест сторожит именно достижимость: кнопка не должна пересекаться с
+    /// полем и обязана иметь адресата.
+    private static func testHistorySearchClearButton() throws {
+        try MainActor.assumeIsolated {
+            let panel = DictorControlPanelApp()
+            panel.mainSection = .history
+            panel.mainHistorySearch = "звонка"
+            let view = panel.makeMainWindowView()
+            view.frame = NSRect(origin: .zero, size: MAIN_WINDOW_SIZE)
+            view.layoutSubtreeIfNeeded()
+
+            func firstSearchField(in view: NSView) -> NSSearchField? {
+                if let field = view as? NSSearchField { return field }
+                for subview in view.subviews {
+                    if let found = firstSearchField(in: subview) { return found }
+                }
+                return nil
+            }
+
+            guard let field = firstSearchField(in: view), let box = field.superview else {
+                throw SelfTestFailure.failed("history search field not found")
+            }
+            guard let clear = box.subviews.compactMap({ $0 as? NSButton }).first else {
+                throw SelfTestFailure.failed("clear button is missing while the query is not empty")
+            }
+            try expect(clear.target != nil && clear.action != nil, equals: true,
+                       "the clear button must have somewhere to send the click")
+            // Зазор в 4 pt: редактор поля вылезает за его границы примерно на
+            // 3,5 pt, и меньший зазор снова спрятал бы кнопку под текст.
+            try expect(clear.frame.minX >= field.frame.maxX + 4, equals: true,
+                       "the clear button must sit clear of the text editor, " +
+                       "button at \(clear.frame.minX), field ends at \(field.frame.maxX)")
+
+            // И обратное: без запроса крестика быть не должно — стирать нечего.
+            panel.mainHistorySearch = ""
+            let empty = panel.makeMainWindowView()
+            empty.frame = NSRect(origin: .zero, size: MAIN_WINDOW_SIZE)
+            empty.layoutSubtreeIfNeeded()
+            guard let emptyField = firstSearchField(in: empty),
+                  let emptyBox = emptyField.superview else {
+                throw SelfTestFailure.failed("history search field not found for the empty query")
+            }
+            try expect(emptyBox.subviews.contains(where: { $0 is NSButton }), equals: false,
+                       "an empty query should show no clear button")
+        }
+    }
+
+    /// Пауза перед показом состояния службы (макет 8c). Проверять её живьём
+    /// нечем: прогрев длится 0,2 с, и увидеть, что он не мигнул, можно только
+    /// по часам.
+    private static func testServiceStatusHold() throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
+
+        // Первое состояние показывается сразу: пустой подвал хуже мигания.
+        let hold = ServiceStatusHold()
+        try expect(hold.settle(.ready(latencyMilliseconds: 180), now: at(0)).identity,
+                   equals: "ready",
+                   "first status should show without waiting")
+
+        // Прогрев на 0,2 с не должен показаться вовсе.
+        try expect(hold.settle(.warmingUp, now: at(0.1)).identity, equals: "ready",
+                   "a fresh status must wait out the pause")
+        try expect(hold.settle(.ready(latencyMilliseconds: 180), now: at(0.3)).identity,
+                   equals: "ready",
+                   "a status shorter than the pause must never reach the screen")
+
+        // Состояние, которое выдержало паузу, показывается.
+        try expect(hold.settle(.verifying(done: 3, total: 21), now: at(1.0)).identity,
+                   equals: "ready",
+                   "the pause starts when the new status appears")
+        try expect(hold.settle(.verifying(done: 5, total: 21), now: at(1.3)).fingerprint,
+                   equals: "verifying:5/21",
+                   "a status that outlived the pause should be shown with fresh numbers")
+
+        // Числа внутри показанного состояния идут без задержки: задержанный
+        // прогресс — это вторая ложь вместо первой.
+        try expect(hold.settle(.verifying(done: 9, total: 21), now: at(1.31)).fingerprint,
+                   equals: "verifying:9/21",
+                   "numbers inside the shown status must pass through immediately")
+
+        // Пока пауза идёт, окно знает, когда её будить.
+        let pending = ServiceStatusHold()
+        _ = pending.settle(.ready(latencyMilliseconds: nil), now: at(0))
+        try expect(pending.pendingDeadline, equals: nil,
+                   "a settled status needs no wake-up")
+        _ = pending.settle(.failed, now: at(1))
+        try expect(pending.pendingDeadline, equals: at(1 + ServiceStatusHold.delay),
+                   "a waiting status should ask for a wake-up at the end of the pause")
+        _ = pending.settle(.failed, now: at(1.3))
+        try expect(pending.pendingDeadline, equals: nil,
+                   "a shown status should cancel its wake-up")
     }
 
     private static func expect<T: Equatable>(
