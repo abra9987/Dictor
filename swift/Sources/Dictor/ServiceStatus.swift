@@ -37,12 +37,18 @@ enum ServiceStatusKind: Equatable {
     case failed
     /// 9 · Выключена намеренно. Не поломка, поэтому ни кнопки, ни движения.
     case off
+    /// Служба работает, но из прежней версии приложения. Так бывает, когда
+    /// человек ставит обновление сам — перетаскивает новое приложение поверх
+    /// старого: файлы заменились, а запущенный агент остался прежним.
+    /// Молча это оставлять нельзя: снаружи выглядит как «обновился, и ничего
+    /// не поменялось».
+    case versionMismatch(running: String, installed: String)
 
     /// Признак «идёт работа»: маркер-волна и запрет на кнопки.
     var isBusy: Bool {
         switch self {
         case .starting, .verifying, .downloading, .warmingUp, .updating: return true
-        case .ready, .needsPermission, .failed, .off: return false
+        case .ready, .needsPermission, .failed, .off, .versionMismatch: return false
         }
     }
 
@@ -128,6 +134,16 @@ func serviceStatusPresentation(_ kind: ServiceStatusKind,
     case .off:
         return .init(title: t("Диктовка выключена", "Dictation is off"),
                      subtitle: t("включите тумблером в меню", "turn it on from the menu"))
+
+    case .versionMismatch(let running, let installed):
+        // Требует человека, но не поломка: диктовка работает, просто старая.
+        // Поэтому квадрат пустой, а не залитый тревожным.
+        return .init(title: t("Установлена версия \(installed)",
+                              "Version \(installed) is installed"),
+                     subtitle: t("служба ещё работает на \(running)",
+                                 "the service is still running \(running)"),
+                     primaryAction: t("Перезапустить службу", "Restart the service"),
+                     wantsAttention: true)
     }
 }
 
@@ -149,6 +165,11 @@ final class ServiceStatusMarkerView: NSView {
         didSet { if shape != oldValue { rebuild() } }
     }
 
+    /// В подвале окна маркер 7×7, в шапке панели — 8×8 (макет 8a и 8b).
+    var markerSize: CGFloat = 7 {
+        didSet { if markerSize != oldValue { invalidateIntrinsicContentSize(); rebuild() } }
+    }
+
     private var bars: [NSView] = []
 
     override init(frame frameRect: NSRect) {
@@ -164,7 +185,7 @@ final class ServiceStatusMarkerView: NSView {
         // высоту. Остальные формы — ровно 7×7 из макета: если дать им высоту
         // волны, круг и квадрат растянутся в овал и прямоугольник.
         if case .wave = shape { return NSSize(width: 17.5, height: 11) }
-        return NSSize(width: 7, height: 7)
+        return NSSize(width: markerSize, height: markerSize)
     }
 
     private func rebuild() {
@@ -178,7 +199,7 @@ final class ServiceStatusMarkerView: NSView {
 
         switch shape {
         case .dot(let color):
-            layer?.cornerRadius = 3.5
+            layer?.cornerRadius = markerSize / 2
             layer?.backgroundColor = resolvedCGColor(color)
         case .hollowSquare:
             layer?.cornerRadius = 1.5
@@ -188,7 +209,7 @@ final class ServiceStatusMarkerView: NSView {
             layer?.cornerRadius = 1.5
             layer?.backgroundColor = resolvedCGColor(color)
         case .hollowRing:
-            layer?.cornerRadius = 3.5
+            layer?.cornerRadius = markerSize / 2
             layer?.borderWidth = 1.5
             layer?.borderColor = resolvedCGColor(SD.C.subtle)
         case .wave(let slow):

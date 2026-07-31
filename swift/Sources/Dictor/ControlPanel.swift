@@ -1280,6 +1280,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return .needsPermission(name: permissionTitle(permission))
         }
 
+        // Служба может работать из бандла прошлой версии — так бывает, когда
+        // человек ставит обновление вручную поверх работающего приложения.
+        if let running = state?.appVersion, running != currentBundleVersion() {
+            return .versionMismatch(running: running, installed: currentBundleVersion())
+        }
+
         switch state?.status {
         case "ready":
             return .ready(latencyMilliseconds: state?.medianLatencyMilliseconds)
@@ -1311,6 +1317,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         marker.translatesAutoresizingMaskIntoConstraints = false
         switch kind {
         case .ready: marker.shape = .dot(SD.C.positive)
+        case .versionMismatch: marker.shape = .hollowSquare
         case .off: marker.shape = .hollowRing
         case .needsPermission: marker.shape = .hollowSquare
         case .failed: marker.shape = .filledSquare(SD.C.danger)
@@ -1436,6 +1443,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             settings.agentEnabled = true
             _ = settings.refreshFromDisk()
             beginServiceOperation(.starting)
+        case .versionMismatch:
+            beginServiceOperation(.restarting)
         default:
             break
         }
