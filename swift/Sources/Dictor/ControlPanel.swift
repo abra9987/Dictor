@@ -80,6 +80,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var updateTask: Task<Void, Never>?
     /// Состояние, навязанное экспортом превью, — в живом окне всегда nil.
     private var previewStatusOverride: ServiceStatusKind?
+    /// Пауза перед показом коротких состояний службы (макет 8c).
+    private let statusHold = ServiceStatusHold()
+    private var statusHoldTimer: Timer?
     private var updateState: ControlPanelUpdateState = .checking
     private var lastRenderFingerprint = ""
     private let settings = Settings.shared
@@ -91,7 +94,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var onboardingPage: OnboardingPageView?
     /// Отчёт последней починки разрешений. Пусто — показываем план.
     private var permissionRepairNotes: [String] = []
-    private var mainHistorySearch = ""
+    /// Запрос поиска по истории. Не private: экспорт превью снимает историю с
+    /// набранным запросом — только там видны подсветка совпадений и крестик
+    /// очистки.
+    var mainHistorySearch = ""
     private weak var mainHistorySearchField: NSSearchField?
     private weak var historyDetailTranscriptView: SDSelectableTranscriptView?
     /// Раздел главного окна (макет 6a): «Сегодня» открывается первым.
@@ -433,7 +439,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                           state?.speechModelReady == true ? "1" : "0"].joined(separator: "|")
         }
         let newestHistory = settings.recentTranscriptEntries.first
-        return [language.rawValue,
+        // Состояние службы — уже выдержавшее паузу (8c), а не сырое: иначе
+        // созревшая пауза не доживёт до экрана. Отпечаток к этому моменту уже
+        // не меняется, и refresh вышел бы на раннем `return`.
+        let statusToken: String = "status:\(currentServiceStatus().fingerprint)"
+        let parts: [String] = [statusToken,
+                language.rawValue,
                 "section:\(mainSection.rawValue):\(statsPeriod.rawValue)",
                 "history:\(settings.recentTranscriptEntries.count):" +
                     "\(newestHistory?.createdAt?.timeIntervalSince1970 ?? 0)",
@@ -455,7 +466,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 permissionClickCount.description,
                 "repair:\(permissionRepairNotes.count)",
                 (AgentRuntimeStateStore.read()?.missingPermissions ?? []).sorted().joined(separator: ",")]
-            .joined(separator: "::")
+        return parts.joined(separator: "::")
     }
 
     private func updateStateFingerprint() -> String {
@@ -1265,8 +1276,31 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// её загрузка, прогрев и обновление приложения. После обновления это было
     /// особенно плохо: служба поднимается заново, а подвал утверждал, что она
     /// остановлена, — человек не знал, ждать или чинить.
+    ///
+    /// Наружу отдаётся не сырое состояние, а выдержавшее паузу (макет 8c):
+    /// прогрев и быстрая проверка файлов иначе успевают только мигнуть.
     func currentServiceStatus() -> ServiceStatusKind {
         if let previewStatusOverride { return previewStatusOverride }
+        let settled = statusHold.settle(rawServiceStatus())
+        scheduleStatusHoldWakeup()
+        return settled
+    }
+
+    /// Будильник на конец паузы. Без него созревшее состояние ждало бы
+    /// очередного тика таймера обновления — до 0,75 с сверх задержки.
+    private func scheduleStatusHoldWakeup() {
+        statusHoldTimer?.invalidate()
+        statusHoldTimer = nil
+        guard let deadline = statusHold.pendingDeadline else { return }
+        let delay = max(0.05, deadline.timeIntervalSinceNow)
+        statusHoldTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refresh()
+            }
+        }
+    }
+
+    private func rawServiceStatus() -> ServiceStatusKind {
         let state = AgentRuntimeStateStore.read()
         let running = DictorAgentService.isAgentRunning()
 
@@ -2557,6 +2591,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         mainHistorySearchField = search
         // Системная лупа-кнопка не нужна: значок нарисован слева по макету.
         (search.cell as? NSSearchFieldCell)?.searchButtonCell = nil
+        // Системный крестик очистки тоже убираем — и вот почему. Поле без
+        // рамки (isBordered = false) кладёт редактор текста на всю свою
+        // площадь: замерено — редактор −2,5…361,5 при кнопке на 334…356.
+        // Крестик рисуется, но попадание мыши достаётся NSTextView, и кнопка
+        // не получает ни одного нажатия. Нарисованная и не работающая кнопка
+        // хуже её отсутствия, поэтому крестик у нас свой.
+        (search.cell as? NSSearchFieldCell)?.cancelButtonCell = nil
         magnifier.translatesAutoresizingMaskIntoConstraints = false
         searchBox.addSubview(magnifier)
         searchBox.addSubview(search)
@@ -2565,9 +2606,36 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             magnifier.leadingAnchor.constraint(equalTo: searchBox.leadingAnchor, constant: 11),
             magnifier.centerYAnchor.constraint(equalTo: searchBox.centerYAnchor),
             search.leadingAnchor.constraint(equalTo: magnifier.trailingAnchor, constant: 8),
-            search.trailingAnchor.constraint(equalTo: searchBox.trailingAnchor, constant: -10),
             search.centerYAnchor.constraint(equalTo: searchBox.centerYAnchor),
         ])
+
+        // Крестик появляется только когда есть что стирать.
+        if mainHistorySearch.isEmpty {
+            search.trailingAnchor.constraint(equalTo: searchBox.trailingAnchor,
+                                             constant: -10).isActive = true
+        } else {
+            let clear = NSButton(title: "×",
+                                 target: self,
+                                 action: #selector(clearMainHistorySearch(_:)))
+            clear.isBordered = false
+            clear.font = .systemFont(ofSize: 15)
+            clear.contentTintColor = SD.C.subtle
+            clear.setButtonType(.momentaryChange)
+            clear.toolTip = t("Очистить поиск", "Clear search")
+            clear.translatesAutoresizingMaskIntoConstraints = false
+            searchBox.addSubview(clear)
+            NSLayoutConstraint.activate([
+                clear.trailingAnchor.constraint(equalTo: searchBox.trailingAnchor, constant: -6),
+                clear.centerYAnchor.constraint(equalTo: searchBox.centerYAnchor),
+                clear.widthAnchor.constraint(equalToConstant: 22),
+                clear.heightAnchor.constraint(equalToConstant: 22),
+                // −8, а не −4: раскладка считает поле по alignment rect, а он
+                // уже настоящего кадра, и редактор текста вылезает за границы
+                // поля на пару точек. Впритык кнопка снова оказалась бы под
+                // текстом.
+                search.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
+            ])
+        }
 
         // Фильтры. Пилюль по приложениям из макета нет: источник диктовки
         // не сохраняется, поэтому остаются «Все» и «Закреплённые».
@@ -2897,6 +2965,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     @objc private func mainHistorySearchChanged(_ sender: NSSearchField) {
         mainHistorySearch = sender.stringValue
+        refresh(force: true)
+    }
+
+    @objc private func clearMainHistorySearch(_ sender: NSButton) {
+        mainHistorySearch = ""
+        mainHistorySearchField?.stringValue = ""
         refresh(force: true)
     }
 
@@ -4216,10 +4290,16 @@ func exportHistoryPanelPreviews(to directory: URL,
     // приложением, поэтому возврат обязателен даже при исключении.
     let savedLanguage = settings.interfaceLanguage
     if let language { settings.interfaceLanguage = language }
+    // Закрытые подсказки — тем же приёмом. Иначе «Сегодня» снимается без
+    // плашки подсказки у всякого, кто хоть раз её закрыл, и проверить эмаль
+    // (макет 8d) рендером нечем.
+    let savedDismissedHints = settings.dismissedHints
+    settings.dismissedHints = []
     defer {
         settings.interfaceLanguage = savedLanguage
         settings.recentTranscriptEntries = savedEntries
         settings.dailyDictationUsage = savedUsage
+        settings.dismissedHints = savedDismissedHints
     }
     // Сэмплы на языке интерфейса: английские снимки с русскими диктовками
     // внутри выглядят как незаконченный перевод.
@@ -4295,6 +4375,33 @@ func exportHistoryPanelPreviews(to directory: URL,
             exported += 1
         }
     }
+    // История с набранным запросом. Без неё не проверить ни подсветку
+    // совпадений, ни крестик очистки: пустое поле не показывает ни того,
+    // ни другого.
+    panel.mainSection = .history
+    panel.mainHistorySearch = settings.interfaceLanguage == .english ? "call" : "звонка"
+    for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                     ("dark", NSAppearance.Name.darkAqua)] {
+        window.appearance = NSAppearance(named: appearanceName)
+        let view = panel.makeMainWindowView()
+        view.frame = NSRect(origin: .zero, size: size)
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SettingsPreviewExportError(message: "no bitmap rep for history-search-\(suffix)")
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw SettingsPreviewExportError(message: "PNG encode failed for history-search-\(suffix)")
+        }
+        try png.write(to: directory.appendingPathComponent("history-search-\(suffix).png"),
+                      options: .atomic)
+        exported += 1
+    }
+    panel.mainHistorySearch = ""
+
     // Годовой разрез статистики (макет 7c). Окно превью выше рабочего,
     // чтобы карточка кварталов попала в кадр целиком, а не под прокрутку.
     panel.mainSection = .stats
