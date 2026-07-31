@@ -6633,7 +6633,10 @@ extension DictorApp: QuickPanelDelegate {
             todayAudioSeconds: today?.audioSeconds ?? 0,
             weekBars: weekBars,
             interfaceLanguage: language
-        )
+        ,
+                               availableUpdateVersion: pendingUpdate?.version,
+                               installedVersion: currentBundleVersion(),
+                               isCheckingForUpdates: isCheckingForUpdates)
     }
 
     func quickPanelDidToggleEnabled(_ enabled: Bool) {
@@ -6714,5 +6717,38 @@ extension DictorApp: QuickPanelDelegate {
     /// Теперь это тот же полный выход, что и в меню.
     func quickPanelQuit() {
         quitApplicationCompletely()
+    }
+
+    func quickPanelInstallUpdate() {
+        guard let release = pendingUpdate else { return }
+        presentUpdateWindow(for: release, currentVersion: currentBundleVersion())
+    }
+
+    /// Ручная проверка из панели. Обработчик для неё существовал с самого
+    /// начала, но не был подключён ни к одному элементу интерфейса: узнать о
+    /// новой версии можно было только дождавшись автоматической проверки.
+    func quickPanelCheckForUpdates() {
+        guard !isCheckingForUpdates else { return }
+        isCheckingForUpdates = true
+        refreshQuickPanel()
+        manualUpdateCheckTask = Task { [weak self] in
+            let outcome = await UpdateCheck.fetchLatest()
+            guard !Task.isCancelled, let self, !self.isTerminating else { return }
+            self.manualUpdateCheckTask = nil
+            self.isCheckingForUpdates = false
+            self.recordUpdateCheck(release: try? outcome.get(), source: .manual)
+            if let release = try? outcome.get() {
+                self.handleFetchedRelease(release)
+            }
+            self.refreshQuickPanel()
+            if self.pendingUpdate == nil {
+                self.quickPanel?.flashUpToDate()
+            }
+        }
+    }
+
+    private func refreshQuickPanel() {
+        guard let panel = quickPanel, panel.isVisible else { return }
+        panel.apply(state: quickPanelState())
     }
 }
