@@ -76,6 +76,10 @@ cp "$ROOT_DIR/swift/Info.plist" "$STAGE_APP/Contents/Info.plist"
 cp "$ROOT_DIR/swift/Resources/dictor-menubar.png" "$STAGE_APP/Contents/Resources/"
 cp "$ROOT_DIR/swift/Resources/dictor-menubar@2x.png" "$STAGE_APP/Contents/Resources/"
 cp "$ROOT_DIR/icon/Dictor.icns" "$STAGE_APP/Contents/Resources/Dictor.icns"
+# MIT требует, чтобы текст лицензии ехал вместе с бинарником — иначе раздавать
+# собранное приложение нельзя.
+cp "$ROOT_DIR/LICENSE" "$STAGE_APP/Contents/Resources/LICENSE.txt"
+cp "$ROOT_DIR/NOTICE.md" "$STAGE_APP/Contents/Resources/NOTICE.md"
 chmod 755 "$STAGE_APP/Contents/MacOS/Dictor"
 
 SIGN_ARGS=(--force --deep --sign "$SIGN_IDENTITY" --options runtime

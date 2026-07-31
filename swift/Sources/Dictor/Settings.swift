@@ -499,9 +499,15 @@ final class Settings: @unchecked Sendable {
         }
     }
 
+    /// По умолчанию включено. Раньше стояло `false` — и правильно: обновления
+    /// вели в чужой репозиторий, а проверять их было незачем. Теперь канал
+    /// свой, приложение не нотаризовано и живёт вне App Store, так что узнать
+    /// о починке человеку больше неоткуда. Выключается в меню-баре, и тогда
+    /// приложение не ходит в сеть вовсе — так и написано во вкладке
+    /// «Приватность».
     var checkForUpdates: Bool {
         get {
-            if defaults.object(forKey: Self.keyCheckForUpdates) == nil { return false }
+            if defaults.object(forKey: Self.keyCheckForUpdates) == nil { return true }
             return defaults.bool(forKey: Self.keyCheckForUpdates)
         }
         set { defaults.set(newValue, forKey: Self.keyCheckForUpdates) }

@@ -14,29 +14,25 @@ import UniformTypeIdentifiers
 
 // MARK: - Update check
 //
-// Hits the GitHub Releases API once at boot + every 6 h. Users can
+// Reads update.json from the update channel once at boot + every 6 h.
+// Users can
 // also force the same lookup from the menu. When a newer version is
 // found AND it's not in the user's skipped list, a submenu inserts
 // itself at the top of the menu: What's new / Update now / Remind me
 // in 24 hours / Skip vX.Y.Z.
 
-struct GitHubRelease: Sendable, Equatable {
+struct DictorRelease: Sendable, Equatable {
     let tagName: String      // 'v0.1.7'
     let version: String      // '0.1.7' (no v)
     let body: String         // release notes, raw markdown
     let htmlURL: String
 }
 
-struct GitHubReleaseResponse: Decodable {
-    let tagName: String
-    let body: String?
-    let htmlURL: String?
-
-    enum CodingKeys: String, CodingKey {
-        case tagName = "tag_name"
-        case body
-        case htmlURL = "html_url"
-    }
+/// `update.json` с канала обновлений. Тот же файл читает установщик —
+/// он же несёт контрольную сумму архива.
+struct DictorUpdateFeedResponse: Decodable {
+    let version: String
+    let notes: String?
 }
 
 /// Why an update check failed. Carried as a value (not a string) so
@@ -46,8 +42,7 @@ struct GitHubReleaseResponse: Decodable {
 enum UpdateCheckFailure: Error, Equatable, Sendable {
     /// The HTTPS request itself failed (offline, DNS, timeout).
     case network
-    /// GitHub answered with a non-2xx status (403 → likely API rate
-    /// limiting).
+    /// The update server answered with a non-2xx status.
     case httpStatus(Int)
     /// A response arrived but was oversized, malformed, or carried an
     /// unusable tag.
@@ -60,23 +55,20 @@ enum UpdateCheckFailure: Error, Equatable, Sendable {
 func manualUpdateCheckFailureText(_ failure: UpdateCheckFailure) -> String {
     switch failure {
     case .network:
-        return "Dictor couldn't reach GitHub. Check your internet connection and try again."
-    case .httpStatus(403):
-        return "GitHub declined the update check (HTTP 403). This is usually temporary rate limiting — try again in a few minutes."
+        return "Dictor couldn't reach the update server. Check your internet connection and try again."
     case .httpStatus(let code):
-        return "GitHub returned an error (HTTP \(code)). Try again later."
+        return "The update server returned an error (HTTP \(code)). Try again later."
     case .unexpectedResponse:
-        return "GitHub returned a response Dictor couldn't read. Try again later, or check the releases page on GitHub directly."
+        return "The update server returned a response Dictor couldn't read. Try again later, or open \(UPDATE_CHANNEL_PAGE.absoluteString) directly."
     }
 }
 
 enum UpdateCheck {
-    private static let githubReleaseURLPathPrefix = "/shlgd/Dictor/releases/tag/"
     static let maxReleaseResponseBytes = 512 * 1024
 
-    static func fetchLatest() async -> Result<GitHubRelease, UpdateCheckFailure> {
-        var req = URLRequest(url: GITHUB_LATEST_RELEASE_URL)
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+    static func fetchLatest() async -> Result<DictorRelease, UpdateCheckFailure> {
+        var req = URLRequest(url: UPDATE_MANIFEST_URL)
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
         // The privacy docs promise exactly this fixed token — no
         // version, device, or user identifiers. Must stay in sync with
         // docs/privacy/network-calls.json.
@@ -98,7 +90,7 @@ enum UpdateCheck {
         }
     }
 
-    static func parseLatest(data: Data, response: URLResponse) -> Result<GitHubRelease, UpdateCheckFailure> {
+    static func parseLatest(data: Data, response: URLResponse) -> Result<DictorRelease, UpdateCheckFailure> {
         guard let http = response as? HTTPURLResponse else {
             return .failure(.unexpectedResponse)
         }
@@ -106,20 +98,20 @@ enum UpdateCheck {
             return .failure(.httpStatus(http.statusCode))
         }
         guard data.count <= maxReleaseResponseBytes,
-              let payload = try? JSONDecoder().decode(GitHubReleaseResponse.self, from: data) else {
+              let payload = try? JSONDecoder().decode(DictorUpdateFeedResponse.self, from: data) else {
             return .failure(.unexpectedResponse)
         }
 
-        let tag = payload.tagName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let version = normalizedReleaseVersion(from: tag) else {
+        let raw = payload.version.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let version = normalizedReleaseVersion(from: raw) else {
             return .failure(.unexpectedResponse)
         }
 
-        return .success(GitHubRelease(
-            tagName: tag,
+        return .success(DictorRelease(
+            tagName: "v\(version)",
             version: version,
-            body: payload.body ?? "",
-            htmlURL: sanitizedReleaseURL(payload.htmlURL, expectedTag: tag)
+            body: payload.notes ?? "",
+            htmlURL: UPDATE_CHANNEL_PAGE.absoluteString
         ))
     }
 
@@ -142,18 +134,22 @@ enum UpdateCheck {
         return parts.joined(separator: ".")
     }
 
-    static func sanitizedReleaseURL(_ value: String?, expectedTag: String) -> String {
-        guard let value else { return GITHUB_RELEASES_PAGE.absoluteString }
+    /// Ссылка «что нового», которую покажем человеку. Принимаем только свой
+    /// канал по HTTPS и без пользователя, пароля, запроса и якоря — всё
+    /// остальное схлопывается на главную страницу канала. Манифест лежит на
+    /// нашем сервере, но обращаться с ним как с доверенным вводом нельзя.
+    static func sanitizedReleaseURL(_ value: String?) -> String {
+        let fallback = UPDATE_CHANNEL_PAGE.absoluteString
+        guard let value else { return fallback }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let components = URLComponents(string: trimmed),
               components.scheme == "https",
-              components.host == "github.com",
+              components.host == UPDATE_CHANNEL_PAGE.host,
               components.user == nil,
               components.password == nil,
               components.query == nil,
-              components.fragment == nil,
-              components.path == "\(githubReleaseURLPathPrefix)\(expectedTag)" else {
-            return GITHUB_RELEASES_PAGE.absoluteString
+              components.fragment == nil else {
+            return fallback
         }
         return trimmed
     }
@@ -193,7 +189,7 @@ enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
             case .invalidManifest:
                 return "The update manifest is damaged or has an unknown format."
             case .manifestVersionMismatch(let expected, let actual):
-                return "GitHub reports version \(expected), but the manifest reports \(actual). The update was stopped."
+                return "The update channel offers version \(expected), but the manifest reports \(actual). The update was stopped."
             case .archiveTooLarge:
                 return "The update archive exceeds the allowed size."
             case .checksumMismatch:
@@ -214,7 +210,7 @@ enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
         case .invalidManifest:
             return "Манифест обновления повреждён или имеет неизвестный формат."
         case .manifestVersionMismatch(let expected, let actual):
-            return "GitHub сообщает о версии \(expected), а манифест — о версии \(actual). Обновление остановлено."
+            return "Канал обновлений предлагает версию \(expected), а манифест сообщает о версии \(actual). Обновление остановлено."
         case .archiveTooLarge:
             return "Архив обновления превышает допустимый размер."
         case .checksumMismatch:
@@ -233,7 +229,7 @@ enum DictorUpdateInstaller {
     private static let manifestMaxBytes = 16 * 1024
 
     static func fetchManifest(expectedVersion: String) async throws -> DictorUpdateManifest {
-        var request = URLRequest(url: GITHUB_UPDATE_MANIFEST_URL)
+        var request = URLRequest(url: UPDATE_MANIFEST_URL)
         request.setValue("dictor-in-app-update", forHTTPHeaderField: "User-Agent")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = 15
@@ -266,7 +262,7 @@ enum DictorUpdateInstaller {
             throw DictorUpdateInstallerError.appNotWritable
         }
 
-        let archiveURL = URL(string: "https://github.com/shlgd/Dictor/releases/download/v\(manifest.version)/Dictor.zip")!
+        let archiveURL = updateArchiveURL(forVersion: manifest.version)
         var request = URLRequest(url: archiveURL)
         request.setValue("dictor-in-app-update", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 60
@@ -355,8 +351,11 @@ enum DictorUpdateInstaller {
             }
         }
 
-        let signature = DictorAgentService.run("/usr/bin/codesign",
-                                                      ["--verify", "--deep", "--strict", appURL.path])
+        // `-R` — обязателен. Без него проверяется только целостность бандла,
+        // но не то, кем он подписан (см. UPDATE_SIGNING_CERT_SHA1).
+        let signature = DictorAgentService.run(
+            "/usr/bin/codesign",
+            ["--verify", "--deep", "--strict", "-R", updateCodeRequirement, appURL.path])
         guard signature.status == 0 else {
             throw DictorUpdateInstallerError.invalidBundle("codesign: \(signature.output)")
         }
@@ -427,183 +426,6 @@ func trustedProcessEnvironment(path: String,
 
 func systemToolProcessEnvironment(current: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
     trustedProcessEnvironment(path: "/usr/bin:/bin:/usr/sbin:/sbin", current: current)
-}
-
-func updateProcessEnvironment(current: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-    trustedProcessEnvironment(path: "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-                              current: current)
-}
-
-func updateHelperScript(pid: pid_t,
-                        brewPath: String,
-                        targetVersion: String,
-                        statePath: String,
-                        appPath: String = INSTALLED_APP_BUNDLE_PATH,
-                        releasesPageURL: String = GITHUB_RELEASES_PAGE.absoluteString) -> String {
-    #"""
-    #!/bin/bash
-    set -u
-    umask 077
-
-    SCRIPT_PATH="$0"
-    BREW=\#(shellSingleQuoted(brewPath))
-    TARGET_VERSION=\#(shellSingleQuoted(targetVersion))
-    STATE_PATH=\#(shellSingleQuoted(statePath))
-    APP_PATH=\#(shellSingleQuoted(appPath))
-    RELEASES_PAGE=\#(shellSingleQuoted(releasesPageURL))
-    PARAKEY_PID=\#(pid)
-    CASK_TAP=\#(shellSingleQuoted(HOMEBREW_CASK_TAP))
-    CASK_TOKEN=\#(shellSingleQuoted(HOMEBREW_CASK_TOKEN))
-    CASK_INSTALLED_TOKEN=\#(shellSingleQuoted(HOMEBREW_CASK_INSTALLED_TOKEN))
-    INFO_PLIST="$APP_PATH/Contents/Info.plist"
-    APP_DIR="$(/usr/bin/dirname "$APP_PATH")"
-
-    cleanup() {
-        if [ -n "${SCRIPT_PATH:-}" ]; then
-            /bin/rm -f "$SCRIPT_PATH" 2>/dev/null || true
-        fi
-    }
-    trap cleanup EXIT
-
-    timestamp() {
-        /bin/date -u '+%Y-%m-%dT%H:%M:%SZ'
-    }
-
-    log() {
-        printf '[%s] %s\n' "$(timestamp)" "$*"
-    }
-
-    state() {
-        local phase="$1"
-        local message="$2"
-        local tmp
-        log "$message"
-        [ -n "$STATE_PATH" ] || return 0
-        tmp="${STATE_PATH}.$$"
-        if printf '%s\t%s\n' "$phase" "$message" >"$tmp"; then
-            /bin/chmod 600 "$tmp" 2>/dev/null || true
-            /bin/mv -f "$tmp" "$STATE_PATH" 2>/dev/null || true
-        else
-            /bin/rm -f "$tmp" 2>/dev/null || true
-        fi
-    }
-
-    fail() {
-        state "failed" "$*"
-        /usr/bin/open "$RELEASES_PAGE"
-        exit 1
-    }
-
-    app_version() {
-        /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || true
-    }
-
-    version_at_least() {
-        /usr/bin/awk -v actual="$1" -v target="$2" '
-            BEGIN {
-                actual_count = split(actual, actual_parts, ".")
-                target_count = split(target, target_parts, ".")
-                for (i = 1; i <= 4; i++) {
-                    actual_part = i <= actual_count ? actual_parts[i] : "0"
-                    target_part = i <= target_count ? target_parts[i] : "0"
-                    sub(/[^0-9].*$/, "", actual_part)
-                    sub(/[^0-9].*$/, "", target_part)
-                    actual_number = actual_part == "" ? 0 : actual_part + 0
-                    target_number = target_part == "" ? 0 : target_part + 0
-                    if (actual_number > target_number) { exit 0 }
-                    if (actual_number < target_number) { exit 1 }
-                }
-                exit 0
-            }'
-    }
-
-    run_brew() {
-        log "Running: $BREW $*"
-        "$BREW" "$@"
-    }
-
-    wait_for_dictor_exit() {
-        for _ in {1..60}; do
-            if ! kill -0 "$PARAKEY_PID" 2>/dev/null; then
-                return 0
-            fi
-            sleep 0.5
-        done
-
-        log "Dictor was still running after 30s; sending TERM before updating."
-        kill -TERM "$PARAKEY_PID" 2>/dev/null || true
-        for _ in {1..20}; do
-            if ! kill -0 "$PARAKEY_PID" 2>/dev/null; then
-                return 0
-            fi
-            sleep 0.5
-        done
-
-        fail "Dictor did not quit, so the app bundle was not touched."
-    }
-
-    installed_target_version() {
-        local installed
-        installed="$(app_version)"
-        log "Installed app version: ${installed:-unknown}"
-        [ -n "$installed" ] && version_at_least "$installed" "$TARGET_VERSION"
-    }
-
-    {
-        echo "[$(timestamp)] Dictor update starting"
-        echo "Target version: $TARGET_VERSION"
-        echo "Current installed version: $(app_version)"
-        echo "Brew: $BREW"
-        echo "Cask tap: $CASK_TAP"
-        echo "Cask: $CASK_TOKEN"
-        echo "Installed cask name: $CASK_INSTALLED_TOKEN"
-        echo "App: $APP_PATH"
-    }
-
-    state "preparing" "Preparing Homebrew for Dictor v$TARGET_VERSION..."
-
-    if ! run_brew tap "$CASK_TAP"; then
-        fail "brew tap failed; leaving the existing app in place."
-    fi
-
-    state "checking" "Checking Homebrew metadata..."
-    if ! run_brew update --force; then
-        fail "brew update failed; leaving the existing app in place."
-    fi
-
-    state "downloading" "Downloading Dictor v$TARGET_VERSION..."
-    if ! run_brew fetch --cask --force "$CASK_TOKEN"; then
-        fail "brew cask fetch failed; leaving the existing app in place."
-    fi
-
-    state "installing" "Installing Dictor v$TARGET_VERSION..."
-    wait_for_dictor_exit
-
-    if ! run_brew upgrade --cask --force --appdir="$APP_DIR" "$CASK_TOKEN"; then
-        fail "brew cask upgrade failed; leaving the existing app in place."
-    fi
-
-    state "verifying" "Verifying the installed app..."
-    if ! installed_target_version; then
-        log "brew upgrade completed without installing v$TARGET_VERSION; forcing qualified cask reinstall."
-        state "installing" "Reinstalling Dictor v$TARGET_VERSION..."
-        if ! run_brew update --force; then
-            fail "brew update failed before reinstall; leaving the existing app in place."
-        fi
-        if ! run_brew reinstall --cask --force --appdir="$APP_DIR" "$CASK_TOKEN"; then
-            fail "brew cask reinstall failed; leaving the existing app in place."
-        fi
-    fi
-
-    if ! installed_target_version; then
-        fail "Expected Dictor v$TARGET_VERSION or newer after update, but the installed app is still $(app_version)."
-    fi
-
-    state "relaunching" "Update complete. Reopening Dictor..."
-    sleep 2
-    /usr/bin/open "$APP_PATH"
-    state "complete" "Dictor v$TARGET_VERSION is installed."
-    """#
 }
 
 func dictorDirectUpdateHelperScript(pid: pid_t,
@@ -744,6 +566,109 @@ func dictorDirectUpdateHelperScript(pid: pid_t,
     /bin/sleep 2
     state "complete" \#(shellSingleQuoted(complete))
     """#
+}
+
+/// Запускает подготовленное обновление: окно прогресса плюс helper-скрипт,
+/// который ждёт смерти вызывающего процесса и подменяет бандл.
+///
+/// Живёт здесь, а не в панели или в агенте, потому что звать его должны оба:
+/// пункт «Update now…» в меню-баре — это агент, а окно обновляется из своего
+/// процесса. Пока установка была написана в одном ControlPanel, из меню-бара
+/// до неё было не дотянуться, и кнопка вместо обновления показывала совет
+/// установить приложение заново вручную.
+///
+/// **Вызывающий обязан завершиться сразу после успешного возврата.** Скрипт
+/// ждёт смерти переданного pid и только тогда трогает бандл; живой процесс
+/// держит установку на месте до таймаута, после чего получает SIGTERM.
+func launchPreparedDictorUpdate(_ prepared: PreparedDictorUpdate,
+                                language: InterfaceLanguage,
+                                pid: pid_t = getpid(),
+                                appURL: URL = Bundle.main.bundleURL) throws {
+    let statePath = try createPrivateUpdateProgressStateFile()
+    let helperLog = try openPrivateUpdateHelperLog()
+    let backupURL = appURL.deletingLastPathComponent()
+        .appendingPathComponent(".Dictor-update-backup-\(UUID().uuidString).app",
+                                isDirectory: true)
+    let script = dictorDirectUpdateHelperScript(
+        pid: pid,
+        targetVersion: prepared.version,
+        statePath: statePath,
+        stagedAppPath: prepared.stagedAppURL.path,
+        workDirectory: prepared.workDirectory.path,
+        backupAppPath: backupURL.path,
+        appPath: appURL.path,
+        language: language
+    )
+    let helperPath = try writePrivateUpdateHelperScript(script)
+
+    let progressAppPath: String
+    do {
+        progressAppPath = try launchDictorUpdateProgressApp(
+            statePath: statePath,
+            logPath: helperLog.path,
+            targetVersion: prepared.version
+        )
+    } catch {
+        try? FileManager.default.removeItem(atPath: helperPath)
+        try? FileManager.default.removeItem(atPath: statePath)
+        try? FileManager.default.removeItem(at: prepared.workDirectory)
+        helperLog.handle.closeFile()
+        throw error
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [helperPath]
+    process.environment = systemToolProcessEnvironment()
+    process.standardOutput = helperLog.handle
+    process.standardError = helperLog.handle
+    do {
+        try process.run()
+    } catch {
+        try? FileManager.default.removeItem(atPath: helperPath)
+        try? FileManager.default.removeItem(atPath: statePath)
+        try? FileManager.default.removeItem(at: prepared.workDirectory)
+        try? FileManager.default.removeItem(atPath: progressAppPath)
+        helperLog.handle.closeFile()
+        throw error
+    }
+}
+
+/// Окно прогресса — копия приложения во временной папке: свой бандл через
+/// секунду будет переименован и заменён, а показывать ход установки должно
+/// что-то, что это переживёт.
+func launchDictorUpdateProgressApp(statePath: String,
+                                   logPath: String,
+                                   targetVersion: String) throws -> String {
+    let sourceAppURL = Bundle.main.bundleURL
+    guard sourceAppURL.pathExtension == "app",
+          let executableName = Bundle.main.executableURL?.lastPathComponent else {
+        throw posixError(EINVAL)
+    }
+    let progressAppURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        .appendingPathComponent("\(UPDATE_PROGRESS_APP_PREFIX)\(UUID().uuidString).app",
+                                isDirectory: true)
+    try FileManager.default.copyItem(at: sourceAppURL, to: progressAppURL)
+    let executableURL = progressAppURL
+        .appendingPathComponent("Contents/MacOS", isDirectory: true)
+        .appendingPathComponent(executableName)
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = [
+        UPDATE_PROGRESS_ARGUMENT,
+        statePath,
+        logPath,
+        targetVersion,
+        progressAppURL.path,
+    ]
+    process.environment = systemToolProcessEnvironment()
+    do {
+        try process.run()
+        return progressAppURL.path
+    } catch {
+        try? FileManager.default.removeItem(at: progressAppURL)
+        throw error
+    }
 }
 
 func writePrivateUpdateHelperScript(_ script: String,

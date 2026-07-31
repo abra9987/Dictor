@@ -922,7 +922,7 @@ final class UpdateProgressAppDelegate: NSObject, NSApplicationDelegate, NSWindow
     }
 
     @objc private func openReleasePageClicked(_ sender: NSButton) {
-        NSWorkspace.shared.open(GITHUB_RELEASES_PAGE)
+        NSWorkspace.shared.open(UPDATE_CHANNEL_PAGE)
     }
 
     @objc private func closeUpdateProgressClicked(_ sender: NSButton) {
@@ -1055,12 +1055,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Latest release detected by the periodic check. nil = no update,
     /// or user has skipped it.
-    private var pendingUpdate: GitHubRelease?
+    private var pendingUpdate: DictorRelease?
     private var isCheckingForUpdates = false
-    /// True while the async brew-install preflight for "Update now"
-    /// is running; guards against a second click spawning a second
-    /// update helper.
-    private var isPreparingUpdate = false
+    /// Установка, запущенная из «Update now…». Держим задачу, чтобы второй
+    /// клик не начал вторую загрузку, и версию — чтобы меню показывало, что
+    /// идёт работа, а не молчало на десятках мегабайт скачивания.
+    private var updateInstallTask: Task<Void, Never>?
+    private var installingUpdateVersion: String?
     private var reminderPausedUpdateVersion: String?
     private var reminderPausedUntil: Date?
 
@@ -1190,6 +1191,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             log("ASR: reset unsupported saved speech model selection to \(settings.speechModelProfile.shortName)")
         }
 
+        DictorAgentService.refreshInstalledPlistIfNeeded()
         recoverStaleTCCAfterUpgrade()
         _ = previousExitNoticeAction(previousRunWasActive: settings.hasActiveRunMarker)
         recoverStaleSystemAudioMuteIfNeeded()
@@ -3587,6 +3589,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func quitClicked(_ sender: NSMenuItem) {
         guard confirmStopDictation() else { return }
+        // Снять службу обязательно: у тех, кто ставил прошлую версию, в plist
+        // остался KeepAlive: true, и без bootout launchd поднял бы агента
+        // обратно — выход выглядел бы как «приложение не закрывается».
+        DictorAgentService.stopForQuit()
         NSApp.terminate(self)
     }
 
@@ -6096,7 +6102,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Permissions: microphone audio, paste-at-cursor, push-to-talk hotkey.
 
             Open source, based on Dictor by Richard Courtman.
-            github.com/shlgd/Dictor · MIT licensed
+            \(UPDATE_CHANNEL_PAGE.host ?? "") · MIT licensed
             """
         // Use our app icon instead of NSAlert's default exclamation
         // mark. .icns lives in Contents/Resources/Dictor.icns;
@@ -6106,18 +6112,19 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             alert.icon = icon
         }
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "View on GitHub")
+        alert.addButton(withTitle: "Open Download Page")
         if alert.runModal() == .alertSecondButtonReturn {
-            NSWorkspace.shared.open(GITHUB_REPOSITORY_PAGE)
+            NSWorkspace.shared.open(UPDATE_CHANNEL_PAGE)
         }
     }
 
     // MARK: - Update flow
 
     private func startUpdateCheckLoop() {
-        // Dictor — самостоятельный форк: апстрим-эндпоинтов обновлений
-        // больше нет, цикл проверки не запускается никогда.
-        return
+        // Цикл был отключён, пока обновления вели на апстрим-репозиторий.
+        // Теперь канал свой (UPDATE_MANIFEST_URL), а ставится только сборка,
+        // подписанная нашим сертификатом (UPDATE_SIGNING_CERT_SHA1).
+        guard settings.checkForUpdates else { return }
         guard updateCheckLoopTask == nil else { return }
         updateCheckLoopTask = Task.detached { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(UPDATE_CHECK_FIRST_DELAY_SECONDS * 1_000_000_000))
@@ -6141,7 +6148,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func recordUpdateCheck(release: GitHubRelease?, source: UpdateCheckSource) {
+    private func recordUpdateCheck(release: DictorRelease?, source: UpdateCheckSource) {
         let skippedVersions = source == .manual ? [] : settings.skippedVersions
         let result = updateCheckResult(
             for: release,
@@ -6157,7 +6164,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         log("update check \(source.rawValue): \(result.rawValue)\(versionText)")
     }
 
-    private func handleFetchedRelease(_ release: GitHubRelease) {
+    private func handleFetchedRelease(_ release: DictorRelease) {
         let current = currentBundleVersion()
         guard isNewer(release.version, than: current) else { return }
         if settings.skippedVersions.contains(release.version) {
@@ -6189,7 +6196,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
 
-    private func buildUpdateItem(for release: GitHubRelease) -> NSMenuItem {
+    private func buildUpdateItem(for release: DictorRelease) -> NSMenuItem {
+        // Пока идёт скачивание, меню — единственное место, где видно, что
+        // нажатие вообще что-то сделало: окно прогресса появляется только
+        // после проверки архива, а до неё десятки мегабайт.
+        if let installing = installingUpdateVersion {
+            let busy = NSMenuItem(title: "Installing Dictor v\(installing)…",
+                                  action: nil, keyEquivalent: "")
+            busy.isEnabled = false
+            return busy
+        }
+
         let parent = NSMenuItem(title: "Update to v\(release.version)",
                                 action: nil, keyEquivalent: "")
         let sub = NSMenu()
@@ -6223,7 +6240,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return parent
     }
 
-    private func showReleaseNotes(for release: GitHubRelease) {
+    private func showReleaseNotes(for release: DictorRelease) {
         showAppForModal()
         let alert = NSAlert()
         alert.messageText = "Dictor v\(release.version)"
@@ -6283,10 +6300,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func finishManualUpdateCheck(_ outcome: Result<GitHubRelease, UpdateCheckFailure>) {
+    private func finishManualUpdateCheck(_ outcome: Result<DictorRelease, UpdateCheckFailure>) {
         manualUpdateCheckTask = nil
         isCheckingForUpdates = false
-        let release: GitHubRelease
+        let release: DictorRelease
         switch outcome {
         case .failure(let failure):
             rebuildMenu()
@@ -6315,7 +6332,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showUpdateAvailableAlert(for: release, currentVersion: current)
     }
 
-    private func showUpdateAvailableAlert(for release: GitHubRelease, currentVersion: String) {
+    private func showUpdateAvailableAlert(for release: DictorRelease, currentVersion: String) {
         showAppForModal()
         let alert = NSAlert()
         alert.messageText = "Dictor v\(release.version) is available"
@@ -6336,7 +6353,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func pauseUpdateReminder(for release: GitHubRelease) {
+    private func pauseUpdateReminder(for release: DictorRelease) {
         setUpdateReminderPause(version: release.version,
                                until: Date().addingTimeInterval(UPDATE_REMIND_LATER_SECONDS))
         pendingUpdate = nil
@@ -6401,213 +6418,67 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alert.runModal()
     }
 
-    private func startUpdate(for release: GitHubRelease) {
-        showManualUpdateRequired(
-            for: release,
-            reason: "The public source build updates by running the installer again."
-        )
-    }
-
-    private func showManualUpdateRequired(for release: GitHubRelease, reason: String) {
-        log("update click: manual update required: \(reason)")
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "Manual update needed"
-        alert.informativeText = """
-        \(reason)
-
-        To update, run this command in Terminal:
-
-        curl -fsSL https://raw.githubusercontent.com/shlgd/Dictor/main/install.sh | bash
-        """
-        alert.addButton(withTitle: "Open Release Page")
-        alert.addButton(withTitle: "Close")
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn,
-           let url = URL(string: release.htmlURL) {
-            NSWorkspace.shared.open(url)
+    /// «Update now…» — единственная кнопка, ради которой писался апдейтер.
+    /// До 1.1.0 она не устанавливала ничего: показывала совет выполнить в
+    /// Терминале установочный скрипт из апстримового репозитория, которого в
+    /// проекте давно нет. Заметно это не было, потому что цикл проверки стоял
+    /// за мёртвым `return` и до кнопки нельзя было добраться.
+    ///
+    /// Теперь она делает то, что обещает: манифест → архив → SHA-256 →
+    /// проверка подписи нашим сертификатом → подмена бандла с перезапуском.
+    /// Загрузка идёт в фоне, а меню всё это время показывает, что происходит:
+    /// молчание в ответ на нажатие читается как поломка.
+    private func startUpdate(for release: DictorRelease) {
+        guard updateInstallTask == nil else { return }
+        let version = release.version
+        log("update: installing v\(version)")
+        installingUpdateVersion = version
+        rebuildMenu()
+        updateInstallTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let manifest = try await DictorUpdateInstaller.fetchManifest(
+                    expectedVersion: version)
+                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest)
+                // Скрипт ждёт смерти этого процесса, чтобы заменить бандл, и
+                // сам снимает службу. Уходим с дороги сразу после запуска.
+                try launchPreparedDictorUpdate(prepared, language: self.settings.interfaceLanguage)
+                log("update: helper started, quitting for v\(version)")
+                self.updateInstallTask = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    NSApp.terminate(nil)
+                }
+            } catch {
+                self.updateInstallTask = nil
+                self.installingUpdateVersion = nil
+                self.rebuildMenu()
+                let detail = (error as? DictorUpdateInstallerError)?
+                    .message(language: self.settings.interfaceLanguage)
+                    ?? error.localizedDescription
+                self.showUpdateCouldNotStart(version: version, detail: detail)
+            }
         }
     }
 
-    private func showUpdateCouldNotStart(detail: String) {
-        log("update: could not start helper: \(detail)")
+    private func showUpdateCouldNotStart(version: String, detail: String) {
+        log("update: install of v\(version) failed: \(detail)")
         showAppForModal()
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Update couldn't start"
+        alert.messageText = "Dictor v\(version) was not installed"
         alert.informativeText = """
         \(detail)
 
-        You can update from Terminal:
-
-        curl -fsSL https://raw.githubusercontent.com/shlgd/Dictor/main/install.sh | bash
+        The version you have is untouched. You can try again later, or \
+        download the new version yourself from \(UPDATE_CHANNEL_PAGE.absoluteString)
         """
         alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
-    /// `brew list --cask` routinely takes seconds. With the active
-    /// session-wide event tap on the main run loop, a synchronous
-    /// waitUntilExit() here would stall every keystroke system-wide
-    /// (and a >1 s stall makes macOS disable the tap), so the check
-    /// runs on a background queue and reports back to the main actor.
-    private static let brewPreflightQueue = DispatchQueue(label: "DictorBrewPreflight",
-                                                          qos: .userInitiated)
-
-    private func isBrewInstall(brewPath: String,
-                               completion: @escaping @MainActor @Sendable (Bool) -> Void) {
-        guard Bundle.main.bundlePath == INSTALLED_APP_BUNDLE_PATH else {
-            completion(false)
-            return
-        }
-
-        Self.brewPreflightQueue.async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: brewPath)
-            proc.arguments = ["list", "--cask", "--versions", HOMEBREW_CASK_INSTALLED_TOKEN]
-            proc.environment = updateProcessEnvironment()
-            proc.standardOutput = Pipe()
-            proc.standardError = Pipe()
-            let isBrewManaged: Bool
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-                isBrewManaged = proc.terminationStatus == 0
-            } catch {
-                log("update: brew install check failed: \(error)")
-                isBrewManaged = false
-            }
-            Task { @MainActor in completion(isBrewManaged) }
+        alert.addButton(withTitle: "Open Download Page")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSWorkspace.shared.open(UPDATE_CHANNEL_PAGE)
         }
     }
 
-    private func findBrew() -> String? {
-        for path in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] {
-            if FileManager.default.isExecutableFile(atPath: path) { return path }
-        }
-        return nil
-    }
-
-    private func launchUpdateProgressApp(statePath: String,
-                                         logPath: String,
-                                         targetVersion: String) throws -> String {
-        let sourceAppURL = Bundle.main.bundleURL
-        guard sourceAppURL.pathExtension == "app",
-              let executableName = Bundle.main.executableURL?.lastPathComponent else {
-            throw posixError(EINVAL)
-        }
-
-        let progressAppURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("\(UPDATE_PROGRESS_APP_PREFIX)\(UUID().uuidString).app",
-                                    isDirectory: true)
-        try FileManager.default.copyItem(at: sourceAppURL, to: progressAppURL)
-
-        let executableURL = progressAppURL
-            .appendingPathComponent("Contents", isDirectory: true)
-            .appendingPathComponent("MacOS", isDirectory: true)
-            .appendingPathComponent(executableName)
-
-        let proc = Process()
-        proc.executableURL = executableURL
-        proc.arguments = [
-            UPDATE_PROGRESS_ARGUMENT,
-            statePath,
-            logPath,
-            targetVersion,
-            progressAppURL.path,
-        ]
-        proc.environment = systemToolProcessEnvironment()
-
-        do {
-            try proc.run()
-            return progressAppURL.path
-        } catch {
-            try? FileManager.default.removeItem(at: progressAppURL)
-            throw error
-        }
-    }
-
-    private func spawnUpdateHelper(brewPath: String, targetVersion: String) {
-        let statePath: String
-        do {
-            statePath = try createPrivateUpdateProgressStateFile()
-        } catch {
-            log("update: creating progress state failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Dictor couldn't prepare the update progress window.")
-            return
-        }
-
-        // Detached shell helper refreshes Homebrew, downloads the cask,
-        // waits for THIS process to exit, upgrades/reinstalls the app,
-        // verifies the installed bundle version, then re-opens
-        // /Applications/Dictor.app. We can't run the install step
-        // in-process because it replaces the bundle we're executing from.
-        let script = updateHelperScript(pid: getpid(),
-                                        brewPath: brewPath,
-                                        targetVersion: targetVersion,
-                                        statePath: statePath)
-        // Use NSTemporaryDirectory() (per-user, typically /var/folders/…/T/)
-        // instead of /tmp, and create the script with O_EXCL/O_NOFOLLOW at
-        // mode 0600 so an existing leaf path is never overwritten or followed.
-        // bash is invoked as `/bin/bash <path>` so the execute bit is not
-        // required.
-        let helperPath: String
-        do {
-            helperPath = try writePrivateUpdateHelperScript(script)
-        } catch {
-            try? FileManager.default.removeItem(atPath: statePath)
-            log("update: writing helper failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Dictor couldn't write the update helper script.")
-            return
-        }
-        let helperLog: PrivateOutputFile
-        do {
-            helperLog = try openPrivateUpdateHelperLog()
-        } catch {
-            try? FileManager.default.removeItem(atPath: helperPath)
-            try? FileManager.default.removeItem(atPath: statePath)
-            log("update: opening helper log failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Dictor couldn't open the update helper log.")
-            return
-        }
-
-        let progressAppPath: String
-        do {
-            progressAppPath = try launchUpdateProgressApp(statePath: statePath,
-                                                          logPath: helperLog.path,
-                                                          targetVersion: targetVersion)
-        } catch {
-            try? FileManager.default.removeItem(atPath: helperPath)
-            try? FileManager.default.removeItem(atPath: statePath)
-            helperLog.handle.closeFile()
-            log("update: launching progress app failed: \(error.localizedDescription)")
-            showUpdateCouldNotStart(detail: "Dictor couldn't open the update progress window.")
-            return
-        }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
-        proc.arguments = [helperPath]
-        proc.environment = updateProcessEnvironment()
-        proc.standardOutput = helperLog.handle
-        proc.standardError = helperLog.handle
-        do {
-            try proc.run()
-        } catch {
-            try? FileManager.default.removeItem(atPath: helperPath)
-            helperLog.handle.closeFile()
-            try? writePrivateUpdateProgressState(phase: "failed",
-                                                 message: "Dictor couldn't launch the update helper.",
-                                                 to: statePath)
-            showUpdateCouldNotStart(detail: "Dictor couldn't launch the update helper.")
-            return
-        }
-        log("update helper spawned \(privacySafeLogPath(helperPath)), progress app \(privacySafeLogPath(progressAppPath)), logging to \(privacySafeLogPath(helperLog.path)); quitting for upgrade")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            NSApp.terminate(nil)
-        }
-    }
 
     // MARK: - TCC stale-state recovery on upgrade
 

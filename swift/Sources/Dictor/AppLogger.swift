@@ -223,27 +223,62 @@ enum DictorAgentService {
             .filter { $0 != getpid() }
     }
 
-    private static func writeLaunchAgentPlist() throws {
-        let directory = launchAgentURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory,
-                                                withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-
+    private static func desiredPlistData() throws -> Data {
         let logPath = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/Dictor-agent.launchd.log").path
         let plist: [String: Any] = [
             "Label": AGENT_LABEL,
             "ProgramArguments": [agentExecutablePath(), AGENT_ARGUMENT],
             "RunAtLoad": true,
-            "KeepAlive": true,
+            // Не голое `true`. С ним launchd поднимает агента после ЛЮБОГО
+            // выхода, включая штатный «Quit Dictor» — приложение закрывалось
+            // и через секунду возвращалось, и выйти из него было нельзя вообще
+            // никак. `SuccessfulExit: false` оставляет перезапуск после падения
+            // (ради этого служба и заведена) и уважает чистый выход с кодом 0.
+            "KeepAlive": ["SuccessfulExit": false],
             "ProcessType": "Interactive",
             "StandardOutPath": logPath,
             "StandardErrorPath": logPath,
         ]
-        let data = try PropertyListSerialization.data(fromPropertyList: plist,
-                                                      format: .xml,
-                                                      options: 0)
-        try data.write(to: launchAgentURL, options: [.atomic])
+        return try PropertyListSerialization.data(fromPropertyList: plist,
+                                                  format: .xml,
+                                                  options: 0)
+    }
+
+    private static func writeLaunchAgentPlist() throws {
+        let directory = launchAgentURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory,
+                                                withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        try desiredPlistData().write(to: launchAgentURL, options: [.atomic])
+    }
+
+    /// Обновляет plist, установленный прошлой версией. Уже загруженная в
+    /// launchd конфигурация от этого не меняется — новая политика KeepAlive
+    /// вступит в силу при следующей загрузке службы, а текущую сессию
+    /// закрывает `stopForQuit()`.
+    static func refreshInstalledPlistIfNeeded() {
+        guard FileManager.default.fileExists(atPath: launchAgentURL.path),
+              let desired = try? desiredPlistData(),
+              let current = try? Data(contentsOf: launchAgentURL),
+              current != desired else { return }
+        guard (try? desired.write(to: launchAgentURL, options: [.atomic])) != nil else { return }
+        log("launch agent: plist refreshed, new KeepAlive policy applies on next load")
+    }
+
+    /// Остановка службы из самого агента. `stop()` здесь не годится: он ждёт
+    /// завершения `launchctl bootout`, а тот ждёт смерти нашего же процесса —
+    /// главный поток встал бы намертво. Поэтому запрос уходит без ожидания,
+    /// а вызывающий сразу завершает приложение.
+    static func stopForQuit() {
+        try? FileManager.default.removeItem(at: launchAgentURL)
+        writeStoppedState()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["bootout", launchService]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()  // намеренно без waitUntilExit()
     }
 
     private static func terminateAgentProcesses() {
