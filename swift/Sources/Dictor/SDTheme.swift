@@ -49,6 +49,18 @@ enum SD {
         }
         /// «Готово к диктовке» и рост показателей (макет 6a: #3FA96A).
         static let positive = adaptive(light: 0x3FA96A, dark: 0x54C083)
+        /// Отказ службы (макет 8: #C0341E / #FF8A75). Тревожный цвет живёт
+        /// только под квадратом маркера и лёгкой подложкой — заливать им текст
+        /// значило бы кричать там, где достаточно сказать.
+        static let danger = adaptive(light: 0xC0341E, dark: 0xFF8A75)
+        /// Подложка отказа — тот же цвет в 6 %.
+        static let dangerWash = NSColor(name: nil) { appearance in
+            (appearance.isDark ? NSColor(hex: 0xFF8A75) : NSColor(hex: 0xC0341E))
+                .withAlphaComponent(0.06)
+        }
+        /// Приглушённая подпись выключенного состояния (макет 8: #A3A09A).
+        /// На шаг тише обычной: «выключено» — не поломка.
+        static let hintText = adaptive(light: 0xA3A09A, dark: 0x7C7973)
         /// Выбранная пилюля: «чернильная» в светлой теме, «бумажная» в тёмной.
         static let pillSelectedFill = adaptive(light: 0x1C1B19, dark: 0xF2F1EE)
         static let pillSelectedText = adaptive(light: 0xF5F4F1, dark: 0x1C1B19)

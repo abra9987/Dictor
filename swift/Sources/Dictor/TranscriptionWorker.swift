@@ -61,8 +61,12 @@ actor TranscriptionWorker {
     /// duration of transcribe(), including across its await.
     private var inFlight = false
 
+    /// `verificationProgress` — «проверено N файлов из M». Проверка идёт до
+    /// двух секунд, и без неё окно всё это время утверждало, что служба
+    /// остановлена.
     func load(profile requestedProfile: SpeechModelProfile,
-              progressHandler: DownloadUtils.ProgressHandler? = nil) async throws {
+              progressHandler: DownloadUtils.ProgressHandler? = nil,
+              verificationProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws {
         let profile = requestedProfile.productionProfile
         if requestedProfile != profile {
             log("ASR: ignoring unsupported speech model \(requestedProfile.shortName); using \(profile.shortName)")
@@ -82,27 +86,31 @@ actor TranscriptionWorker {
             log("ASR: downloading + verifying + loading \(profile.shortName) CoreML weights…")
         }
         let t0 = Date()
-        engine = .parakeetV3(try await loadParakeetV3(progressHandler: progressHandler))
+        engine = .parakeetV3(try await loadParakeetV3(progressHandler: progressHandler,
+                                                      verificationProgress: verificationProgress))
         loadedProfile = profile
         ready = true
         log("ASR: \(profile.shortName) ready in \(String(format: "%.2f", Date().timeIntervalSince(t0))) s")
     }
 
-    private func loadParakeetV3(progressHandler: DownloadUtils.ProgressHandler?) async throws -> AsrManager {
+    private func loadParakeetV3(progressHandler: DownloadUtils.ProgressHandler?,
+                                verificationProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> AsrManager {
         if !speechModelCacheExists(for: .multilingualV3) {
             try assertSufficientDiskSpaceForSpeechModelDownload(profile: .multilingualV3)
         }
         var modelDirectory = try await AsrModels.download(version: .v3,
                                                           progressHandler: progressHandler)
         do {
-            try ModelIntegrity.verifyParakeetV3Model(at: modelDirectory)
+            try ModelIntegrity.verifyParakeetV3Model(at: modelDirectory,
+                                                     onProgress: verificationProgress)
         } catch {
             log("ASR: model integrity check failed; redownloading once: \(error.localizedDescription)")
             try assertSufficientDiskSpaceForSpeechModelDownload(profile: .multilingualV3)
             modelDirectory = try await AsrModels.download(force: true,
                                                           version: .v3,
                                                           progressHandler: progressHandler)
-            try ModelIntegrity.verifyParakeetV3Model(at: modelDirectory)
+            try ModelIntegrity.verifyParakeetV3Model(at: modelDirectory,
+                                                     onProgress: verificationProgress)
         }
         let models = try await AsrModels.load(from: modelDirectory,
                                               version: .v3,

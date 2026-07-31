@@ -987,6 +987,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var manualUpdateCheckTask: Task<Void, Never>?
     private var startupStatusTitle = "Loading speech model…"
     private var speechModelStartupProgressFraction: Double?
+    /// «Проверено N файлов модели из M» — то, чем занята служба первые
+    /// секунды после запуска. Раньше это время выглядело как «Остановлена».
+    private var verifiedModelFiles: Int?
+    private var totalModelFiles: Int?
+    private var lastDownloadPhase: DownloadUtils.DownloadPhase?
     private var startupFailure: StartupFailure?
     private var didTouchAudioEngine = false
     private var permissionReadinessTimer: Timer?
@@ -1479,14 +1484,21 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
             do {
                 let throttler = ProgressThrottler()
-                try await asr.load(profile: speechModelProfile) { [weak self] progress in
-                    let title = speechModelStartupStatusTitle(progress)
-                    let fraction = speechModelStartupProgressValue(progress)
-                    guard throttler.shouldDispatch(title, fraction) else { return }
-                    Task { @MainActor in
-                        self?.updateSpeechModelStartupProgress(progress)
-                    }
-                }
+                try await asr.load(
+                    profile: speechModelProfile,
+                    progressHandler: { [weak self] progress in
+                        let title = speechModelStartupStatusTitle(progress)
+                        let fraction = speechModelStartupProgressValue(progress)
+                        guard throttler.shouldDispatch(title, fraction) else { return }
+                        Task { @MainActor in
+                            self?.updateSpeechModelStartupProgress(progress)
+                        }
+                    },
+                    verificationProgress: { [weak self] verified, total in
+                        Task { @MainActor in
+                            self?.updateModelVerificationProgress(verified: verified, total: total)
+                        }
+                    })
                 guard !Task.isCancelled, !isTerminating else { return }
 
                 do {
@@ -1614,6 +1626,19 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         rebuildMenu()
     }
 
+    private func updateModelVerificationProgress(verified: Int, total: Int) {
+        guard !isTerminating else { return }
+        verifiedModelFiles = verified
+        totalModelFiles = total
+        if verified >= total {
+            // Проверка кончилась — число больше не актуально, дальше грузится
+            // сама модель.
+            verifiedModelFiles = nil
+            totalModelFiles = nil
+        }
+        publishAgentState()
+    }
+
     private func updateSpeechModelStartupProgress(_ progress: DownloadUtils.DownloadProgress) {
         guard startupTask != nil, !isTerminating else { return }
         let next = speechModelStartupStatusTitle(progress)
@@ -1622,6 +1647,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             || nextProgressFraction != speechModelStartupProgressFraction else { return }
         startupStatusTitle = next
         speechModelStartupProgressFraction = nextProgressFraction
+        lastDownloadPhase = progress.phase
+        publishAgentState()
         rebuildMenu()
     }
 
@@ -3727,8 +3754,35 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                               missingPermissions: missing,
                               hotkeyName: hotkey.hotkey.name,
                               triggerMode: settings.triggerMode.rawValue,
-                              downloadProgressFraction: speechModelStartupProgressFraction)
+                              downloadProgressFraction: speechModelStartupProgressFraction,
+                              verifiedModelFiles: verifiedModelFiles,
+                              totalModelFiles: totalModelFiles,
+                              downloadedModelFiles: downloadedModelFiles,
+                              totalDownloadModelFiles: totalDownloadModelFiles,
+                              medianLatencyMilliseconds: medianLatencyMilliseconds,
+                              isUpdating: installingUpdateVersion != nil)
         )
+    }
+
+    /// Сколько файлов модели уже скачано. Байты FluidAudio не отдаёт — только
+    /// число файлов и долю, поэтому «412 МБ из 600 МБ» из макета показать
+    /// нечем, а придумывать объём нельзя.
+    private var downloadedModelFiles: Int? {
+        guard case .downloading(let completed, _)? = lastDownloadPhase else { return nil }
+        return completed
+    }
+
+    private var totalDownloadModelFiles: Int? {
+        guard case .downloading(_, let total)? = lastDownloadPhase else { return nil }
+        return total
+    }
+
+    /// Медиана времени распознавания последних тридцати диктовок. Это же число
+    /// показывает плитка в «Продвинутых» — считаем один раз здесь.
+    private var medianLatencyMilliseconds: Int? {
+        guard let seconds = medianRecognitionSeconds(entries: settings.recentTranscriptEntries),
+              seconds > 0 else { return nil }
+        return Int((seconds * 1000).rounded())
     }
 
     private func agentStateStatusDetail() -> (status: String, detail: String) {

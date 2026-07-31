@@ -131,16 +131,23 @@ enum ModelIntegrity {
         // END GENERATED PARAKEET_V3_MODEL_MANIFEST
     ]
 
-    static func verifyParakeetV3Model(at directory: URL) throws {
+    /// `onProgress` вызывается после каждого проверенного файла. Проверка
+    /// 21 файла занимает до двух секунд, и всё это время окно писало
+    /// «Остановлена»: сообщать, что именно происходит, дешевле, чем оставлять
+    /// человека гадать.
+    static func verifyParakeetV3Model(at directory: URL,
+                                      onProgress: ((Int, Int) -> Void)? = nil) throws {
         try verifyFiles(root: directory,
                         expectedFiles: parakeetV3Files,
-                        strictDirectories: parakeetV3StrictDirectories)
+                        strictDirectories: parakeetV3StrictDirectories,
+                        onProgress: onProgress)
         log("ASR: verified \(parakeetV3Files.count) model files from \(parakeetV3Repository) @ \(parakeetV3RepositoryCommit)")
     }
 
     static func verifyFiles(root: URL,
                             expectedFiles: [ModelFileDigest],
-                            strictDirectories: [String]) throws {
+                            strictDirectories: [String],
+                            onProgress: ((Int, Int) -> Void)? = nil) throws {
         var expectedByPath: [String: String] = [:]
         var expectedDirectoryPaths = Set<String>()
         for directory in strictDirectories {
@@ -171,6 +178,7 @@ enum ModelIntegrity {
                                                          actual: actual)
             }
             seenPaths.insert(file.relativePath)
+            onProgress?(seenPaths.count, expectedFiles.count)
         }
 
         guard seenPaths.count == expectedFiles.count else {
