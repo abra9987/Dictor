@@ -682,11 +682,15 @@ final class SDRecentEntryRowView: NSControl {
 /// высота 30, радиус 8, рамка rgba(0,0,0,.13).
 final class SDSecondaryButton: NSControl {
     private let background = NSView()
+    private let titleLabel: NSTextField
+    private var revertWorkItem: DispatchWorkItem?
     private var isHovered = false {
         didSet { restyle() }
     }
 
     init(title: String, target: AnyObject?, action: Selector) {
+        let label = NSTextField(labelWithString: title)
+        titleLabel = label
         super.init(frame: .zero)
         self.target = target
         self.action = action
@@ -697,7 +701,6 @@ final class SDSecondaryButton: NSControl {
         background.translatesAutoresizingMaskIntoConstraints = false
         addSubview(background)
 
-        let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 12.5, weight: .medium)
         label.textColor = SD.C.ink
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -717,6 +720,21 @@ final class SDSecondaryButton: NSControl {
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// То же подтверждение на месте надписи, что и у главной кнопки, и по той
+    /// же причине: результат нажатия — запись в словаре или строка в буфере —
+    /// человеку не виден, а молчание читается как поломка. Окно при этом не
+    /// пересобирается, иначе подтверждение стёрло бы выделение в тексте рядом.
+    func flashTitle(_ text: String, revertingTo original: String,
+                    after seconds: TimeInterval = 1.4) {
+        revertWorkItem?.cancel()
+        titleLabel.stringValue = text
+        let revert = DispatchWorkItem { [weak self] in
+            self?.titleLabel.stringValue = original
+        }
+        revertWorkItem = revert
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: revert)
+    }
 
     private func restyle() {
         background.layer?.borderColor = resolvedCGColor(
@@ -997,8 +1015,48 @@ final class SDHintBannerView: NSView {
 /// подпись: диктовку разбирают по кускам — выделяют слово двойным щелчком,
 /// строку тройным, копируют выделенное на ⌘C или через контекстное меню.
 /// Подпись отдавала только всё целиком, кнопкой «Копировать».
+/// NSTextView с одним добавленным пунктом контекстного меню — «В словарь…».
+/// Слово, которое модель услышала не так, попадается на глаза именно здесь,
+/// в собственной расшифровке; заставлять человека запомнить его, уйти в
+/// «Словарь» и набрать заново — это просить его поработать за программу.
+final class SDTranscriptTextView: NSTextView {
+    weak var dictionaryTarget: AnyObject?
+    var dictionaryAction: Selector?
+    var dictionaryItemTitle = ""
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        // Только при выделении: пункт «В словарь…» без выделенного слова
+        // ничего не значит, а неактивный пункт в меню — это вопрос без ответа.
+        guard let menu, let action = dictionaryAction, selectedRange().length > 0 else {
+            return menu
+        }
+        menu.insertItem(.separator(), at: 0)
+        let item = NSMenuItem(title: dictionaryItemTitle, action: action, keyEquivalent: "")
+        item.target = dictionaryTarget
+        menu.insertItem(item, at: 0)
+        return menu
+    }
+}
+
 final class SDSelectableTranscriptView: NSScrollView {
-    let textView = NSTextView()
+    let textView = SDTranscriptTextView()
+
+    /// Выделенный кусок расшифровки — то, что человек показал пальцем.
+    var selectedText: String {
+        let range = textView.selectedRange()
+        guard range.length > 0,
+              let text = textView.textStorage?.string as NSString? else { return "" }
+        return text.substring(with: range)
+    }
+
+    /// Настроить пункт «В словарь…». Заголовок приходит снаружи: язык
+    /// интерфейса живёт в панели, а не во вью.
+    func setDictionaryItem(title: String, target: AnyObject?, action: Selector) {
+        textView.dictionaryItemTitle = title
+        textView.dictionaryTarget = target
+        textView.dictionaryAction = action
+    }
 
     init(text: String, font: NSFont, color: NSColor, lineHeightMultiple: CGFloat) {
         super.init(frame: .zero)

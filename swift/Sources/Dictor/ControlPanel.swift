@@ -827,12 +827,34 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     @objc private func addCorrectionFromPanel(_ sender: NSButton) {
+        _ = presentCorrectionDialog(heard: "")
+        refresh(force: true)
+    }
+
+    /// Диалог новой автозамены. `heard` подставляется в первое поле, когда
+    /// слово пришло из выделения в «Истории»: человек уже показал его пальцем,
+    /// просить набрать заново незачем.
+    ///
+    /// Возвращает добавленную запись или nil, если человек отменил, оставил
+    /// поле пустым или такая замена уже есть. Вызывающий сам решает, как
+    /// подтвердить — в «Словаре» новая строка видна сразу, а в «Истории»
+    /// подтверждать надо на кнопке.
+    @discardableResult
+    private func presentCorrectionDialog(heard: String) -> TranscriptCorrection? {
         let alert = NSAlert()
         alert.messageText = t("Новая автозамена", "New correction")
-        alert.informativeText = t("Что слышит модель — и что должно быть в тексте.",
-                                  "What the model hears — and what the text should say.")
+        alert.informativeText = t(
+            "Что слышит модель — и что должно быть в тексте. Слово находится "
+            + "целиком и в любом регистре, а подставляется ровно так, как "
+            + "написано справа. Одна запись чинит одну форму слова: для падежей "
+            + "добавьте отдельные записи.",
+            "What the model hears — and what the text should say. The word is "
+            + "matched whole and in any case, and is replaced exactly as written "
+            + "on the right. One entry fixes one form of a word: add separate "
+            + "entries for other forms.")
         let sourceField = NSTextField(frame: NSRect(x: 0, y: 32, width: 260, height: 24))
         sourceField.placeholderString = t("слышится («супер диктант»)", "heard (“super dictate”)")
+        sourceField.stringValue = heard
         let replacementField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         replacementField.placeholderString = t("должно быть (Dictor)", "should be (Dictor)")
         let holder = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 60))
@@ -841,16 +863,65 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         alert.accessoryView = holder
         alert.addButton(withTitle: t("Добавить", "Add"))
         alert.addButton(withTitle: t("Отмена", "Cancel"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // Курсор туда, где человеку есть что печатать: услышанное уже стоит.
+        alert.window.initialFirstResponder = heard.isEmpty ? sourceField : replacementField
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
         let source = sourceField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let replacement = replacementField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !source.isEmpty, !replacement.isEmpty else { return }
-        let next = normalizedTranscriptCorrections(
-            settings.transcriptCorrections + [TranscriptCorrection(source: source,
-                                                                   replacement: replacement)]
-        )
-        settings.transcriptCorrections = next
-        refresh(force: true)
+        guard !source.isEmpty, !replacement.isEmpty else { return nil }
+
+        let existing = settings.transcriptCorrections
+        // `normalizedTranscriptCorrections` схлопнет дубликат молча, и человек
+        // решит, что добавление не сработало. Говорим прямо.
+        if let clash = existing.first(where: { $0.source.lowercased() == source.lowercased() }) {
+            guard confirmCorrectionOverwrite(source: source,
+                                             from: clash.replacement,
+                                             to: replacement) else { return nil }
+        }
+        let entry = TranscriptCorrection(source: source, replacement: replacement)
+        settings.transcriptCorrections = normalizedTranscriptCorrections(existing + [entry])
+        log("dictionary: correction added «\(source)» → «\(replacement)»")
+        return entry
+    }
+
+    private func confirmCorrectionOverwrite(source: String, from: String, to: String) -> Bool {
+        guard from != to else { return false }
+        let alert = NSAlert()
+        alert.messageText = t("«\(source)» уже есть в словаре", "«\(source)» is already in the dictionary")
+        alert.informativeText = t("Сейчас заменяется на «\(from)». Заменить на «\(to)»?",
+                                  "It is currently replaced with «\(from)». Change it to «\(to)»?")
+        alert.addButton(withTitle: t("Заменить", "Replace"))
+        alert.addButton(withTitle: t("Отмена", "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    /// «В словарь» из «Истории» — из кнопки в шапке или из контекстного меню
+    /// текста. Без выделения открывает пустой диалог: кнопка, которая молчит
+    /// в ответ на нажатие, читается как сломанная.
+    @objc private func addHistorySelectionToDictionary(_ sender: Any?) {
+        let heard = (historyDetailTranscriptView?.selectedText ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let added = presentCorrectionDialog(heard: heard)
+        guard let added else { return }
+        if let button = sender as? SDSecondaryButton {
+            button.flashTitle(t("Добавлено", "Added"),
+                              revertingTo: t("В словарь", "To dictionary"))
+        } else {
+            // Из контекстного меню подтверждать негде — кнопки под рукой нет.
+            let done = NSAlert()
+            done.messageText = t("Добавлено в словарь", "Added to the dictionary")
+            done.informativeText = t("«\(added.source)» → «\(added.replacement)». "
+                                     + "Замена сработает в следующих диктовках.",
+                                     "«\(added.source)» → «\(added.replacement)». "
+                                     + "It will apply to the next dictations.")
+            done.addButton(withTitle: "OK")
+            done.runModal()
+        }
+        // Окно намеренно не пересобирается: «История» от новой записи в
+        // словаре не меняется, а пересборка заменила бы кнопку вместе с
+        // подтверждением, которое на ней только что появилось. Словарь
+        // перечитает настройки, когда человек туда перейдёт.
     }
 
     @objc private func removeCorrectionFromPanel(_ sender: NSButton) {
@@ -2378,12 +2449,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: isPinned ? t("Открепить", "Unpin") : t("Закрепить", "Pin"),
             target: self,
             action: #selector(togglePinSelectedHistoryEntry(_:)))
+        // Словарь чинит то, что модель услышала не так, а видно это здесь —
+        // в собственной расшифровке. Кнопка работает и без выделения (откроет
+        // пустой диалог), поэтому её состояние не зависит от того, что сейчас
+        // выделено: окно во время выделения намеренно не пересобирается.
+        let dictionaryButton = SDSecondaryButton(
+            title: t("В словарь", "To dictionary"),
+            target: self,
+            action: #selector(addHistorySelectionToDictionary(_:)))
         let deleteButton = SDSecondaryButton(title: t("Удалить", "Delete"),
                                              target: self,
                                              action: #selector(deleteSelectedHistoryEntry(_:)))
         deleteButton.tag = index
 
-        let actions = NSStackView(views: [copyButton, pinButton, NSView(), deleteButton])
+        let actions = NSStackView(views: [copyButton, pinButton, dictionaryButton,
+                                          NSView(), deleteButton])
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 10
@@ -2425,6 +2505,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                                               color: SD.C.ink,
                                               lineHeightMultiple: 1.6)
         body.translatesAutoresizingMaskIntoConstraints = false
+        body.setDictionaryItem(title: t("В словарь…", "Add to Dictionary…"),
+                               target: self,
+                               action: #selector(addHistorySelectionToDictionary(_:)))
         historyDetailTranscriptView = body
 
         metaRow.translatesAutoresizingMaskIntoConstraints = false
