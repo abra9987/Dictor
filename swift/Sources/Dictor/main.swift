@@ -60,13 +60,17 @@ if launchArguments.first == "--export-settings-preview" {
     }
 }
 if launchArguments.first == "--export-history-preview" {
-    guard launchArguments.count == 2 else {
-        fputs("usage: Dictor --export-history-preview <directory>\n", stderr)
+    guard launchArguments.count == 2 || launchArguments.count == 3 else {
+        fputs("usage: Dictor --export-history-preview <directory> [ru|en]\n", stderr)
         exit(EXIT_FAILURE)
     }
     do {
+        let previewLanguage: InterfaceLanguage? = launchArguments.count > 2
+            ? (launchArguments[2].lowercased().hasPrefix("en") ? .english : .russian)
+            : nil
         try exportHistoryPanelPreviews(to: URL(fileURLWithPath: launchArguments[1],
-                                               isDirectory: true))
+                                               isDirectory: true),
+                                       language: previewLanguage)
         exit(EXIT_SUCCESS)
     } catch {
         fputs("history preview export failed: \(error.localizedDescription)\n", stderr)
@@ -116,13 +120,18 @@ if launchArguments.first == "--export-popover-preview" {
     }
 }
 if launchArguments.first == RECORDING_HUD_EXPORT_ARGUMENT {
-    guard launchArguments.count == 2 else {
-        fputs("usage: Dictor --export-hud-animation <frames-directory>\n", stderr)
+    guard launchArguments.count == 2 || launchArguments.count == 3 else {
+        fputs("usage: Dictor --export-hud-animation <frames-directory> [ru|en]\n", stderr)
         exit(EXIT_FAILURE)
     }
     do {
+        // Необязательный третий аргумент — язык кадров (ru/en).
+        let hudLanguage: InterfaceLanguage = launchArguments.count > 2
+            ? (launchArguments[2].lowercased().hasPrefix("en") ? .english : .russian)
+            : Settings.shared.interfaceLanguage
         try exportRecordingHUDAnimationFrames(to: URL(fileURLWithPath: launchArguments[1],
-                                                       isDirectory: true))
+                                                      isDirectory: true),
+                                              language: hudLanguage)
         exit(EXIT_SUCCESS)
     } catch {
         fputs("HUD export failed: \(error.localizedDescription)\n", stderr)

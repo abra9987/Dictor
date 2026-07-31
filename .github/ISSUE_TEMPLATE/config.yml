@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Permissions keep being asked for
+    url: https://github.com/abra9987/Dictor#install
+    about: >
+      Usually the app was launched from the disk image rather than from
+      Applications. Settings → Advanced → Permissions → Check and repair
+      diagnoses this.

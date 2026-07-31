@@ -530,7 +530,11 @@ final class RecordingHUDView: NSView {
 let RECORDING_HUD_EXPORT_ARGUMENT = "--export-hud-animation"
 
 @MainActor
-func exportRecordingHUDAnimationFrames(to directory: URL) throws {
+/// Язык — параметром, а не из настроек: кадры для витрины проекта нужны на
+/// английском, и снимать их, переключая язык живого приложения, значило бы
+/// трогать чужие настройки ради картинки.
+func exportRecordingHUDAnimationFrames(to directory: URL,
+                                       language: InterfaceLanguage = Settings.shared.interfaceLanguage) throws {
     let fileManager = FileManager.default
     if fileManager.fileExists(atPath: directory.path) {
         try fileManager.removeItem(at: directory)
@@ -558,6 +562,7 @@ func exportRecordingHUDAnimationFrames(to directory: URL) throws {
     let frameCount = Int((totalDuration * framesPerSecond).rounded())
 
     let view = RecordingHUDView(frame: NSRect(origin: .zero, size: pointSize))
+    view.interfaceLanguage = language
     view.visualScale = hudSize.visualScale
     let settings = Settings.shared
     view.recordingColor = settings.recordingHUDRecordingColor.nsColor

@@ -4058,7 +4058,8 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
 /// Превью главного окна истории. Сеет сэмпл-данные в defaults ТЕКУЩЕГО
 /// процесса (CLI-домен, не приложение) и рендерит светлый/тёмный вариант.
 @MainActor
-func exportHistoryPanelPreviews(to directory: URL) throws {
+func exportHistoryPanelPreviews(to directory: URL,
+                                language: InterfaceLanguage? = nil) throws {
     let fileManager = FileManager.default
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     let now = Date()
@@ -4068,21 +4069,38 @@ func exportHistoryPanelPreviews(to directory: URL) throws {
     // диктовки пользователя. Снимаем состояние и возвращаем его на выходе.
     let savedEntries = settings.recentTranscriptEntries
     let savedUsage = settings.dailyDictationUsage
+    // Язык — тем же приёмом, что история: подменяем и возвращаем. Нужен для
+    // англоязычных снимков в витрине проекта; настройка общая с работающим
+    // приложением, поэтому возврат обязателен даже при исключении.
+    let savedLanguage = settings.interfaceLanguage
+    if let language { settings.interfaceLanguage = language }
     defer {
+        settings.interfaceLanguage = savedLanguage
         settings.recentTranscriptEntries = savedEntries
         settings.dailyDictationUsage = savedUsage
     }
+    // Сэмплы на языке интерфейса: английские снимки с русскими диктовками
+    // внутри выглядят как незаконченный перевод.
+    let sampleTexts = settings.interfaceLanguage == .english
+        ? ["Hey! Sending a short recap of the call and the three next steps — take a look before Friday",
+           "Let's talk Thursday at three, I'll send the invite",
+           "Headline: local dictation with no cloud — a look at Dictor",
+           "We cut the beta scope down to the dictionary and the modes"]
+        : ["Привет! По итогам звонка присылаю короткое резюме и три следующих шага, посмотри до пятницы",
+           "Давай созвонимся в четверг в три, я закину приглашение",
+           "Заголовок: локальная диктовка без облака — обзор Dictor",
+           "Собираем бету в пятницу, режем скоуп до словаря и режимов"]
     settings.recentTranscriptEntries = [
-        TranscriptHistoryEntry(text: "Привет! По итогам звонка присылаю короткое резюме и три следующих шага, посмотри до пятницы",
+        TranscriptHistoryEntry(text: sampleTexts[0],
                                transcriptionDurationSeconds: 1.2,
                                createdAt: now.addingTimeInterval(-3600)),
-        TranscriptHistoryEntry(text: "Давай созвонимся в четверг в три, я закину приглашение",
+        TranscriptHistoryEntry(text: sampleTexts[1],
                                transcriptionDurationSeconds: 0.7,
                                createdAt: now.addingTimeInterval(-9000)),
-        TranscriptHistoryEntry(text: "Заголовок: локальная диктовка без облака — обзор Dictor",
+        TranscriptHistoryEntry(text: sampleTexts[2],
                                transcriptionDurationSeconds: 0.6,
                                createdAt: now.addingTimeInterval(-16000)),
-        TranscriptHistoryEntry(text: "Собираем бету в пятницу, режем скоуп до словаря и режимов",
+        TranscriptHistoryEntry(text: sampleTexts[3],
                                transcriptionDurationSeconds: 0.9,
                                createdAt: now.addingTimeInterval(-100_000)),
     ]

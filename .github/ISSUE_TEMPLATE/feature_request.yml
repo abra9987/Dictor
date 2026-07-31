@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest something Dictor should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        Describe the situation rather than the solution — the underlying
+        problem usually has more than one answer.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+    validations:
+      required: false
