@@ -42,6 +42,22 @@ enum SD {
         }
         /// Плашка подсказки (макет 6a: #EAE7E1), тёмная пара выведена.
         static let hintPaper = adaptive(light: 0xEAE7E1, dark: 0x2B2A27)
+
+        // Эмаль подсказки (макет 8d). Три размытых пятна под текстом съедают
+        // контраст, поэтому текст, ссылка и крестик берут по шагу
+        // решительности — иначе акцентная ссылка садится на акцентное пятно.
+        static let enamelAccent = enamelBlob(light: 0xE8502F, lightAlpha: 0.50,
+                                             dark: 0xFF6B47, darkAlpha: 0.60)
+        static let enamelGreen = enamelBlob(light: 0x3FA96A, lightAlpha: 0.34,
+                                            dark: 0x4BBE7A, darkAlpha: 0.40)
+        static let enamelWarm = enamelBlob(light: 0xE88A2F, lightAlpha: 0.42,
+                                           dark: 0xFFA85A, darkAlpha: 0.46)
+        /// Текст подсказки поверх эмали: #3D3B37 / #EAE7E1.
+        static let enamelInk = adaptive(light: 0x3D3B37, dark: 0xEAE7E1)
+        /// Ссылка поверх эмали: #C43E20 / #FFC7B8.
+        static let enamelVoice = adaptive(light: 0xC43E20, dark: 0xFFC7B8)
+        /// Крестик поверх эмали: #8A8781 / #C9C6C0.
+        static let enamelSubtle = adaptive(light: 0x8A8781, dark: 0xC9C6C0)
         /// Выделение выбранного пункта сайдбара: rgba(232,80,47,.13).
         static let sidebarSelection = NSColor(name: nil) { appearance in
             (appearance.isDark ? NSColor(hex: 0xFF6B47) : NSColor(hex: 0xE8502F))
@@ -91,6 +107,17 @@ enum SD {
         private static func adaptive(light: Int, dark: Int) -> NSColor {
             NSColor(name: nil) { appearance in
                 appearance.isDark ? NSColor(hex: dark) : NSColor(hex: light)
+            }
+        }
+
+        /// Пятно эмали: в тёмной теме и цвет, и прозрачность свои — суммарная
+        /// альфа держится в пределах 0,5 в светлой и 0,6 в тёмной (макет 8d).
+        private static func enamelBlob(light: Int, lightAlpha: CGFloat,
+                                       dark: Int, darkAlpha: CGFloat) -> NSColor {
+            NSColor(name: nil) { appearance in
+                appearance.isDark
+                    ? NSColor(hex: dark, alpha: darkAlpha)
+                    : NSColor(hex: light, alpha: lightAlpha)
             }
         }
     }
