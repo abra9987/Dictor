@@ -67,7 +67,7 @@ func hotkeyIsModifierPrefix(_ prefix: HotkeyChoice,
 enum ControlPanelUpdateState: Equatable, Sendable {
     case checking
     case upToDate(String)
-    case available(GitHubRelease)
+    case available(DictorRelease)
     case preparing(version: String, phase: String)
     case failed(String)
 }
@@ -85,7 +85,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var settingsDraft: ControlPanelSettingsDraft?
     var settingsTab = "general"
     private var hotkeyRecorder: HotkeyRecorderController?
-    private let onboarding = OnboardingController()
+    private var onboardingFlow: OnboardingFlow?
+    private var onboardingPage: OnboardingPageView?
+    /// Отчёт последней починки разрешений. Пусто — показываем план.
+    private var permissionRepairNotes: [String] = []
     private var mainHistorySearch = ""
     private weak var mainHistorySearchField: NSSearchField?
     private weak var historyDetailTranscriptView: SDSelectableTranscriptView?
@@ -109,6 +112,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             return
         }
         DictorControlPanelRegistry.claimCurrentPanel()
+        guard offerToMoveIntoApplicationsIfNeeded() else {
+            NSApp.terminate(nil)
+            return
+        }
         installMainMenu()
         // Раздел, запрошенный поповером (макет 6a: «История» и «Настройки»
         // ведут в окно, а не открывают отдельные окна).
@@ -131,8 +138,36 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         if settings.agentEnabled && !DictorAgentService.isAgentRunning() {
             beginServiceOperation(.starting)
         }
-        onboarding.showIfNeeded(
-            force: CommandLine.arguments.contains("--onboarding"))
+        startOnboardingIfNeeded(force: CommandLine.arguments.contains("--onboarding"))
+    }
+
+    // MARK: - Онбординг
+
+    private func startOnboardingIfNeeded(force: Bool) {
+        guard let flow = OnboardingFlow.makeIfNeeded(force: force) else { return }
+        onboardingFlow = flow
+        onboardingPage = OnboardingPageView(language: language, actions: self)
+        window?.contentView = makeMainWindowView()
+        applyOnboarding()
+    }
+
+    /// Обновление онбординга минует общую пересборку окна. В `refresh()` вид
+    /// заменяется целиком по отпечатку, куда входит и доля загрузки модели —
+    /// на шаге пробы это уносило бы поле ввода вместе с фокусом раз в тик.
+    private func applyOnboarding() {
+        guard let flow = onboardingFlow, let page = onboardingPage else { return }
+        let snapshot = flow.currentSnapshot()
+        flow.advance(with: snapshot)
+        page.apply(step: flow.step, snapshot: snapshot)
+    }
+
+    private func finishOnboarding() {
+        guard onboardingFlow != nil else { return }
+        settings.onboardingCompleted = true
+        onboardingFlow = nil
+        onboardingPage = nil
+        lastRenderFingerprint = ""
+        refresh(force: true)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -163,6 +198,57 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func t(_ russian: String, _ english: String) -> String {
         localizedText(russian, english, language: language)
+    }
+
+    /// Возвращает false, если запускаться отсюда нельзя и приложение должно
+    /// закрыться: либо мы уже открыли установленную копию, либо пользователь
+    /// отказался переносить.
+    private func offerToMoveIntoApplicationsIfNeeded() -> Bool {
+        guard InstallLocation.isEphemeral() else { return true }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = t("Перенести Dictor в «Программы»?",
+                              "Move Dictor to Applications?")
+        alert.informativeText = t(
+            """
+            Сейчас Dictor открыт из временного места — прямо с образа или из \
+            папки загрузок. Оттуда он работать не будет: macOS подменяет такой \
+            копии путь, разрешения на микрофон и мониторинг ввода к ней не \
+            привязываются, а служба диктовки сломается, как только образ будет \
+            извлечён.
+            """,
+            """
+            Dictor is running from a temporary location — straight off the disk \
+            image or out of your downloads folder. It cannot work from there: \
+            macOS gives such a copy a throwaway path, microphone and input \
+            monitoring permissions will not stick to it, and dictation breaks as \
+            soon as the image is ejected.
+            """)
+        alert.addButton(withTitle: t("Перенести и открыть", "Move and Open"))
+        alert.addButton(withTitle: t("Выйти", "Quit"))
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            log("install location: user declined the move from \(InstallLocation.current.path)")
+            return false
+        }
+
+        do {
+            try InstallLocation.moveToApplicationsAndRelaunch()
+            log("install location: moved into Applications and relaunched")
+            return false
+        } catch {
+            let failure = NSAlert()
+            failure.alertStyle = .critical
+            failure.messageText = t("Не удалось перенести Dictor",
+                                    "Could not move Dictor")
+            failure.informativeText = t(
+                "Перетащи Dictor.app в «Программы» вручную и открой уже оттуда.\n\n\(error.localizedDescription)",
+                "Drag Dictor.app into Applications yourself, then open it from there.\n\n\(error.localizedDescription)")
+            failure.addButton(withTitle: "OK")
+            failure.runModal()
+            return false
+        }
     }
 
     /// Без этого меню ⌘C в окне только пищит. Приложение живёт в меню-баре
@@ -266,6 +352,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         if !force, window.isKeyWindow,
            historyDetailTranscriptView?.hasSelection == true { return }
         _ = settings.refreshFromDisk()
+        if onboardingFlow != nil {
+            applyOnboarding()
+            return
+        }
         let fingerprint = renderFingerprint()
         guard force || fingerprint != lastRenderFingerprint else { return }
         lastRenderFingerprint = fingerprint
@@ -344,7 +434,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 settings.recordingHUDTranscribingColor.rawValue,
                 settings.recordingHUDBackgroundStyle.rawValue,
                 settings.recordingHUDSize.rawValue,
-                permissionClickCount.description].joined(separator: "::")
+                permissionClickCount.description,
+                "repair:\(permissionRepairNotes.count)",
+                (AgentRuntimeStateStore.read()?.missingPermissions ?? []).sorted().joined(separator: ",")]
+            .joined(separator: "::")
     }
 
     private func updateStateFingerprint() -> String {
@@ -778,9 +871,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let headline = panelLabel(t("Ваш голос не покидает этот Mac",
                                     "Your voice never leaves this Mac"),
                                   size: 15, weight: .bold)
+        // «Интернет нужен один раз» перестало быть правдой, когда включился
+        // канал обновлений: раз в 6 часов приложение спрашивает версию.
+        // Строка ниже говорит, сколько это запросов и за чем именно.
         let sub = panelLabel(
-            t("Запись, распознавание и история живут локально. Интернет нужен один раз — скачать модель.",
-              "Recording, transcription and history live locally. The internet is needed once — to download the model."),
+            t("Запись, распознавание и история живут локально. В сеть Dictor выходит за моделью и за обновлениями.",
+              "Recording, transcription and history live locally. Dictor goes online for the model and for updates."),
             size: 12, color: SD.C.graphite)
         sub.maximumNumberOfLines = 2
         sub.alignment = .center
@@ -795,9 +891,16 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         showcase.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -48).isActive = true
         root.addArrangedSubview(SDHairlineView())
 
+        // Значение было зашито как «0 — обновления отключены». Пока проверка
+        // стояла за мёртвым `return`, это была правда; в 1.1.0 канал включён,
+        // и строка стала бы враньём ровно в той вкладке, где человек решает,
+        // насколько приложению верить. Считаем по настройке.
         root.addArrangedSubview(SDRowView(
             title: t("Сетевые запросы", "Network requests"),
-            control: monoValueLabel(t("0 — обновления отключены", "0 — updates disabled")),
+            control: monoValueLabel(settings.checkForUpdates
+                ? t("1 раз в 6 ч — проверка обновлений",
+                    "once every 6 h — update check")
+                : t("0 — обновления отключены", "0 — updates disabled")),
             verticalPadding: 12
         ))
 
@@ -910,6 +1013,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// Сайдбар 212pt + раздел. Сайдбар уходит под тайтлбар, первые 52pt
     /// оставлены под кнопки окна.
     func makeMainWindowView() -> NSView {
+        // Онбординг занимает окно целиком: ни сайдбара, ни разделов, пока
+        // человек не дошёл до конца или не нажал «Пропустить».
+        if let onboardingPage { return onboardingPage }
+
         let sidebar = makeSidebarView()
         sidebar.translatesAutoresizingMaskIntoConstraints = false
 
@@ -2524,6 +2631,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     // а модель и так никогда не выгружается, кроме смены модели. Тумблер,
     // который ничего не переключает, врёт убедительнее отсутствующего.
     private func addAdvancedTabRows(to root: NSStackView) {
+        addPermissionsSection(to: root)
         root.addArrangedSubview(advancedSectionHeader(t("Капсула", "Capsule")))
 
         // Размер — с живым превью справа: переключение S/M/L видно сразу,
@@ -2655,6 +2763,112 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             hairline.bottomAnchor.constraint(equalTo: row.bottomAnchor),
         ])
         return row
+    }
+
+    /// Разрешения и их починка. Живут в «Продвинутых», потому что сюда идут
+    /// именно тогда, когда что-то не работает.
+    private func addPermissionsSection(to root: NSStackView) {
+        let report = PermissionsDoctor.report()
+        root.addArrangedSubview(advancedSectionHeader(t("Разрешения macOS", "macOS permissions")))
+
+        for (index, row) in report.rows.enumerated() {
+            let copy = onboardingPermissionCopy(row.permission, language: language)
+            let state = panelLabel(PermissionsDoctor.explain(row.diagnosis, language: language),
+                                   size: 12,
+                                   color: row.diagnosis == .granted ? SD.C.positive : SD.C.graphite)
+            let trailing: NSView
+            if row.diagnosis == .missing {
+                let button = NSButton(title: t("Разрешить", "Allow"),
+                                      target: self,
+                                      action: #selector(permissionGrantClicked(_:)))
+                button.tag = index
+                button.bezelStyle = .rounded
+                button.font = .systemFont(ofSize: 12)
+                trailing = button
+            } else {
+                trailing = NSView()
+            }
+            root.addArrangedSubview(advancedCapsuleRow(title: copy.name,
+                                                       control: state,
+                                                       trailing: trailing))
+        }
+
+        let fix = NSButton(title: t("Проверить и починить", "Check and repair"),
+                           target: self,
+                           action: #selector(permissionRepairClicked(_:)))
+        fix.bezelStyle = .rounded
+        fix.font = .systemFont(ofSize: 12, weight: .semibold)
+        root.addArrangedSubview(advancedCapsuleRow(
+            title: t("Диагностика", "Diagnostics"),
+            control: fix,
+            trailing: NSView()))
+
+        // Что кнопка сделает — показываем заранее, а после нажатия заменяем
+        // на отчёт о том, что сделано.
+        let lines = permissionRepairNotes.isEmpty
+            ? PermissionsDoctor.repairPlan(report, language: language)
+            : permissionRepairNotes
+        for (index, line) in lines.enumerated() {
+            // Запуск не из «Программ» — не совет, а причина, по которой всё
+            // остальное бесполезно. Он всегда первый и выделен цветом.
+            let isBlocker = index == 0 && !report.isInstalledInApplications
+            root.addArrangedSubview(permissionsNoteRow(line,
+                                                       color: isBlocker ? SD.C.voice : SD.C.subtle))
+        }
+    }
+
+    private func permissionsNoteRow(_ text: String, color: NSColor) -> NSView {
+        let label = panelLabel("• " + text, size: 11.5, color: color)
+        // Без уступки по сжатию строка вылезала за правый край окна. Точки
+        // разрыва внутри пути расставляет PermissionsDoctor.
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let wrapper = NSStackView(views: [label])
+        wrapper.orientation = .vertical
+        wrapper.alignment = .leading
+        wrapper.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 6, right: 0)
+        label.widthAnchor.constraint(equalTo: wrapper.widthAnchor).isActive = true
+        return wrapper
+    }
+
+    @objc private func permissionGrantClicked(_ sender: NSButton) {
+        guard Permission.allCases.indices.contains(sender.tag) else { return }
+        Permissions.request(Permission.allCases[sender.tag])
+        refresh(force: true)
+    }
+
+    @objc private func permissionRepairClicked(_ sender: NSButton) {
+        let report = PermissionsDoctor.report()
+        var notes: [String] = []
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.raul.dictor"
+
+        if report.needsAgentRestart {
+            notes.append(t("Служба перезапущена — теперь она перечитает разрешения.",
+                           "The service was restarted — it will re-read permissions now."))
+            beginServiceOperation(.restarting)
+        }
+
+        let missing = report.rows.filter { $0.diagnosis == .missing }.map(\.permission)
+        for permission in missing {
+            let name = onboardingPermissionCopy(permission, language: language).name
+            notes.append(t("Запись macOS для «\(name)» сброшена, запрос отправлен заново.",
+                           "The macOS record for “\(name)” was reset and requested again."))
+            TCC.reset(permission, bundleID: bundleID) { [weak self] in
+                Permissions.request(permission)
+                self?.refresh(force: true)
+            }
+        }
+
+        if notes.isEmpty {
+            notes.append(t("Чинить нечего: все разрешения выданы и служба их видит.",
+                           "Nothing to repair: every permission is granted and the service sees it."))
+        }
+        if !report.isInstalledInApplications {
+            notes.append(t("Это не лечится отсюда: перенесите Dictor в «Программы» и выдайте разрешения заново.",
+                           "This cannot be fixed from here: move Dictor to Applications and grant the permissions again."))
+        }
+        log("permissions repair: \(notes.count) action(s)")
+        permissionRepairNotes = notes
+        refresh(force: true)
     }
 
     private func advancedSectionHeader(_ title: String) -> NSView {
@@ -2806,49 +3020,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
 
-    private func compactUpdatePresentation() -> (symbol: String,
-                                                   color: NSColor,
-                                                   title: String,
-                                                   detail: String,
-                                                   buttonTitle: String?,
-                                                   action: Selector?,
-                                                   buttonEnabled: Bool,
-                                                   buttonToolTip: String?) {
-        switch updateState {
-        case .checking:
-            return ("arrow.triangle.2.circlepath", .systemBlue,
-                    t("Проверяю обновления", "Checking for updates"),
-                    t("Установлена v\(currentBundleVersion())", "Installed v\(currentBundleVersion())"),
-                    nil, nil, false, nil)
-        case .upToDate:
-            return ("checkmark.circle.fill", .systemGreen,
-                    t("Dictor актуален", "Dictor is up to date"),
-                    t("Установлена последняя версия v\(currentBundleVersion())",
-                      "Latest version v\(currentBundleVersion()) is installed"),
-                    t("Проверить", "Check"), #selector(updateButtonClicked(_:)), true,
-                    t("Проверить GitHub Releases ещё раз", "Check GitHub Releases again"))
-        case .available(let release):
-            return ("arrow.down.circle.fill", .systemBlue,
-                    t("Доступна версия v\(release.version)", "Version v\(release.version) is available"),
-                    t("Скачается, проверится и установится автоматически",
-                      "Downloads, verifies, and installs automatically"),
-                    t("Обновить", "Update"), #selector(updateButtonClicked(_:)), serviceOperation == nil,
-                    t("Обновить Dictor до v\(release.version) одной кнопкой",
-                      "Update Dictor to v\(release.version) with one click"))
-        case .preparing(let version, let phase):
-            return ("arrow.down.circle", .systemBlue,
-                    t("Обновляю до v\(version)", "Updating to v\(version)"),
-                    phase, nil, nil, false, nil)
-        case .failed(let message):
-            return ("exclamationmark.triangle.fill", .systemRed,
-                    t("Обновление не проверено", "Update check failed"),
-                    message,
-                    t("Повторить", "Retry"), #selector(updateButtonClicked(_:)), true,
-                    t("Повторить проверку обновлений", "Retry the update check"))
-        }
-    }
-
-
     private func operationTitle(_ operation: ControlPanelServiceOperation) -> String {
         switch operation {
         case .starting: return t("Запускаю службу диктовки", "Starting dictation service")
@@ -2932,149 +3103,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         guard language == .russian else { return manualUpdateCheckFailureText(failure) }
         switch failure {
         case .network:
-            return "Не удалось связаться с GitHub. Проверьте интернет и повторите попытку."
-        case .httpStatus(403):
-            return "GitHub временно ограничил проверку обновлений. Повторите через несколько минут."
+            return "Не удалось связаться с сервером обновлений. Проверьте интернет и повторите попытку."
         case .httpStatus(let code):
-            return "GitHub вернул ошибку HTTP \(code). Повторите попытку позже."
+            return "Сервер обновлений вернул ошибку HTTP \(code). Повторите попытку позже."
         case .unexpectedResponse:
-            return "GitHub вернул ответ, который Dictor не смог проверить."
-        }
-    }
-
-    private func beginInAppUpdate(for release: GitHubRelease) {
-        guard updateTask == nil else { return }
-        let version = release.version
-        updateState = .preparing(
-            version: version,
-            phase: t("Получаю защищённый манифест обновления…",
-                     "Fetching the verified update manifest…")
-        )
-        refresh(force: true)
-        updateTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let manifest = try await DictorUpdateInstaller.fetchManifest(
-                    expectedVersion: version
-                )
-                guard !Task.isCancelled else { return }
-                self.updateState = .preparing(
-                    version: version,
-                    phase: self.t("Скачиваю архив и проверяю SHA-256…",
-                                  "Downloading the archive and verifying SHA-256…")
-                )
-                self.refresh(force: true)
-                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest)
-                guard !Task.isCancelled else {
-                    try? FileManager.default.removeItem(at: prepared.workDirectory)
-                    return
-                }
-                self.updateState = .preparing(
-                    version: version,
-                    phase: self.t("Архив проверен. Запускаю установку…",
-                                  "The archive is verified. Starting installation…")
-                )
-                self.refresh(force: true)
-                try self.launchPreparedUpdate(prepared)
-            } catch {
-                self.updateTask = nil
-                let message = (error as? DictorUpdateInstallerError)?
-                    .message(language: self.language) ?? error.localizedDescription
-                self.updateState = .failed(message)
-                self.lastRenderFingerprint = ""
-                self.refresh(force: true)
-            }
-        }
-    }
-
-    private func launchPreparedUpdate(_ prepared: PreparedDictorUpdate) throws {
-        let statePath = try createPrivateUpdateProgressStateFile()
-        let helperLog = try openPrivateUpdateHelperLog()
-        let appURL = Bundle.main.bundleURL
-        let backupURL = appURL.deletingLastPathComponent()
-            .appendingPathComponent(".Dictor-update-backup-\(UUID().uuidString).app",
-                                    isDirectory: true)
-        let script = dictorDirectUpdateHelperScript(
-            pid: getpid(),
-            targetVersion: prepared.version,
-            statePath: statePath,
-            stagedAppPath: prepared.stagedAppURL.path,
-            workDirectory: prepared.workDirectory.path,
-            backupAppPath: backupURL.path,
-            appPath: appURL.path,
-            language: language
-        )
-        let helperPath = try writePrivateUpdateHelperScript(script)
-
-        let progressAppPath: String
-        do {
-            progressAppPath = try launchUpdateProgressApp(
-                statePath: statePath,
-                logPath: helperLog.path,
-                targetVersion: prepared.version
-            )
-        } catch {
-            try? FileManager.default.removeItem(atPath: helperPath)
-            try? FileManager.default.removeItem(atPath: statePath)
-            try? FileManager.default.removeItem(at: prepared.workDirectory)
-            helperLog.handle.closeFile()
-            throw error
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [helperPath]
-        process.environment = systemToolProcessEnvironment()
-        process.standardOutput = helperLog.handle
-        process.standardError = helperLog.handle
-        do {
-            try process.run()
-        } catch {
-            try? FileManager.default.removeItem(atPath: helperPath)
-            try? FileManager.default.removeItem(atPath: statePath)
-            try? FileManager.default.removeItem(at: prepared.workDirectory)
-            try? FileManager.default.removeItem(atPath: progressAppPath)
-            helperLog.handle.closeFile()
-            throw error
-        }
-
-        updateTask = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            NSApp.terminate(nil)
-        }
-    }
-
-    private func launchUpdateProgressApp(statePath: String,
-                                         logPath: String,
-                                         targetVersion: String) throws -> String {
-        let sourceAppURL = Bundle.main.bundleURL
-        guard sourceAppURL.pathExtension == "app",
-              let executableName = Bundle.main.executableURL?.lastPathComponent else {
-            throw posixError(EINVAL)
-        }
-        let progressAppURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("\(UPDATE_PROGRESS_APP_PREFIX)\(UUID().uuidString).app",
-                                    isDirectory: true)
-        try FileManager.default.copyItem(at: sourceAppURL, to: progressAppURL)
-        let executableURL = progressAppURL
-            .appendingPathComponent("Contents/MacOS", isDirectory: true)
-            .appendingPathComponent(executableName)
-        let process = Process()
-        process.executableURL = executableURL
-        process.arguments = [
-            UPDATE_PROGRESS_ARGUMENT,
-            statePath,
-            logPath,
-            targetVersion,
-            progressAppURL.path,
-        ]
-        process.environment = systemToolProcessEnvironment()
-        do {
-            try process.run()
-            return progressAppURL.path
-        } catch {
-            try? FileManager.default.removeItem(at: progressAppURL)
-            throw error
+            return "Сервер обновлений вернул ответ, который Dictor не смог проверить."
         }
     }
 
@@ -3497,17 +3530,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    @objc private func updateButtonClicked(_ sender: NSButton) {
-        switch updateState {
-        case .available(let release):
-            beginInAppUpdate(for: release)
-        case .checking, .preparing:
-            return
-        case .upToDate, .failed:
-            checkForUpdates()
-        }
-    }
-
     @objc private func startAgentClicked(_ sender: NSButton) {
         settings.agentEnabled = true
         _ = settings.refreshFromDisk()
@@ -3901,4 +3923,29 @@ func exportHistoryPanelPreviews(to directory: URL) throws {
         throw SettingsPreviewExportError(message: "nothing exported")
     }
     print("HISTORY_PREVIEW exported \(exported) files to \(directory.path)")
+}
+
+// MARK: - Действия онбординга
+
+extension DictorControlPanelApp: OnboardingPageActions {
+    func onboardingStartTapped() {
+        guard let flow = onboardingFlow else { return }
+        flow.start(with: flow.currentSnapshot())
+        applyOnboarding()
+    }
+
+    func onboardingGrantTapped(_ permission: Permission) {
+        Permissions.request(permission)
+        applyOnboarding()
+    }
+
+    func onboardingSkipTapped() {
+        log("onboarding: skipped by user")
+        finishOnboarding()
+    }
+
+    func onboardingFinishTapped() {
+        log("onboarding: finished by user")
+        finishOnboarding()
+    }
 }

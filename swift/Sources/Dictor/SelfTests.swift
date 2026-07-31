@@ -2615,43 +2615,43 @@ enum DictorSelfTest {
     }
 
     private static func testUpdateCheckParsing() throws {
-        let ok = HTTPURLResponse(url: GITHUB_LATEST_RELEASE_URL,
+        let ok = HTTPURLResponse(url: UPDATE_MANIFEST_URL,
                                  statusCode: 200,
                                  httpVersion: nil,
                                  headerFields: nil)!
-        let notFound = HTTPURLResponse(url: GITHUB_LATEST_RELEASE_URL,
+        let notFound = HTTPURLResponse(url: UPDATE_MANIFEST_URL,
                                        statusCode: 404,
                                        httpVersion: nil,
                                        headerFields: nil)!
         let releaseData = Data(
-            #"{"tag_name":"v9.8.7","body":"Notes","html_url":"https://github.com/shlgd/Dictor/releases/tag/v9.8.7"}"#.utf8
+            #"{"version":"9.8.7","sha256":"deadbeef","notes":"Notes"}"#.utf8
         )
 
         try expect(
             UpdateCheck.parseLatest(data: releaseData, response: ok),
-            equals: .success(GitHubRelease(tagName: "v9.8.7",
+            equals: .success(DictorRelease(tagName: "v9.8.7",
                                            version: "9.8.7",
                                            body: "Notes",
-                                           htmlURL: "https://github.com/shlgd/Dictor/releases/tag/v9.8.7")),
-            "update parsing should decode typed GitHub release payloads"
+                                           htmlURL: UPDATE_CHANNEL_PAGE.absoluteString)),
+            "update parsing should decode the channel manifest"
         )
         try expect(
             UpdateCheck.parseLatest(data: releaseData, response: notFound),
             equals: .failure(.httpStatus(404)),
             "update parsing should reject non-2xx HTTP responses with the status code"
         )
-        let rateLimited = HTTPURLResponse(url: GITHUB_LATEST_RELEASE_URL,
+        let rateLimited = HTTPURLResponse(url: UPDATE_MANIFEST_URL,
                                           statusCode: 403,
                                           httpVersion: nil,
                                           headerFields: nil)!
         try expect(
             UpdateCheck.parseLatest(data: releaseData, response: rateLimited),
             equals: .failure(.httpStatus(403)),
-            "update parsing should surface HTTP 403 distinctly (GitHub rate limiting)"
+            "update parsing should surface HTTP 403 distinctly"
         )
         let oversizedReleaseData = Data(
             """
-            {"tag_name":"v9.8.7","body":"\(String(repeating: "x", count: UpdateCheck.maxReleaseResponseBytes))","html_url":"https://github.com/shlgd/Dictor/releases/tag/v9.8.7"}
+            {"version":"9.8.7","notes":"\(String(repeating: "x", count: UpdateCheck.maxReleaseResponseBytes))"}
             """.utf8
         )
         try expect(
@@ -2665,23 +2665,23 @@ enum DictorSelfTest {
             "update parsing should reject oversized release responses before decoding"
         )
         try expect(
-            UpdateCheck.parseLatest(data: Data(#"{"tag_name":""}"#.utf8), response: ok),
+            UpdateCheck.parseLatest(data: Data(#"{"version":""}"#.utf8), response: ok),
             equals: .failure(.unexpectedResponse),
             "update parsing should reject empty release tags"
         )
         try expect(
-            UpdateCheck.parseLatest(data: Data(#"{"tag_name":"latest"}"#.utf8), response: ok),
+            UpdateCheck.parseLatest(data: Data(#"{"version":"latest"}"#.utf8), response: ok),
             equals: .failure(.unexpectedResponse),
             "update parsing should reject non-version release tags"
         )
         try expect(
-            UpdateCheck.parseLatest(data: Data(#"{"tag_name":"v01.2.3"}"#.utf8), response: ok),
+            UpdateCheck.parseLatest(data: Data(#"{"version":"v01.2.3"}"#.utf8), response: ok),
             equals: .failure(.unexpectedResponse),
             "update parsing should reject non-normal semver tags"
         )
         try expect(
             UpdateCheck.parseLatest(
-                data: Data(#"{"tag_name":"v999999999999999999999999.2.3"}"#.utf8),
+                data: Data(#"{"version":"v999999999999999999999999.2.3"}"#.utf8),
                 response: ok
             ),
             equals: .failure(.unexpectedResponse),
@@ -2711,25 +2711,25 @@ enum DictorSelfTest {
         )
         try expect(
             UpdateCheck.parseLatest(
-                data: Data(#"{"tag_name":"9.8.7","html_url":"https://example.test/v9.8.7"}"#.utf8),
+                data: Data(#"{"version":"v9.8.7"}"#.utf8),
                 response: ok
             ),
-            equals: .success(GitHubRelease(tagName: "9.8.7",
+            equals: .success(DictorRelease(tagName: "v9.8.7",
                                            version: "9.8.7",
                                            body: "",
-                                           htmlURL: GITHUB_RELEASES_PAGE.absoluteString)),
-            "update parsing should fall back from non-project release URLs"
+                                           htmlURL: UPDATE_CHANNEL_PAGE.absoluteString)),
+            "update parsing should accept a v-prefixed version and empty notes"
         )
         try expect(
             UpdateCheck.parseLatest(
-                data: Data(#"{"tag_name":"v9.8.7","html_url":"https://github.com/shlgd/Dictor/releases/tag/v9.8.8"}"#.utf8),
+                data: Data(#"{"version":"9.8.7","sha256":"deadbeef","channel":"stable"}"#.utf8),
                 response: ok
             ),
-            equals: .success(GitHubRelease(tagName: "v9.8.7",
+            equals: .success(DictorRelease(tagName: "v9.8.7",
                                            version: "9.8.7",
                                            body: "",
-                                           htmlURL: GITHUB_RELEASES_PAGE.absoluteString)),
-            "update parsing should fall back when release URL tag does not match the payload tag"
+                                           htmlURL: UPDATE_CHANNEL_PAGE.absoluteString)),
+            "update parsing should ignore unknown manifest fields"
         )
         // Manual-check alert copy: each failure kind gets its own
         // explanation instead of blaming the network for everything.
@@ -2738,10 +2738,12 @@ enum DictorSelfTest {
             equals: true,
             "network failure text should point at connectivity"
         )
+        // Про «rate limiting» здесь больше нет речи: это была особенность
+        // GitHub API, а канал теперь свой.
         try expect(
-            manualUpdateCheckFailureText(.httpStatus(403)).contains("rate limiting"),
+            manualUpdateCheckFailureText(.httpStatus(403)).contains("HTTP 403"),
             equals: true,
-            "HTTP 403 failure text should mention rate limiting"
+            "HTTP 403 failure text should include the status code"
         )
         try expect(
             manualUpdateCheckFailureText(.httpStatus(500)).contains("HTTP 500"),
@@ -2773,31 +2775,41 @@ enum DictorSelfTest {
             equals: nil,
             "stored app version normalization should reject oversized numeric components"
         )
+        let channel = UPDATE_CHANNEL_PAGE.absoluteString
         try expect(
-            UpdateCheck.sanitizedReleaseURL("http://github.com/shlgd/Dictor/releases/tag/v9.8.7",
-                                            expectedTag: "v9.8.7"),
-            equals: GITHUB_RELEASES_PAGE.absoluteString,
+            UpdateCheck.sanitizedReleaseURL("http://dictor.raulgumerov.com/notes"),
+            equals: channel,
             "release URL sanitizing should require HTTPS"
         )
         try expect(
-            UpdateCheck.sanitizedReleaseURL("https://user@github.com/shlgd/Dictor/releases/tag/v9.8.7",
-                                            expectedTag: "v9.8.7"),
-            equals: GITHUB_RELEASES_PAGE.absoluteString,
+            UpdateCheck.sanitizedReleaseURL("https://user@dictor.raulgumerov.com/notes"),
+            equals: channel,
             "release URL sanitizing should reject userinfo"
         )
         try expect(
-            UpdateCheck.sanitizedReleaseURL("https://github.com/shlgd/Dictor/releases/tag/v9.8.7?download=1",
-                                            expectedTag: "v9.8.7"),
-            equals: GITHUB_RELEASES_PAGE.absoluteString,
+            UpdateCheck.sanitizedReleaseURL("https://dictor.raulgumerov.com/notes?download=1"),
+            equals: channel,
             "release URL sanitizing should reject query strings"
+        )
+        // Манифест лежит на нашем сервере, но это всё равно внешний ввод:
+        // подменённая ссылка не должна увести человека на чужой хост.
+        try expect(
+            UpdateCheck.sanitizedReleaseURL("https://example.com/notes"),
+            equals: channel,
+            "release URL sanitizing should reject foreign hosts"
+        )
+        try expect(
+            UpdateCheck.sanitizedReleaseURL("https://dictor.raulgumerov.com/notes"),
+            equals: "https://dictor.raulgumerov.com/notes",
+            "release URL sanitizing should keep a clean URL on our own channel"
         )
     }
 
     private static func testUpdateCheckState() throws {
-        let release = GitHubRelease(tagName: "v1.2.4",
+        let release = DictorRelease(tagName: "v1.2.4",
                                     version: "1.2.4",
                                     body: "",
-                                    htmlURL: GITHUB_RELEASES_PAGE.absoluteString)
+                                    htmlURL: UPDATE_CHANNEL_PAGE.absoluteString)
         try expect(
             updateCheckResult(for: nil, currentVersion: "1.2.3", skippedVersions: []),
             equals: .failed,
@@ -2937,39 +2949,29 @@ enum DictorSelfTest {
             equals: (NSHomeDirectory() as NSString).appendingPathComponent("Library/Logs"),
             "update helper log should live in the user's log directory"
         )
-        let updateEnv = updateProcessEnvironment(current: [
-            "LANG": "C\nbad",
+        // Раньше здесь проверялось ещё и окружение с Homebrew в PATH: обновление
+        // ставилось через brew cask из апстримового tap. Раздача идёт образом со
+        // своего канала, brew-путь удалён — остаётся одно окружение, системное.
+        let systemEnv = systemToolProcessEnvironment(current: [
+            "LANG": "en_GB.UTF-8",
             "USER": "dictor-user",
             "LOGNAME": "dictor-logname",
-            "__CF_USER_TEXT_ENCODING": "0x1F5:0x0:0x0",
             "BASH_ENV": "/tmp/pwn.sh",
             "ENV": "/tmp/pwn.sh",
             "SHELLOPTS": "xtrace",
             "RUBYOPT": "-r/tmp/pwn.rb",
-            "HOMEBREW_BOTTLE_DOMAIN": "https://example.test",
-        ])
-        try expect(updateEnv["HOME"], equals: Optional(NSHomeDirectory()),
-                   "update environment should set HOME explicitly")
-        try expect(updateEnv["PATH"],
-                   equals: Optional("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
-                   "update environment should use a deterministic PATH")
-        try expect(updateEnv["LANG"], equals: Optional("en_US.UTF-8"),
-                   "update environment should reject unsafe locale values")
-        try expect(updateEnv["USER"], equals: Optional("dictor-user"),
-                   "update environment should preserve a safe USER value")
-        try expect(updateEnv["LOGNAME"], equals: Optional("dictor-logname"),
-                   "update environment should preserve a safe LOGNAME value")
-        for key in ["BASH_ENV", "ENV", "SHELLOPTS", "RUBYOPT", "HOMEBREW_BOTTLE_DOMAIN"] {
-            try expect(updateEnv[key], equals: String?.none,
-                       "update environment should not inherit \(key)")
-        }
-        let systemEnv = systemToolProcessEnvironment(current: [
-            "LANG": "en_GB.UTF-8",
-            "USER": "dictor-user",
-            "BASH_ENV": "/tmp/pwn.sh",
             "DYLD_INSERT_LIBRARIES": "/tmp/pwn.dylib",
+            "HOMEBREW_BOTTLE_DOMAIN": "https://example.test",
             "PATH": "/tmp/bin",
         ])
+        try expect(systemEnv["HOME"], equals: Optional(NSHomeDirectory()),
+                   "system tool environment should set HOME explicitly")
+        try expect(systemEnv["LOGNAME"], equals: Optional("dictor-logname"),
+                   "system tool environment should preserve a safe LOGNAME value")
+        for key in ["ENV", "SHELLOPTS", "RUBYOPT", "HOMEBREW_BOTTLE_DOMAIN"] {
+            try expect(systemEnv[key], equals: String?.none,
+                       "system tool environment should not inherit \(key)")
+        }
         try expect(systemEnv["PATH"], equals: Optional("/usr/bin:/bin:/usr/sbin:/sbin"),
                    "system tool environment should not include Homebrew or inherited PATH entries")
         try expect(systemEnv["LANG"], equals: Optional("en_GB.UTF-8"),
@@ -2979,50 +2981,6 @@ enum DictorSelfTest {
         for key in ["BASH_ENV", "DYLD_INSERT_LIBRARIES"] {
             try expect(systemEnv[key], equals: String?.none,
                        "system tool environment should not inherit \(key)")
-        }
-
-        let script = updateHelperScript(pid: 123,
-                                        brewPath: "/opt/homebrew/bin/brew",
-                                        targetVersion: "9.8.7",
-                                        statePath: "/tmp/dictor-update.state",
-                                        appPath: "/Applications/Dictor.app",
-                                        releasesPageURL: "https://example.test/releases")
-        for fragment in [
-            "umask 077",
-            "TARGET_VERSION='9.8.7'",
-            "STATE_PATH='/tmp/dictor-update.state'",
-            "PARAKEY_PID=123",
-            "SCRIPT_PATH=\"$0\"",
-            "trap cleanup EXIT",
-            "/bin/rm -f \"$SCRIPT_PATH\"",
-            "printf '[%s] %s\\n' \"$(timestamp)\" \"$*\"",
-            "printf '%s\\t%s\\n' \"$phase\" \"$message\" >\"$tmp\"",
-            "CASK_TAP='shlgd/dictor'",
-            "CASK_TOKEN='shlgd/dictor/dictor'",
-            "CASK_INSTALLED_TOKEN='dictor'",
-            "PlistBuddy -c \"Print :CFBundleShortVersionString\"",
-            "version_at_least \"$installed\" \"$TARGET_VERSION\"",
-            "state \"preparing\" \"Preparing Homebrew for Dictor v$TARGET_VERSION...\"",
-            "state \"downloading\" \"Downloading Dictor v$TARGET_VERSION...\"",
-            "state \"installing\" \"Installing Dictor v$TARGET_VERSION...\"",
-            "run_brew tap \"$CASK_TAP\"",
-            "run_brew update --force",
-            "run_brew fetch --cask --force \"$CASK_TOKEN\"",
-            "run_brew upgrade --cask --force --appdir=\"$APP_DIR\" \"$CASK_TOKEN\"",
-            "run_brew reinstall --cask --force --appdir=\"$APP_DIR\" \"$CASK_TOKEN\"",
-            "installed_target_version",
-            "sleep 2",
-            "state \"complete\" \"Dictor v$TARGET_VERSION is installed.\"",
-            "/usr/bin/open \"$APP_PATH\""
-        ] {
-            guard script.contains(fragment) else {
-                throw SelfTestFailure.failed("update helper script missing fragment: \(fragment)")
-            }
-        }
-        for fragment in ["LOG=", ">>\"$LOG\"", ">\"$LOG\"", "prepare_log"] {
-            guard !script.contains(fragment) else {
-                throw SelfTestFailure.failed("update helper script should not reopen a log path: \(fragment)")
-            }
         }
 
         let directScript = dictorDirectUpdateHelperScript(
@@ -3053,6 +3011,13 @@ enum DictorSelfTest {
                 throw SelfTestFailure.failed("direct update helper missing fragment: \(fragment)")
             }
         }
+        // Лог открывает вызывающий и передаёт скрипту готовый дескриптор.
+        // Скрипт, который откроет путь сам, пишет туда с чужими правами.
+        for fragment in ["LOG=", ">>\"$LOG\"", ">\"$LOG\"", "prepare_log"] {
+            guard !directScript.contains(fragment) else {
+                throw SelfTestFailure.failed("direct update helper should not reopen a log path: \(fragment)")
+            }
+        }
         let directTmp = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("dictor-direct-update-self-test-\(UUID().uuidString).sh")
         try directScript.write(to: directTmp, atomically: true, encoding: .utf8)
@@ -3068,29 +3033,13 @@ enum DictorSelfTest {
             throw SelfTestFailure.failed("direct update helper script should pass bash -n")
         }
 
-        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("dictor-update-self-test-\(UUID().uuidString).sh")
-        try script.write(to: tmp, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/bin/bash")
-        proc.arguments = ["-n", tmp.path]
-        proc.standardOutput = Pipe()
-        proc.standardError = Pipe()
-        try proc.run()
-        proc.waitUntilExit()
-        guard proc.terminationStatus == 0 else {
-            throw SelfTestFailure.failed("update helper script should pass bash -n")
-        }
-
         let fm = FileManager.default
         let helperRoot = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("dictor-update-helper-test-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: helperRoot, withIntermediateDirectories: false)
         defer { try? fm.removeItem(at: helperRoot) }
 
-        let helperPath = try writePrivateUpdateHelperScript(script,
+        let helperPath = try writePrivateUpdateHelperScript(directScript,
                                                             directory: helperRoot.path,
                                                             fileName: "helper.sh")
         var createdStat = stat()
@@ -3108,7 +3057,7 @@ enum DictorSelfTest {
                    "update helper script should not be hard-linked")
         try expect(
             String(data: try Data(contentsOf: URL(fileURLWithPath: helperPath)), encoding: .utf8),
-            equals: script,
+            equals: directScript,
             "update helper script file should contain the generated script"
         )
 
@@ -3267,8 +3216,28 @@ enum DictorSelfTest {
             throw SelfTestFailure.failed("direct update replacement failed: \(processOutput)")
         }
 
-        try DictorUpdateInstaller.validateApp(at: currentApp,
-                                                     expectedVersion: "9.8.7")
+        if selfTestHasSigningIdentity {
+            try DictorUpdateInstaller.validateApp(at: currentApp,
+                                                  expectedVersion: "9.8.7")
+
+            // Обратная сторона пиннинга: сборка с чужой подписью обязана
+            // отлетать. Без этой проверки регрессия в требовании прошла бы
+            // незамеченной — «валидный» бандл валиден в обоих случаях.
+            let foreignApp = root.appendingPathComponent("Foreign.app", isDirectory: true)
+            try makeSyntheticSignedUpdateApp(at: foreignApp, version: "9.8.7", identity: "-")
+            let renamed = root.appendingPathComponent("Dictor.app", isDirectory: true)
+            try fileManager.moveItem(at: foreignApp, to: renamed)
+            var rejected = false
+            do {
+                try DictorUpdateInstaller.validateApp(at: renamed, expectedVersion: "9.8.7")
+            } catch {
+                rejected = true
+            }
+            try expect(rejected, equals: true,
+                       "an ad-hoc signed build must not satisfy the pinned code requirement")
+        } else {
+            log("self-test: no 'Dictor Dev' identity, skipping pinned signature checks")
+        }
         try expect(fileManager.fileExists(atPath: backupApp.path), equals: false,
                    "successful direct update should remove its backup")
         try expect(fileManager.fileExists(atPath: workDirectory.path), equals: false,
@@ -3279,7 +3248,8 @@ enum DictorSelfTest {
     }
 
     private static func makeSyntheticSignedUpdateApp(at appURL: URL,
-                                                     version: String) throws {
+                                                     version: String,
+                                                     identity: String? = nil) throws {
         guard let sourceExecutable = Bundle.main.executableURL else {
             throw SelfTestFailure.failed("self-test executable URL is unavailable")
         }
@@ -3302,11 +3272,26 @@ enum DictorSelfTest {
                                                           format: .xml,
                                                           options: 0)
         try infoData.write(to: appURL.appendingPathComponent("Contents/Info.plist"))
-        let signing = DictorAgentService.run("/usr/bin/codesign",
-                                                   ["--force", "--deep", "--sign", "-", appURL.path])
+        let signing = DictorAgentService.run(
+            "/usr/bin/codesign",
+            ["--force", "--deep", "--sign", identity ?? selfTestSigningIdentity(), appURL.path])
         guard signing.status == 0 else {
             throw SelfTestFailure.failed("could not sign synthetic update app: \(signing.output)")
         }
+    }
+
+    /// Апдейтер ставит только сборки, подписанные «Dictor Dev»
+    /// (UPDATE_SIGNING_CERT_SHA1), поэтому синтетический бандл подписываем
+    /// тем же сертификатом. Ad-hoc остаётся запасным вариантом для машин без
+    /// сертификата — там проверка подписи в тесте пропускается.
+    private static func selfTestSigningIdentity() -> String {
+        let identities = DictorAgentService.run(
+            "/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"])
+        return identities.output.contains("\"Dictor Dev\"") ? "Dictor Dev" : "-"
+    }
+
+    private static var selfTestHasSigningIdentity: Bool {
+        selfTestSigningIdentity() != "-"
     }
 
     private static func testUpdateProgressState() throws {

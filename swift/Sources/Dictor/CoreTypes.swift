@@ -33,14 +33,39 @@ let MIN_CLIP_SECONDS: Double = 0.25
 let UPDATE_CHECK_FIRST_DELAY_SECONDS: TimeInterval = 30
 let UPDATE_CHECK_INTERVAL_SECONDS: TimeInterval = 6 * 3600  // 6h
 let UPDATE_REMIND_LATER_SECONDS: TimeInterval = 24 * 3600  // 24h
-let GITHUB_LATEST_RELEASE_URL = URL(string: "https://api.github.com/repos/shlgd/Dictor/releases/latest")!
-let GITHUB_REPOSITORY_PAGE = URL(string: "https://github.com/shlgd/Dictor")!
-let GITHUB_RELEASES_PAGE = URL(string: "https://github.com/shlgd/Dictor/releases/latest")!
-let GITHUB_UPDATE_MANIFEST_URL = URL(string: "https://raw.githubusercontent.com/shlgd/Dictor/main/update.json")!
+// Канал обновлений. Исходники Dictor лежат в приватном репозитории, а
+// ассеты приватного репозитория GitHub отдаёт только по токену — зашивать
+// его в раздаваемое приложение значит раздать вместе с ним доступ к коду.
+// Поэтому готовые файлы живут на своём хостинге, и в приложении нет никаких
+// учётных данных.
+let UPDATE_CHANNEL_PAGE = URL(string: "https://dictor.raulgumerov.com/")!
+let UPDATE_MANIFEST_URL = URL(string: "https://dictor.raulgumerov.com/update.json")!
+
+/// Адрес архива выводится из версии, а не берётся из манифеста: иначе
+/// подменённый манифест мог бы увести загрузку на чужой хост.
+func updateArchiveURL(forVersion version: String) -> URL {
+    UPDATE_CHANNEL_PAGE.appendingPathComponent("Dictor-\(version).zip")
+}
 let UPDATE_ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
-let HOMEBREW_CASK_TAP = "shlgd/dictor"
-let HOMEBREW_CASK_TOKEN = "shlgd/dictor/dictor"
-let HOMEBREW_CASK_INSTALLED_TOKEN = "dictor"
+
+/// Отпечаток сертификата, которым подписывается Dictor. Обновление ставится
+/// только если новая сборка подписана именно им.
+///
+/// Без этого `codesign --verify` подтверждал лишь целостность бандла — что
+/// подпись есть и совпадает с содержимым. Чья подпись, он не спрашивал, и
+/// любая корректно подписанная сборка проходила проверку: кто угодно, кто
+/// смог бы подсунуть файл по адресу обновлений, получил бы выполнение кода
+/// на всех машинах.
+///
+/// Если сертификат «Dictor Dev» будет перевыпущен, значение надо обновить,
+/// иначе обновления перестанут ставиться. `scripts/check.sh` сверяет его со
+/// связкой ключей.
+let UPDATE_SIGNING_CERT_SHA1 = "1FE86FCD948E9DCE5229E1C4E7B5B30FE3036C94"
+
+/// Требование, которому обязана удовлетворять скачанная сборка.
+var updateCodeRequirement: String {
+    "=identifier \"com.raul.dictor\" and certificate leaf = H\"\(UPDATE_SIGNING_CERT_SHA1)\""
+}
 let INSTALLED_APP_BUNDLE_PATH = "/Applications/Dictor.app"
 let AGENT_ARGUMENT = "--agent"
 let AGENT_LABEL = "com.raul.dictor.agent"
@@ -1052,7 +1077,7 @@ enum UpdateCheckResult: String, Equatable {
     }
 }
 
-func updateCheckResult(for release: GitHubRelease?,
+func updateCheckResult(for release: DictorRelease?,
                        currentVersion: String,
                        skippedVersions: [String]) -> UpdateCheckResult {
     guard let release else { return .failed }
