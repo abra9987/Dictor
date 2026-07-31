@@ -157,7 +157,7 @@ swift/.build/debug/Dictor --export-hud-animation      <dir> [ru|en]
 Releases go out with `./scripts/make-release.sh --notes "…"`, which builds,
 verifies the archive against the same signature requirement the updater
 enforces, publishes it and tags the commit. See
-[DISTRIBUTION.md](DISTRIBUTION.md) for how the update channel works, and
+[docs/updates.md](docs/updates.md) for how the update channel works, and
 [CHANGELOG.md](CHANGELOG.md) for the version history.
 
 ## Credits
