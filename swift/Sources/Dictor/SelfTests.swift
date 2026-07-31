@@ -1660,6 +1660,48 @@ enum DictorSelfTest {
             "correction count should track applied non-overlapping replacements"
         )
 
+        // Обещания диалога «В словарь» из «Истории». Он говорит человеку три
+        // вещи, и каждая должна быть правдой — иначе это дефект того же рода,
+        // что «Хранить историю: 10» над архивом на десять тысяч записей.
+        let promised = [TranscriptCorrection(source: "пятниц", replacement: "пятниц")]
+
+        // 1. «Слово находится целиком»: форма с окончанием — другое слово.
+        try expect(
+            TranscriptCorrector.apply(to: "до пятницы", corrections: promised).appliedCount,
+            equals: 0,
+            "a correction must not fire inside a longer word form"
+        )
+        // 2. «...и в любом регистре».
+        try expect(
+            TranscriptCorrector.apply(
+                to: "ПЯТНИЦ",
+                corrections: [TranscriptCorrection(source: "пятниц", replacement: "пятниц!")]
+            ).appliedCount,
+            equals: 1,
+            "matching must ignore case, as the dialog promises"
+        )
+        // 3. «...а подставляется ровно так, как написано справа»: регистр
+        // найденного слова не переносится на замену. Диалог обещает именно
+        // это, потому что движок именно так и делает.
+        try expect(
+            TranscriptCorrector.apply(
+                to: "Диктор молодец",
+                corrections: [TranscriptCorrection(source: "диктор", replacement: "Dictor")]
+            ).text,
+            equals: "Dictor молодец",
+            "replacement text must be inserted verbatim, not case-matched to the source"
+        )
+        // Выделение из «Истории» приходит как есть — с пробелами по краям,
+        // если человек прихватил лишнего мышью. Нормализация их снимает,
+        // иначе запись не совпала бы ни с чем.
+        try expect(
+            normalizedTranscriptCorrections([
+                TranscriptCorrection(source: "  пятниц \n", replacement: " пятниц ")
+            ]),
+            equals: [TranscriptCorrection(source: "пятниц", replacement: "пятниц")],
+            "a selection dragged from the history pane must survive trimming"
+        )
+
         let transferred = try TranscriptCorrectionsTransfer.decode(
             TranscriptCorrectionsTransfer.encode([
                 TranscriptCorrection(source: "  Right Option  ", replacement: "R-Option")
