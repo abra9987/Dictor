@@ -120,13 +120,17 @@ if launchArguments.first == "--export-status-preview" {
     }
 }
 if launchArguments.first == "--export-popover-preview" {
-    guard launchArguments.count == 2 else {
-        fputs("usage: Dictor --export-popover-preview <directory>\n", stderr)
+    guard launchArguments.count == 2 || launchArguments.count == 3 else {
+        fputs("usage: Dictor --export-popover-preview <directory> [ru|en]\n", stderr)
         exit(EXIT_FAILURE)
     }
     do {
+        let popoverLanguage: InterfaceLanguage = launchArguments.count > 2
+            ? (launchArguments[2].lowercased().hasPrefix("en") ? .english : .russian)
+            : .russian
         try exportQuickPanelPreviews(to: URL(fileURLWithPath: launchArguments[1],
-                                             isDirectory: true))
+                                             isDirectory: true),
+                                     language: popoverLanguage)
         exit(EXIT_SUCCESS)
     } catch {
         fputs("popover preview export failed: \(error.localizedDescription)\n", stderr)
