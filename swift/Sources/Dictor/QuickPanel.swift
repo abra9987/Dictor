@@ -15,6 +15,8 @@ protocol QuickPanelDelegate: AnyObject {
     func quickPanelOpenSettings()
     func quickPanelOpenHistory()
     func quickPanelQuit()
+    func quickPanelInstallUpdate()
+    func quickPanelCheckForUpdates()
 }
 
 struct QuickPanelState {
@@ -30,6 +32,12 @@ struct QuickPanelState {
     var todayAudioSeconds: Double
     var weekBars: [CGFloat]
     var interfaceLanguage: InterfaceLanguage
+    /// Версия, которую предлагает канал обновлений, если она есть. Панель —
+    /// то, что открывается левым кликом, то есть единственное меню, которое
+    /// человек вообще видит; предложение обновиться обязано быть и здесь.
+    var availableUpdateVersion: String?
+    var installedVersion: String
+    var isCheckingForUpdates: Bool
 }
 
 @MainActor
@@ -39,6 +47,11 @@ final class DictorQuickPanel: NSPanel {
     private let contentStack = NSStackView()
     private var waveView: QuickPanelWaveView?
     private var outsideClickMonitor: Any?
+    /// Проверка, которая ничего не нашла, обязана это сказать. Иначе нажатие
+    /// «Проверить» выглядит как нажатие в пустоту — а именно за этим человек
+    /// и нажимал.
+    private var showsUpToDate = false
+    private var upToDateWorkItem: DispatchWorkItem?
 
     static let panelWidth: CGFloat = 360
 
@@ -160,6 +173,7 @@ final class DictorQuickPanel: NSPanel {
         stack.addArrangedSubview(hairline())
         stack.addArrangedSubview(statsRow())
         stack.addArrangedSubview(hairline(inset: 0))
+        stack.addArrangedSubview(updateRow())
         stack.addArrangedSubview(footerRow())
 
         container.addSubview(stack)
@@ -251,6 +265,91 @@ final class DictorQuickPanel: NSPanel {
             toggle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
         return row
+    }
+
+    /// Предложение обновиться. Подложка голосового цвета, потому что это
+    /// единственная строка панели, которая появляется не всегда, и её
+    /// незаметность означала бы, что обновления снова нет.
+    private func updateRow() -> NSView {
+        let row = PaperBackgroundView()
+        let caption: NSTextField
+        let button: NSButton
+
+        if let version = state.availableUpdateVersion {
+            // Единственная строка панели, которая появляется не всегда, —
+            // и потому единственная, которой позволено быть цветной. Заливка
+            // разбавленная: на плотном оранжевом надпись кнопки тонет, а это
+            // ровно та кнопка, ради которой строка и нужна.
+            row.fill = NSColor(name: nil) { appearance in
+                appearance.isDark
+                    ? NSColor(hex: 0xFF6B47).withAlphaComponent(0.16)
+                    : NSColor(hex: 0xE8502F).withAlphaComponent(0.10)
+            }
+            caption = label(t("Доступна версия \(version)", "Version \(version) is available"),
+                            size: 12.5, weight: .medium, color: SD.C.ink)
+            button = NSButton(title: t("Обновить", "Update"),
+                              target: self, action: #selector(installUpdateClicked))
+            button.contentTintColor = SD.C.voice
+        } else if showsUpToDate {
+            row.fill = .clear
+            caption = label(t("Установлена последняя версия — \(state.installedVersion)",
+                              "You are on the latest version — \(state.installedVersion)"),
+                            size: 12, color: SD.C.graphite)
+            button = NSButton(title: "", target: nil, action: nil)
+            button.isHidden = true
+        } else if state.isCheckingForUpdates {
+            row.fill = .clear
+            caption = label(t("Проверяю обновления…", "Checking for updates…"),
+                            size: 12, color: SD.C.graphite)
+            button = NSButton(title: "", target: nil, action: nil)
+            button.isHidden = true
+        } else {
+            row.fill = .clear
+            caption = label(t("Версия \(state.installedVersion)",
+                              "Version \(state.installedVersion)"),
+                            size: 12, color: SD.C.graphite)
+            button = NSButton(title: t("Проверить", "Check"),
+                              target: self, action: #selector(checkUpdatesClicked))
+            button.contentTintColor = SD.C.ink
+        }
+        button.isBordered = false
+        button.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+
+        for view in [caption, button] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: 36),
+            row.widthAnchor.constraint(equalToConstant: Self.panelWidth),
+            caption.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+            caption.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            button.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+            button.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+        ])
+        return row
+    }
+
+    @objc private func installUpdateClicked() {
+        close()
+        quickDelegate?.quickPanelInstallUpdate()
+    }
+
+    @objc private func checkUpdatesClicked() {
+        quickDelegate?.quickPanelCheckForUpdates()
+    }
+
+    func flashUpToDate() {
+        upToDateWorkItem?.cancel()
+        showsUpToDate = true
+        rebuildContent()
+        let revert = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.showsUpToDate = false
+            self.rebuildContent()
+        }
+        upToDateWorkItem = revert
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: revert)
     }
 
     private func languageRow() -> NSView {
@@ -668,9 +767,14 @@ final class QuickPanelFooterView: NSView {
 func exportQuickPanelPreviews(to directory: URL) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     var exported = 0
-    for (suffix, appearanceName, language) in
+    // Строка обновления живёт в двух видах — «версия и кнопка проверки» и
+    // «доступна новая версия». Снимаем оба: цветная строка появляется редко,
+    // и увидеть её иначе можно только дождавшись релиза.
+    for (base, appearanceName, language) in
         [("light", NSAppearance.Name.aqua, InterfaceLanguage.russian),
          ("dark", NSAppearance.Name.darkAqua, InterfaceLanguage.russian)] {
+      for (variant, offered) in [("", String?.none), ("-update", .some("1.1.3"))] {
+        let suffix = base + variant
         let now = Date()
         let state = QuickPanelState(
             statusTitle: language == .russian ? "Слушаю хоткей" : "Listening for hotkey",
@@ -699,7 +803,10 @@ func exportQuickPanelPreviews(to directory: URL) throws {
             todayCharacters: 7192,
             todayAudioSeconds: 810,
             weekBars: [0.3, 0.55, 0.4, 0.8, 0.65, 1.0, 0.5],
-            interfaceLanguage: language
+            interfaceLanguage: language,
+            availableUpdateVersion: offered,
+            installedVersion: "1.1.2",
+            isCheckingForUpdates: false
         )
         let panel = DictorQuickPanel(state: state)
         panel.appearance = NSAppearance(named: appearanceName)
@@ -720,6 +827,7 @@ func exportQuickPanelPreviews(to directory: URL) throws {
         try png.write(to: directory.appendingPathComponent("popover-\(suffix).png"),
                       options: .atomic)
         exported += 1
+      }
     }
     guard exported > 0 else {
         throw SettingsPreviewExportError(message: "nothing exported")
