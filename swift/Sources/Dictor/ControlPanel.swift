@@ -78,6 +78,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var refreshTimer: Timer?
     private var serviceOperation: ControlPanelServiceOperation?
     private var updateTask: Task<Void, Never>?
+    /// Состояние, навязанное экспортом превью, — в живом окне всегда nil.
+    private var previewStatusOverride: ServiceStatusKind?
     private var updateState: ControlPanelUpdateState = .checking
     private var lastRenderFingerprint = ""
     private let settings = Settings.shared
@@ -1258,41 +1260,83 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return root
     }
 
-    /// Низ сайдбара: зелёная точка + состояние службы, второй строкой — модель.
-    private func makeSidebarStatusView() -> NSView {
+    /// Текущее состояние службы — одно из девяти (макет 8). Раньше их было
+    /// два, «готово» и «остановлена», и между ними прятались проверка модели,
+    /// её загрузка, прогрев и обновление приложения. После обновления это было
+    /// особенно плохо: служба поднимается заново, а подвал утверждал, что она
+    /// остановлена, — человек не знал, ждать или чинить.
+    func currentServiceStatus() -> ServiceStatusKind {
+        if let previewStatusOverride { return previewStatusOverride }
         let state = AgentRuntimeStateStore.read()
         let running = DictorAgentService.isAgentRunning()
-        let ready = running && state?.status == "ready"
 
-        let dot = SDStatusDotView()
-        dot.color = ready ? SD.C.positive : (running ? SD.C.voice : SD.C.subtle)
-        dot.translatesAutoresizingMaskIntoConstraints = false
+        if state?.isUpdating == true { return .updating }
+        if let operation = serviceOperation, operation != .stopping { return .starting }
+        if !settings.agentEnabled && !running { return .off }
+        if !running { return .failed }
 
-        let title: String
-        if let operation = serviceOperation {
-            // Пока служба перезапускается, об этом надо сказать: иначе
-            // смена хоткея выглядит как «ничего не произошло».
-            dot.color = SD.C.voice
-            title = operationTitle(operation)
-        } else if !running {
-            title = t("Служба остановлена", "Service stopped")
-        } else if ready {
-            title = t("Готово к диктовке", "Ready to dictate")
-        } else {
-            title = state?.detail ?? t("Запускается…", "Starting…")
+        if let missing = state?.missingPermissions, let first = missing.first,
+           let permission = Permission(rawValue: first) {
+            return .needsPermission(name: permissionTitle(permission))
         }
-        let titleLabel = panelLabel(title, size: 11.5, color: SD.C.inkSecondary)
+
+        switch state?.status {
+        case "ready":
+            return .ready(latencyMilliseconds: state?.medianLatencyMilliseconds)
+        case "error":
+            return .failed
+        default:
+            if let verified = state?.verifiedModelFiles, let total = state?.totalModelFiles {
+                return .verifying(done: verified, total: total)
+            }
+            if state?.speechModelReady == false,
+               state?.downloadProgressFraction != nil || state?.downloadedModelFiles != nil {
+                return .downloading(fraction: state?.downloadProgressFraction,
+                                    files: state?.downloadedModelFiles,
+                                    totalFiles: state?.totalDownloadModelFiles)
+            }
+            if state?.speechModelReady == true { return .warmingUp }
+            return .starting
+        }
+    }
+
+    /// Низ сайдбара по макету 8a. Маркер 7×7 в 16 px от края, заголовок 11,5,
+    /// вторая строка 11 — и то, и другое всегда на одном месте: меняется
+    /// только форма маркера, движение и высота подвала.
+    private func makeSidebarStatusView() -> NSView {
+        let kind = currentServiceStatus()
+        let view = serviceStatusPresentation(kind, language: language)
+
+        let marker = ServiceStatusMarkerView()
+        marker.translatesAutoresizingMaskIntoConstraints = false
+        switch kind {
+        case .ready: marker.shape = .dot(SD.C.positive)
+        case .off: marker.shape = .hollowRing
+        case .needsPermission: marker.shape = .hollowSquare
+        case .failed: marker.shape = .filledSquare(SD.C.danger)
+        default: marker.shape = .wave(slow: kind.waveIsSlow)
+        }
+
+        let titleLabel = panelLabel(view.title,
+                                    size: 11.5,
+                                    weight: view.wantsAttention ? .semibold : .regular,
+                                    color: view.wantsAttention
+                                        ? SD.C.ink
+                                        : (kind == .off ? SD.C.subtle : SD.C.inkSecondary))
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        let head = NSStackView(views: [dot, titleLabel])
+        let head = NSStackView(views: [marker, titleLabel])
         head.orientation = .horizontal
         head.alignment = .centerY
         head.spacing = 8
 
-        let detail = panelLabel(
-            t("Parakeet · локально", "Parakeet · on-device"),
-            size: 11, color: SD.C.subtle)
-        detail.lineBreakMode = .byTruncatingTail
+        let detail = panelLabel(view.subtitle, size: 11,
+                                color: kind == .off ? SD.C.hintText : SD.C.subtle)
+        // Две строки и перенос по словам: «Parakeet · локально · отклик 180 мс»
+        // в 188 px одной строкой не помещается, а многоточие вместо числа —
+        // ровно та подпись, ради которой строка и нужна.
+        detail.maximumNumberOfLines = 2
+        detail.preferredMaxLayoutWidth = 188
 
         let hairline = SDHairlineView()
         let column = NSStackView(views: [hairline, head, detail])
@@ -1303,7 +1347,64 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         column.setCustomSpacing(14, after: hairline)
         column.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
+        // Прогресс: засечки по числу файлов модели либо сплошная полоса
+        // загрузки. И то, и другое — под второй строкой, с отступом 7.
+        if let ticks = view.ticks {
+            let ticksView = ServiceStatusTicksView()
+            ticksView.done = ticks.done
+            ticksView.total = ticks.total
+            ticksView.translatesAutoresizingMaskIntoConstraints = false
+            ticksView.heightAnchor.constraint(equalToConstant: 5).isActive = true
+            column.addArrangedSubview(ticksView)
+            column.setCustomSpacing(7, after: detail)
+            ticksView.widthAnchor.constraint(equalToConstant: 188).isActive = true
+        } else if let fraction = view.progressFraction {
+            let bar = ServiceStatusProgressView()
+            bar.fraction = fraction
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.heightAnchor.constraint(equalToConstant: 5).isActive = true
+            column.addArrangedSubview(bar)
+            column.setCustomSpacing(7, after: detail)
+            bar.widthAnchor.constraint(equalToConstant: 188).isActive = true
+        }
+
+        // Кнопка есть только там, где нужен человек, — она и есть сигнал.
+        if let primary = view.primaryAction {
+            let button = SDSolidButton(title: primary,
+                                       target: self,
+                                       action: #selector(serviceStatusPrimaryClicked(_:)))
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.heightAnchor.constraint(equalToConstant: 24).isActive = true
+            if let secondary = view.secondaryAction {
+                let quiet = SDSecondaryButton(title: secondary,
+                                              target: self,
+                                              action: #selector(serviceStatusSecondaryClicked(_:)))
+                quiet.translatesAutoresizingMaskIntoConstraints = false
+                quiet.heightAnchor.constraint(equalToConstant: 24).isActive = true
+                let row = NSStackView(views: [button, quiet])
+                row.orientation = .horizontal
+                row.alignment = .centerY
+                row.spacing = 6
+                row.distribution = .fill
+                // Главная кнопка занимает остаток строки, тихая — по тексту.
+                // Без этого «Запустить» сжималась до многоточия.
+                quiet.setContentHuggingPriority(.required, for: .horizontal)
+                quiet.setContentCompressionResistancePriority(.required, for: .horizontal)
+                button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                row.translatesAutoresizingMaskIntoConstraints = false
+                column.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalToConstant: 188).isActive = true
+            } else {
+                column.addArrangedSubview(button)
+                button.widthAnchor.constraint(equalToConstant: 188).isActive = true
+            }
+            column.setCustomSpacing(8, after: column.arrangedSubviews[column.arrangedSubviews.count - 2])
+        }
+
+        let container = ServiceStatusFooterView()
+        // Подложка лёгким тревожным цветом — только у отказа. У «нужен доступ»
+        // подложки нет: это ожидание действия, а не поломка.
+        container.fill = kind == .failed ? SD.C.dangerWash : .clear
         container.addSubview(column)
         NSLayoutConstraint.activate([
             column.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -1313,6 +1414,38 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         ])
         hairline.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
         return container
+    }
+
+    /// Точка входа для рендера: собирает подвал для заданного состояния,
+    /// не спрашивая живую службу.
+    func serviceStatusFooterPreview(for kind: ServiceStatusKind,
+                                    language: InterfaceLanguage) -> NSView {
+        previewStatusOverride = kind
+        defer { previewStatusOverride = nil }
+        return makeSidebarStatusView()
+    }
+
+    @objc private func serviceStatusPrimaryClicked(_ sender: Any?) {
+        switch currentServiceStatus() {
+        case .needsPermission:
+            mainSection = .settings
+            settingsTab = "advanced"
+            settingsDraft = ControlPanelSettingsDraft(settings: settings)
+            refresh(force: true)
+        case .failed:
+            settings.agentEnabled = true
+            _ = settings.refreshFromDisk()
+            beginServiceOperation(.starting)
+        default:
+            break
+        }
+    }
+
+    @objc private func serviceStatusSecondaryClicked(_ sender: Any?) {
+        mainSection = .settings
+        settingsTab = "advanced"
+        settingsDraft = ControlPanelSettingsDraft(settings: settings)
+        refresh(force: true)
     }
 
     /// Поповер попросил открыть раздел в уже запущенном окне.

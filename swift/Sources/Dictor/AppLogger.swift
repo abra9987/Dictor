@@ -70,6 +70,21 @@ struct AgentRuntimeState: Codable {
     var hotkeyName: String
     var triggerMode: String
     var downloadProgressFraction: Double?
+    // Ниже — то, что окно показывает человеку, пока служба ещё не готова.
+    // Раньше публиковался только статус, и «Остановлена» выглядела одинаково
+    // и когда всё сломано, и когда идёт обычный запуск.
+    /// Сколько файлов модели уже проверено и сколько всего (21).
+    var verifiedModelFiles: Int?
+    var totalModelFiles: Int?
+    /// Скачано файлов модели из общего числа. Байты FluidAudio не отдаёт,
+    /// поэтому мегабайты не показываем — оценка, выданная за факт, хуже
+    /// отсутствия числа.
+    var downloadedModelFiles: Int?
+    var totalDownloadModelFiles: Int?
+    /// Медиана времени распознавания последних тридцати диктовок, мс.
+    var medianLatencyMilliseconds: Int?
+    /// Приложение сейчас заменяет само себя.
+    var isUpdating: Bool?
 }
 
 enum AgentRuntimeStateStore {

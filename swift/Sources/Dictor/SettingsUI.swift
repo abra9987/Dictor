@@ -112,6 +112,18 @@ final class SDSolidButton: NSButton {
         didSet { restyle() }
     }
 
+    /// Красимся при создании, а не только при смене темы. Раньше `restyle()`
+    /// звали лишь из `viewDidChangeEffectiveAppearance`, и только что созданная
+    /// кнопка до первой смены темы выглядела системной — то есть не такой, как
+    /// в макете.
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        restyle()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
     func restyle() {
         wantsLayer = true
         layer?.cornerRadius = 8
