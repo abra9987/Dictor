@@ -3588,10 +3588,26 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func quitClicked(_ sender: NSMenuItem) {
+        quitApplicationCompletely()
+    }
+
+    /// Единственный выход из Dictor, куда бы на него ни нажали: «Выйти» в
+    /// поповере, «Quit Dictor» в служебном меню, ⌘Q в окне. Все три обязаны
+    /// делать одно и то же, иначе «выйти» означает разное в зависимости от
+    /// того, откуда вышли, — а человек видит одно приложение.
+    private func quitApplicationCompletely() {
         guard confirmStopDictation() else { return }
+        // Окно — отдельный процесс, и раньше выход его не касался: иконка из
+        // меню-бара исчезала, а приложение оставалось на экране и в Dock.
+        DistributedNotificationCenter.default().postNotificationName(
+            CONTROL_PANEL_QUIT_NOTIFICATION,
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true)
         // Снять службу обязательно: у тех, кто ставил прошлую версию, в plist
         // остался KeepAlive: true, и без bootout launchd поднял бы агента
         // обратно — выход выглядел бы как «приложение не закрывается».
+        log("quit: stopping the service and closing the window")
         DictorAgentService.stopForQuit()
         NSApp.terminate(self)
     }
@@ -6632,7 +6648,14 @@ extension DictorApp: QuickPanelDelegate {
         openControlPanelFromAgent(section: "history")
     }
 
+    /// «Выйти» в поповере — та кнопка, которой люди действительно выходят:
+    /// поповер открывается левым кликом, а меню с «Quit Dictor» — правым,
+    /// куда мало кто заходит. Она же и не выходила толком: завершала процесс
+    /// службы, оставляя открытое окно жить своей жизнью и не снимая launchd,
+    /// так что «Выйти» выглядело как «пропала иконка».
+    ///
+    /// Теперь это тот же полный выход, что и в меню.
     func quickPanelQuit() {
-        NSApp.terminate(self)
+        quitApplicationCompletely()
     }
 }

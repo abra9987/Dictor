@@ -106,6 +106,12 @@ let HOTKEY_CAPTURE_END_NOTIFICATION = Notification.Name("com.raul.dictor.hotkey-
 /// и «Настройки» ведут в приложение, а не открывают ещё одно окно.
 let CONTROL_PANEL_SECTION_NOTIFICATION = Notification.Name("com.raul.dictor.open-section")
 let CONTROL_PANEL_SECTION_ARGUMENT = "--section"
+
+/// «Выйти» в меню-баре закрывает и окно. Dictor — два процесса: служба с
+/// иконкой в меню-баре и окно; выход из одного другого не касался, поэтому
+/// после «Выйти» иконка пропадала, а приложение продолжало висеть на экране
+/// и в Dock. Для человека это одно приложение, и выход должен быть один.
+let CONTROL_PANEL_QUIT_NOTIFICATION = Notification.Name("com.raul.dictor.quit-panel")
 let HOTKEY_CAPTURE_FAILSAFE_SECONDS: TimeInterval = 45
 let DICTATION_ERROR_FLASH_SECONDS: TimeInterval = 1.5  // how long the menu-bar icon flags a dropped dictation before returning to idle
 let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]

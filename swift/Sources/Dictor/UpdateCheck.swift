@@ -481,6 +481,7 @@ func dictorDirectUpdateHelperScript(pid: pid_t,
     APP_PARENT="$(/usr/bin/dirname "$APP_PATH")"
     INFO_PLIST="$APP_PATH/Contents/Info.plist"
     SERVICE="gui/$(/usr/bin/id -u)/\#(agentLabel)"
+    AGENT_PLIST="$HOME/Library/LaunchAgents/\#(agentLabel).plist"
 
     timestamp() {
         /bin/date -u '+%Y-%m-%dT%H:%M:%SZ'
@@ -549,7 +550,13 @@ func dictorDirectUpdateHelperScript(pid: pid_t,
     wait_for_panel_exit || rollback
 
     /bin/launchctl bootout "$SERVICE" >/dev/null 2>&1 || true
-    /usr/bin/pkill -f "$APP_PATH/Contents/MacOS/Dictor --agent" >/dev/null 2>&1 || true
+    # Снимаем ВСЕ процессы приложения, а не только службу. Dictor — это ещё и
+    # окно, отдельный процесс; оно переживало подмену бандла, и тогда финальный
+    # `open` не запускал ничего нового: macOS видел живое приложение с тем же
+    # идентификатором и просто выводил его вперёд. Ставить службу обратно
+    # оказывалось некому — обновление проходило, а диктовка исчезала.
+    /usr/bin/pkill -f "$APP_PATH/Contents/MacOS/Dictor" >/dev/null 2>&1 || true
+    /bin/sleep 1
 
     state "installing" \#(shellSingleQuoted(installing))
     /bin/mv "$APP_PATH" "$BACKUP_APP" || rollback
@@ -562,6 +569,14 @@ func dictorDirectUpdateHelperScript(pid: pid_t,
     state "relaunching" \#(shellSingleQuoted(relaunching))
     if [ "$SHOULD_RELAUNCH" = "1" ]; then
         /usr/bin/open "$APP_PATH" || rollback
+        # Службу поднимаем сами, а не надеемся, что это сделает запущенное
+        # приложение: диктовка — то, ради чего Dictor стоит на машине, и
+        # обновление не имеет права её потерять. Если приложение поднимет
+        # службу первым, bootstrap просто вернёт ошибку «уже загружена».
+        if [ -f "$AGENT_PLIST" ]; then
+            /bin/sleep 2
+            /bin/launchctl bootstrap "gui/$(/usr/bin/id -u)" "$AGENT_PLIST" >/dev/null 2>&1 || true
+        fi
     fi
     /bin/sleep 2
     state "complete" \#(shellSingleQuoted(complete))

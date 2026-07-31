@@ -132,6 +132,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             selector: #selector(openSectionRequested(_:)),
             name: CONTROL_PANEL_SECTION_NOTIFICATION,
             object: nil)
+        // «Выйти» в меню-баре закрывает и это окно: Dictor — одно приложение,
+        // хоть и два процесса.
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(quitRequestedByAgent(_:)),
+            name: CONTROL_PANEL_QUIT_NOTIFICATION,
+            object: nil)
         showWindow()
         startRefreshTimer()
         checkForUpdates()
@@ -271,6 +278,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         appMenu.addItem(withTitle: t("Закрыть окно", "Close Window"),
                         action: #selector(NSWindow.performClose(_:)),
                         keyEquivalent: "w")
+        appMenu.addItem(.separator())
+        // ⌘Q не делал ничего: пункта «Выйти» в меню не было, а без пункта
+        // сочетание некому обработать. Выход здесь — полный: и окно, и
+        // служба, потому что «выйти из приложения» не означает «оставить
+        // половину работать».
+        let quit = appMenu.addItem(withTitle: t("Выйти из Dictor", "Quit Dictor"),
+                                   action: #selector(quitEverythingClicked(_:)),
+                                   keyEquivalent: "q")
+        quit.target = self
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
 
@@ -667,9 +683,69 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: t("Звуки", "Sounds"),
             subtitle: t("Сигналы начала, конца и ошибки диктовки",
                         "Cues for start, finish and errors"),
-            control: soundsToggle,
-            hairline: false
+            control: soundsToggle
         ))
+
+        root.addArrangedSubview(versionRow())
+    }
+
+    /// Версия и проверка обновлений. Ни того, ни другого в интерфейсе не было:
+    /// номер версии человек мог узнать только из «О программе» в меню-баре, а
+    /// проверить обновления вручную — никак, оставалось ждать автоматической
+    /// проверки раз в шесть часов. Для приложения, которое обновляет себя само
+    /// и не лежит в App Store, это две вещи, которые спрашивают первыми.
+    private func versionRow() -> NSView {
+        let version = monoValueLabel("v\(currentBundleVersion())")
+        let button: NSButton
+        let subtitle: String
+
+        switch updateState {
+        case .checking:
+            subtitle = t("Проверяю обновления…", "Checking for updates…")
+            button = panelButton(t("Проверить", "Check"),
+                                 action: #selector(updateRowButtonClicked(_:)),
+                                 enabled: false)
+        case .upToDate:
+            subtitle = t("Установлена последняя версия", "This is the latest version")
+            button = panelButton(t("Проверить", "Check"),
+                                 action: #selector(updateRowButtonClicked(_:)))
+        case .available(let release):
+            subtitle = t("Доступна версия \(release.version) — скачается, проверится и установится",
+                         "Version \(release.version) is available — it downloads, verifies and installs")
+            button = panelButton(t("Обновить", "Update"),
+                                 action: #selector(updateRowButtonClicked(_:)))
+        case .preparing(let target, let phase):
+            subtitle = "\(t("Обновляю до", "Updating to")) \(target): \(phase)"
+            button = panelButton(t("Обновить", "Update"),
+                                 action: #selector(updateRowButtonClicked(_:)),
+                                 enabled: false)
+        case .failed(let message):
+            subtitle = message
+            button = panelButton(t("Повторить", "Retry"),
+                                 action: #selector(updateRowButtonClicked(_:)))
+        }
+        button.controlSize = .small
+
+        let control = NSStackView(views: [version, button])
+        control.orientation = .horizontal
+        control.alignment = .centerY
+        control.spacing = 10
+
+        return SDRowView(title: t("Версия", "Version"),
+                         subtitle: subtitle,
+                         control: control,
+                         hairline: false)
+    }
+
+    @objc private func updateRowButtonClicked(_ sender: NSButton) {
+        switch updateState {
+        case .available(let release):
+            beginInAppUpdate(for: release)
+        case .checking, .preparing:
+            return
+        case .upToDate, .failed:
+            checkForUpdates()
+        }
     }
 
     @objc private func selectMicrophoneFromPanel(_ sender: NSPopUpButton) {
@@ -1251,6 +1327,41 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refresh(force: true)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Служба уходит и уводит окно за собой. Останавливать её отсюда не надо —
+    /// она уже сняла себя сама, а повторный bootout из второго процесса только
+    /// гонялся бы за уже мёртвым джобом.
+    @objc private func quitRequestedByAgent(_ notification: Notification) {
+        log("control panel: quitting because the menu-bar app is quitting")
+        NSApp.terminate(nil)
+    }
+
+    /// ⌘Q и «Выйти из Dictor» в меню окна. Раньше выход из окна оставлял
+    /// службу работать: иконка в меню-баре, живой хоткей и процесс, который
+    /// человек только что попросил закрыть. Спрашиваем, потому что диктовка
+    /// перестанет работать до следующего запуска, и потому что рядом есть
+    /// «Закрыть окно» — ровно для случая «уберите с глаз, но не выключайте».
+    @objc private func quitEverythingClicked(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = t("Выйти из Dictor?", "Quit Dictor?")
+        alert.informativeText = t(
+            "Диктовка по \(settings.configuredHotkey.name) перестанет работать, пока вы не "
+            + "откроете Dictor снова. Чтобы убрать окно и оставить диктовку — "
+            + "«Закрыть окно» (⌘W).",
+            "Dictation on \(settings.configuredHotkey.name) will stop until you open Dictor "
+            + "again. To hide the window and keep dictation running, use Close "
+            + "Window (⌘W).")
+        alert.addButton(withTitle: t("Оставить работать", "Keep Running"))
+        alert.addButton(withTitle: t("Выйти", "Quit"))
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        log("control panel: quitting the app and the dictation service")
+        // Здесь ждать можно: это окно, а не агент. Дедлок ловил только сам
+        // агент, который своим bootout ждал собственной смерти.
+        DictorAgentService.stop()
+        settings.agentEnabled = false
+        NSApp.terminate(nil)
     }
 
     @objc private func sidebarItemClicked(_ sender: SDSidebarItemView) {
@@ -3179,6 +3290,55 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             }
             self.lastRenderFingerprint = ""
             self.refresh(force: true)
+        }
+    }
+
+    /// Установка из окна. Путь тот же, что у «Update now…» в меню-баре, —
+    /// `launchPreparedDictorUpdate`; отличается только тем, что ход работы
+    /// видно прямо в строке настроек, а не в пункте меню.
+    private func beginInAppUpdate(for release: DictorRelease) {
+        guard updateTask == nil else { return }
+        let version = release.version
+        updateState = .preparing(
+            version: version,
+            phase: t("получаю манифест…", "fetching the manifest…"))
+        refresh(force: true)
+        updateTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let manifest = try await DictorUpdateInstaller.fetchManifest(
+                    expectedVersion: version)
+                guard !Task.isCancelled else { return }
+                self.updateState = .preparing(
+                    version: version,
+                    phase: self.t("скачиваю и проверяю SHA-256…",
+                                  "downloading and verifying SHA-256…"))
+                self.refresh(force: true)
+                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest)
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: prepared.workDirectory)
+                    return
+                }
+                self.updateState = .preparing(
+                    version: version,
+                    phase: self.t("архив проверен, ставлю…",
+                                  "archive verified, installing…"))
+                self.refresh(force: true)
+                // Скрипт ждёт смерти этого процесса, чтобы подменить бандл.
+                // Уходим с дороги сразу после запуска.
+                try launchPreparedDictorUpdate(prepared, language: self.language)
+                self.updateTask = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    NSApp.terminate(nil)
+                }
+            } catch {
+                self.updateTask = nil
+                let message = (error as? DictorUpdateInstallerError)?
+                    .message(language: self.language) ?? error.localizedDescription
+                self.updateState = .failed(message)
+                self.lastRenderFingerprint = ""
+                self.refresh(force: true)
+            }
         }
     }
 
