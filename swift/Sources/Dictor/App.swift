@@ -963,6 +963,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var errorImage: NSImage?
     private var recordingStartedAtUptime: TimeInterval?
     private var quickPanel: DictorQuickPanel?
+    /// Пауза перед показом коротких состояний службы (макет 8c) — та же, что
+    /// в подвале окна, чтобы шапка панели и подвал не расходились словами.
+    private let quickPanelStatusHold = ServiceStatusHold()
+    private var quickPanelStatusHoldTimer: Timer?
     private var isDictationPaused = false
     private var menuBarGlyphPhase: CGFloat = 0
     private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
@@ -6640,7 +6644,33 @@ extension DictorApp: QuickPanelDelegate {
 
     /// Состояние службы для панели. Агент — это и есть служба, поэтому здесь
     /// оно известно напрямую, без чтения файла состояния.
+    ///
+    /// Наружу — состояние, выдержавшее паузу (макет 8c): прогрев длится 0,2 с
+    /// и в шапке успевал только мигнуть.
     private func quickPanelServiceStatus() -> ServiceStatusKind {
+        let settled = quickPanelStatusHold.settle(rawQuickPanelServiceStatus())
+        scheduleQuickPanelStatusWakeup()
+        return settled
+    }
+
+    /// Пока панель открыта, созревшую паузу некому донести до экрана: шапка
+    /// пересобирается по событиям службы, а их в этот момент может не быть.
+    private func scheduleQuickPanelStatusWakeup() {
+        quickPanelStatusHoldTimer?.invalidate()
+        quickPanelStatusHoldTimer = nil
+        guard let deadline = quickPanelStatusHold.pendingDeadline,
+              quickPanel?.isVisible == true else { return }
+        let delay = max(0.05, deadline.timeIntervalSinceNow)
+        quickPanelStatusHoldTimer = Timer.scheduledTimer(withTimeInterval: delay,
+                                                         repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.quickPanel?.isVisible == true else { return }
+                self.quickPanel?.apply(state: self.quickPanelState())
+            }
+        }
+    }
+
+    private func rawQuickPanelServiceStatus() -> ServiceStatusKind {
         if installingUpdateVersion != nil { return .updating }
         if !settings.agentEnabled { return .off }
         if let missing = missingPermissions().first {

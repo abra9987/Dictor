@@ -55,6 +55,112 @@ enum ServiceStatusKind: Equatable {
     /// Обновление живёт в своём ритме: 1,62 с против 0,9 с у остальных.
     /// «Это не ваша спешка» — так в макете.
     var waveIsSlow: Bool { self == .updating }
+
+    /// Только случай, без чисел внутри. «17 из 21» и «18 из 21» — одно и то же
+    /// состояние с новыми числами, а не смена состояния: паузу перед показом
+    /// оно начинать не должно, иначе прогресс замрёт.
+    var identity: String {
+        switch self {
+        case .ready: return "ready"
+        case .starting: return "starting"
+        case .verifying: return "verifying"
+        case .downloading: return "downloading"
+        case .warmingUp: return "warmingUp"
+        case .updating: return "updating"
+        case .needsPermission: return "needsPermission"
+        case .failed: return "failed"
+        case .off: return "off"
+        case .versionMismatch: return "versionMismatch"
+        }
+    }
+
+    /// Случай вместе с числами — для отпечатка перерисовки окна. Без него
+    /// созревшая пауза не доживала бы до экрана: отпечаток считается по сырому
+    /// состоянию службы, а оно к этому моменту уже не меняется.
+    var fingerprint: String {
+        switch self {
+        case .ready(let latency):
+            return "ready:\(latency.map(String.init) ?? "-")"
+        case .verifying(let done, let total):
+            return "verifying:\(done)/\(total)"
+        case .downloading(let fraction, let files, let totalFiles):
+            let percent = fraction.map { String(Int(($0 * 100).rounded())) } ?? "-"
+            return "downloading:\(percent):\(files.map(String.init) ?? "-")/\(totalFiles.map(String.init) ?? "-")"
+        case .needsPermission(let name):
+            return "needsPermission:\(name)"
+        case .versionMismatch(let running, let installed):
+            return "versionMismatch:\(running)→\(installed)"
+        case .starting, .warmingUp, .updating, .failed, .off:
+            return identity
+        }
+    }
+}
+
+/// Пауза перед показом нового состояния (макет 8c).
+///
+/// Прогрев длится 0,2 с, быстрая проверка файлов модели — меньше секунды.
+/// Показанные честно, они успевают только мигнуть, и подвал сайдбара дёргается
+/// на ровном месте. В макете это сказано прямо: «мигание хуже, чем ничего» —
+/// состояние короче 400 мс не показываем вовсе, а перед показом ждём 250 мс.
+///
+/// Работает так: новое состояние сначала становится кандидатом. Если через
+/// 250 мс служба всё ещё в нём — показываем. Если за это время состояние
+/// сменилось ещё раз — предыдущий кандидат не показывается никогда.
+/// Числа внутри того же состояния (файл 12 из 21) проходят сразу: это не смена
+/// состояния, и задерживать прогресс было бы враньём в другую сторону.
+final class ServiceStatusHold {
+    /// Из макета. Меньше — снова мигает, больше — «готово» приходит с
+    /// заметным опозданием.
+    static let delay: TimeInterval = 0.25
+
+    private var displayed: ServiceStatusKind?
+    private var candidate: ServiceStatusKind?
+    private var candidateSince: Date?
+
+    /// Когда кандидат имеет право выйти на экран. Окно заводит на это время
+    /// будильник: таймер обновления тикает раз в 0,75 с, и без будильника
+    /// созревшее состояние ждало бы следующего тика.
+    private(set) var pendingDeadline: Date?
+
+    /// Первое состояние показываем сразу — паузу держать не от чего, а пустой
+    /// подвал при запуске окна хуже любого мигания.
+    func settle(_ raw: ServiceStatusKind, now: Date = Date()) -> ServiceStatusKind {
+        guard let shown = displayed else {
+            displayed = raw
+            candidate = nil
+            candidateSince = nil
+            pendingDeadline = nil
+            return raw
+        }
+
+        if raw.identity == shown.identity {
+            // То же состояние: числа обновляем, кандидата (если был) забываем —
+            // служба вернулась туда, где и была.
+            displayed = raw
+            candidate = nil
+            candidateSince = nil
+            pendingDeadline = nil
+            return raw
+        }
+
+        if candidate?.identity != raw.identity {
+            candidate = raw
+            candidateSince = now
+            pendingDeadline = now.addingTimeInterval(Self.delay)
+            return shown
+        }
+
+        // Кандидат тот же — обновляем его числа и смотрим, выдержал ли паузу.
+        candidate = raw
+        guard let since = candidateSince, now.timeIntervalSince(since) >= Self.delay else {
+            return shown
+        }
+        displayed = raw
+        candidate = nil
+        candidateSince = nil
+        pendingDeadline = nil
+        return raw
+    }
 }
 
 /// Что показывать в подвале сайдбара: две строки, необязательный прогресс и
