@@ -3043,6 +3043,14 @@ enum DictorSelfTest {
             "wait_for_panel_exit || rollback",
             "SERVICE=\"gui/$(/usr/bin/id -u)/\(AGENT_LABEL)\"",
             "launchctl bootout \"$SERVICE\"",
+            // Окно — отдельный процесс, и оно переживало подмену бандла:
+            // финальный `open` тогда лишь поднимал уже живое приложение,
+            // нового процесса не появлялось, и службу ставить было некому.
+            // Обновление проходило, а диктовка исчезала.
+            "/usr/bin/pkill -f \"$APP_PATH/Contents/MacOS/Dictor\"",
+            // И служба поднимается явно, а не в надежде на запущенное
+            // приложение: диктовка — то, ради чего Dictor стоит на машине.
+            "/bin/launchctl bootstrap \"gui/$(/usr/bin/id -u)\" \"$AGENT_PLIST\"",
             "/bin/mv \"$APP_PATH\" \"$BACKUP_APP\" || rollback",
             "/usr/bin/ditto \"$STAGED_APP\" \"$APP_PATH\" || rollback",
             "/usr/bin/codesign --verify --deep --strict \"$APP_PATH\"",
