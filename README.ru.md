@@ -106,7 +106,7 @@ swift build --package-path swift            # check.sh не компилируе
 swift/.build/debug/Dictor --self-test all
 ```
 
-Подробности о канале обновлений — в [DISTRIBUTION.md](DISTRIBUTION.md), история
+Подробности о канале обновлений — в [docs/updates.md](docs/updates.md), история
 версий — в [CHANGELOG.md](CHANGELOG.md).
 
 ## Благодарности

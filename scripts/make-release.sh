@@ -15,8 +15,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SSH_HOST="${DICTOR_RELEASE_HOST:-my-server}"
-REMOTE_DIR="${DICTOR_RELEASE_DIR:-/srv/dictor}"
+# Куда выкладывать — в scripts/release.env, которого нет в репозитории:
+# адрес сервера и путь на нём это карта для того, кто захочет подменить
+# обновление, и в открытом репозитории им делать нечего. Пример — в
+# scripts/release.env.example.
+RELEASE_ENV="$ROOT_DIR/scripts/release.env"
+# shellcheck source=/dev/null
+[[ -f "$RELEASE_ENV" ]] && source "$RELEASE_ENV"
+
+SSH_HOST="${DICTOR_RELEASE_HOST:-}"
+REMOTE_DIR="${DICTOR_RELEASE_DIR:-}"
 CHANNEL_URL="${DICTOR_CHANNEL_URL:-https://dictor.raulgumerov.com}"
 # Репозиторий проекта. Пока он не создан, `origin` смотрит на апстрим, из
 # которого Dictor вырос, — туда тег отправлять нельзя. Скрипт советует push
@@ -161,6 +169,9 @@ if (( DRY_RUN )); then
 fi
 
 # --- Выкладка --------------------------------------------------------------
+
+[[ -n "$SSH_HOST" && -n "$REMOTE_DIR" ]] || fail \
+    "Не задано, куда выкладывать. Создайте scripts/release.env по образцу scripts/release.env.example."
 
 say "Выкладываем на ${SSH_HOST}:${REMOTE_DIR}…"
 ssh "$SSH_HOST" "mkdir -p '$REMOTE_DIR'" \
