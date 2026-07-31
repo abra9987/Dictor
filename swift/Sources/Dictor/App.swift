@@ -3760,7 +3760,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                               downloadedModelFiles: downloadedModelFiles,
                               totalDownloadModelFiles: totalDownloadModelFiles,
                               medianLatencyMilliseconds: medianLatencyMilliseconds,
-                              isUpdating: installingUpdateVersion != nil)
+                              isUpdating: installingUpdateVersion != nil,
+                              appVersion: currentBundleVersion())
         )
     }
 
@@ -6637,6 +6638,29 @@ extension DictorApp: QuickPanelDelegate {
         panel.toggle(relativeTo: sender, state: quickPanelState())
     }
 
+    /// Состояние службы для панели. Агент — это и есть служба, поэтому здесь
+    /// оно известно напрямую, без чтения файла состояния.
+    private func quickPanelServiceStatus() -> ServiceStatusKind {
+        if installingUpdateVersion != nil { return .updating }
+        if !settings.agentEnabled { return .off }
+        if let missing = missingPermissions().first {
+            return .needsPermission(name: missing.rawValue)
+        }
+        if let verified = verifiedModelFiles, let total = totalModelFiles {
+            return .verifying(done: verified, total: total)
+        }
+        if !isSpeechModelReady {
+            if speechModelStartupProgressFraction != nil || downloadedModelFiles != nil {
+                return .downloading(fraction: speechModelStartupProgressFraction,
+                                    files: downloadedModelFiles,
+                                    totalFiles: totalDownloadModelFiles)
+            }
+            return .starting
+        }
+        if !isReady { return .warmingUp }
+        return .ready(latencyMilliseconds: medianLatencyMilliseconds)
+    }
+
     func quickPanelState() -> QuickPanelState {
         let language = settings.interfaceLanguage
         let title: String
@@ -6695,7 +6719,8 @@ extension DictorApp: QuickPanelDelegate {
         ,
                                availableUpdateVersion: pendingUpdate?.version,
                                installedVersion: currentBundleVersion(),
-                               isCheckingForUpdates: isCheckingForUpdates)
+                               isCheckingForUpdates: isCheckingForUpdates,
+                               serviceStatus: quickPanelServiceStatus())
     }
 
     func quickPanelDidToggleEnabled(_ enabled: Bool) {
@@ -6786,6 +6811,27 @@ extension DictorApp: QuickPanelDelegate {
     /// Ручная проверка из панели. Обработчик для неё существовал с самого
     /// начала, но не был подключён ни к одному элементу интерфейса: узнать о
     /// новой версии можно было только дождавшись автоматической проверки.
+    /// «Открыть Настройки» / «Запустить» / «Перезапустить службу» из шапки
+    /// панели — те же действия, что и в подвале окна.
+    func quickPanelStatusPrimaryAction() {
+        switch quickPanelServiceStatus() {
+        case .needsPermission:
+            openControlPanelFromAgent(section: "settings")
+        case .failed, .versionMismatch:
+            // Перезапускать службу из неё самой нельзя: `bootout` ждал бы
+            // смерти этого же процесса и повесил бы главный поток. Открываем
+            // окно — там перезапуск делает отдельный процесс, и там же видно,
+            // чем всё кончилось.
+            openControlPanelFromAgent(section: "settings")
+        default:
+            break
+        }
+    }
+
+    func quickPanelStatusSecondaryAction() {
+        openControlPanelFromAgent(section: "settings")
+    }
+
     func quickPanelCheckForUpdates() {
         guard !isCheckingForUpdates else { return }
         isCheckingForUpdates = true

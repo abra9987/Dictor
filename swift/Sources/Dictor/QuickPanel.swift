@@ -17,6 +17,8 @@ protocol QuickPanelDelegate: AnyObject {
     func quickPanelQuit()
     func quickPanelInstallUpdate()
     func quickPanelCheckForUpdates()
+    func quickPanelStatusPrimaryAction()
+    func quickPanelStatusSecondaryAction()
 }
 
 struct QuickPanelState {
@@ -38,6 +40,9 @@ struct QuickPanelState {
     var availableUpdateVersion: String?
     var installedVersion: String
     var isCheckingForUpdates: Bool
+    /// Состояние службы — одно из девяти (макет 8b). Панель показывает его
+    /// теми же словами, что и подвал окна.
+    var serviceStatus: ServiceStatusKind
 }
 
 @MainActor
@@ -228,43 +233,163 @@ final class DictorQuickPanel: NSPanel {
 
     // MARK: - Ряды
 
+    /// Шапка панели по макету 8b. Маркер 8×8, заголовок 14/600, подпись 12,
+    /// тумблер 36×22 — всё на одном месте во всех девяти состояниях; меняются
+    /// форма маркера, тексты, высота и наличие кнопок.
+    ///
+    /// Раньше здесь всегда стояла волна: она шла и когда служба готова, и
+    /// когда лежит. Движение — обещание работы, и обещать его в состоянии
+    /// покоя значит врать; теперь в «Готово» стоит зелёная точка, а волна
+    /// появляется ровно тогда, когда что-то действительно происходит.
     private func headerRow() -> NSView {
-        // Макет: padding 16px 16px 14px, заголовок 13/600 ink + волна,
-        // подпись 11 graphite, коралловый тумблер 36×22.
+        let kind = state.serviceStatus
+        let view = serviceStatusPresentation(kind, language: state.interfaceLanguage)
+
         let row = NSView()
-        let title = label(state.statusTitle, size: 13, weight: .semibold, color: SD.C.ink)
-        let wave = QuickPanelWaveView()
-        wave.isActive = state.enabled
-        wave.isHot = state.isRecording
-        waveView = wave
-        let subtitle = label(state.statusSubtitle, size: 11, color: SD.C.graphite)
+        let marker = ServiceStatusMarkerView()
+        marker.markerSize = 8
+        switch kind {
+        case .ready: marker.shape = .dot(SD.C.positive)
+        case .off: marker.shape = .hollowRing
+        case .needsPermission, .versionMismatch: marker.shape = .hollowSquare
+        case .failed: marker.shape = .filledSquare(SD.C.danger)
+        default: marker.shape = .wave(slow: kind.waveIsSlow)
+        }
+
+        let title = label(view.title, size: 14, weight: .semibold,
+                          color: kind == .off ? SD.C.graphite : SD.C.ink)
+        let subtitle = label(view.subtitle, size: 12,
+                             color: kind == .off ? SD.C.hintText : SD.C.graphite)
+        subtitle.maximumNumberOfLines = 2
+        subtitle.preferredMaxLayoutWidth = Self.panelWidth - 32 - 36 - 12
+
         let toggle = SDToggle()
         toggle.isOn = state.enabled
+        // Во время обновления тумблер не нажимается: служба и так сейчас
+        // сменится, а нажатие в этот момент только запутает.
+        toggle.isEnabled = kind != .updating
+        toggle.alphaValue = kind == .updating ? 0.45 : 1
         toggle.onToggle = { [weak self] enabled in
             self?.quickDelegate?.quickPanelDidToggleEnabled(enabled)
         }
 
-        for view in [title, wave, subtitle, toggle] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(view)
+        let head = NSStackView(views: [marker, title])
+        head.orientation = .horizontal
+        head.alignment = .centerY
+        head.spacing = 8
+
+        let textColumn = NSStackView(views: [head, subtitle])
+        textColumn.orientation = .vertical
+        textColumn.alignment = .leading
+        textColumn.spacing = 3
+
+        for sub in [textColumn, toggle] {
+            sub.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(sub)
         }
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 62),
             toggle.widthAnchor.constraint(equalToConstant: 36),
             toggle.heightAnchor.constraint(equalToConstant: 22),
-            title.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
-            title.topAnchor.constraint(equalTo: row.topAnchor, constant: 16),
-            wave.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 8),
-            wave.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-            wave.widthAnchor.constraint(equalToConstant: 26),
-            wave.heightAnchor.constraint(equalToConstant: 10),
-            subtitle.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2),
-            subtitle.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor, constant: -8),
             toggle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
-            toggle.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            textColumn.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+            textColumn.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor,
+                                                 constant: -12),
+            textColumn.topAnchor.constraint(equalTo: row.topAnchor, constant: 12),
         ])
+
+        // Прогресс и кнопки — только там, где они есть по макету.
+        var lastAnchor: NSView = textColumn
+        if let ticks = view.ticks {
+            let ticksView = ServiceStatusTicksView()
+            ticksView.done = ticks.done
+            ticksView.total = ticks.total
+            ticksView.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(ticksView)
+            NSLayoutConstraint.activate([
+                ticksView.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+                ticksView.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+                ticksView.topAnchor.constraint(equalTo: textColumn.bottomAnchor, constant: 8),
+                ticksView.heightAnchor.constraint(equalToConstant: 5),
+            ])
+            lastAnchor = ticksView
+        } else if let fraction = view.progressFraction {
+            let bar = ServiceStatusProgressView()
+            bar.fraction = fraction
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(bar)
+            NSLayoutConstraint.activate([
+                bar.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+                bar.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+                bar.topAnchor.constraint(equalTo: textColumn.bottomAnchor, constant: 8),
+                bar.heightAnchor.constraint(equalToConstant: 5),
+            ])
+            lastAnchor = bar
+        }
+
+        if let primary = view.primaryAction {
+            let buttons = NSStackView()
+            buttons.orientation = .horizontal
+            buttons.alignment = .centerY
+            buttons.spacing = 8
+            buttons.translatesAutoresizingMaskIntoConstraints = false
+
+            let main = NSButton(title: primary, target: self,
+                                action: #selector(statusPrimaryClicked))
+            main.isBordered = false
+            main.wantsLayer = true
+            main.layer?.cornerRadius = 8
+            main.layer?.backgroundColor = main.resolvedCGColor(SD.C.voice)
+            main.contentTintColor = .white
+            main.font = .systemFont(ofSize: 12, weight: .semibold)
+            main.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            buttons.addArrangedSubview(main)
+
+            if let secondary = view.secondaryAction {
+                let quiet = NSButton(title: secondary, target: self,
+                                     action: #selector(statusSecondaryClicked))
+                quiet.isBordered = false
+                quiet.font = .systemFont(ofSize: 12, weight: .medium)
+                quiet.contentTintColor = SD.C.inkSecondary
+                quiet.heightAnchor.constraint(equalToConstant: 28).isActive = true
+                buttons.addArrangedSubview(quiet)
+            }
+            buttons.addArrangedSubview(NSView())
+
+            row.addSubview(buttons)
+            NSLayoutConstraint.activate([
+                buttons.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+                buttons.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+                buttons.topAnchor.constraint(equalTo: lastAnchor.bottomAnchor, constant: 10),
+            ])
+            lastAnchor = buttons
+        }
+
+        row.bottomAnchor.constraint(equalTo: lastAnchor.bottomAnchor, constant: 12).isActive = true
+
+        // Отказ подсвечен той же лёгкой подложкой, что и в подвале окна.
+        if kind == .failed {
+            let wash = ServiceStatusFooterView()
+            wash.fill = SD.C.dangerWash
+            wash.translatesAutoresizingMaskIntoConstraints = false
+            row.addSubview(wash, positioned: .below, relativeTo: nil)
+            NSLayoutConstraint.activate([
+                wash.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+                wash.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+                wash.topAnchor.constraint(equalTo: row.topAnchor),
+                wash.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            ])
+        }
         return row
+    }
+
+    @objc private func statusPrimaryClicked() {
+        close()
+        quickDelegate?.quickPanelStatusPrimaryAction()
+    }
+
+    @objc private func statusSecondaryClicked() {
+        close()
+        quickDelegate?.quickPanelStatusSecondaryAction()
     }
 
     /// Предложение обновиться. Подложка голосового цвета, потому что это
@@ -806,7 +931,8 @@ func exportQuickPanelPreviews(to directory: URL) throws {
             interfaceLanguage: language,
             availableUpdateVersion: offered,
             installedVersion: "1.1.2",
-            isCheckingForUpdates: false
+            isCheckingForUpdates: false,
+            serviceStatus: .ready(latencyMilliseconds: 180)
         )
         let panel = DictorQuickPanel(state: state)
         panel.appearance = NSAppearance(named: appearanceName)
