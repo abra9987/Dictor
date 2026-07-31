@@ -18,6 +18,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_HOST="${DICTOR_RELEASE_HOST:-my-server}"
 REMOTE_DIR="${DICTOR_RELEASE_DIR:-/srv/dictor}"
 CHANNEL_URL="${DICTOR_CHANNEL_URL:-https://dictor.raulgumerov.com}"
+# Репозиторий проекта. Пока он не создан, `origin` смотрит на апстрим, из
+# которого Dictor вырос, — туда тег отправлять нельзя. Скрипт советует push
+# только когда `origin` действительно наш; задайте DICTOR_ORIGIN_MATCH, когда
+# приватный репозиторий появится.
+ORIGIN_MATCH="${DICTOR_ORIGIN_MATCH:-abra9987/Dictor}"
 DRY_RUN=0
 NOTES=""
 
@@ -179,4 +184,16 @@ REMOTE_SHA="$(curl -fsS --max-time 120 "$CHANNEL_URL/Dictor-$VERSION.zip" | shas
 
 git tag -a "$TAG" -m "Dictor $VERSION"
 say "Готово: $TAG выложен на $CHANNEL_URL"
-say "Тег создан локально. Отправить: git push origin $TAG"
+
+# Раздача от git-репозитория не зависит: канал обновлений уже получил всё,
+# что нужно людям. Тег — только метка для истории, и отправлять его есть
+# смысл лишь в свой репозиторий.
+ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+if [[ -n "$ORIGIN_URL" && "$ORIGIN_URL" == *"$ORIGIN_MATCH"* ]]; then
+    say "Тег создан локально. Отправить: git push origin $TAG"
+else
+    say "Тег $TAG создан локально и никуда не отправлен."
+    say "  origin = ${ORIGIN_URL:-не задан} — это не репозиторий проекта."
+    say "  Не делайте push: тег уедет в чужой репозиторий."
+    say "  Когда появится свой, задайте DICTOR_ORIGIN_MATCH или смените origin."
+fi
