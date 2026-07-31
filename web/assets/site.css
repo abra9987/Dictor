@@ -1,0 +1,298 @@
+/* Страница канала Dictor.
+ *
+ * Токены — те же, что в приложении (swift/Sources/Dictor/SDTheme.swift):
+ * бумага #F5F4F1, чернила #1C1B19, акцент #E8502F, графит #6E6B66.
+ * Сайт должен читаться как продолжение окна, а не как отдельная витрина,
+ * поэтому здесь нет ни одного цвета и ни одного радиуса со стороны. */
+
+:root {
+    --paper: #F5F4F1;
+    --card: #FFFFFF;
+    --hint: #EAE7E1;
+    --ink: #1C1B19;
+    --ink-2: #3D3B37;
+    --graphite: #6E6B66;
+    --subtle: #A3A09A;
+    --voice: #E8502F;
+    --voice-deep: #C43E20;
+    --positive: #3FA96A;
+    --border: rgba(0, 0, 0, .07);
+    --shadow: 0 1px 3px rgba(0, 0, 0, .06);
+    --enamel-1: rgba(232, 80, 47, .5);
+    --enamel-2: rgba(63, 169, 106, .34);
+    --enamel-3: rgba(232, 138, 47, .42);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --paper: #1E1D1B;
+        --card: #2E2C2A;
+        --hint: #2B2A27;
+        --ink: #F2F1EE;
+        --ink-2: #C9C6C0;
+        --graphite: #A3A09A;
+        --subtle: #6E6B66;
+        --voice: #FF6B47;
+        --voice-deep: #FFC7B8;
+        --positive: #54C083;
+        --border: rgba(255, 255, 255, .08);
+        --shadow: none;
+        --enamel-1: rgba(255, 107, 71, .42);
+        --enamel-2: rgba(75, 190, 122, .28);
+        --enamel-3: rgba(255, 168, 90, .32);
+    }
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 940px; margin: 0 auto; padding: 0 24px; }
+
+a { color: var(--voice-deep); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* --- Шапка ------------------------------------------------------------- */
+
+header.top {
+    display: flex; align-items: center; gap: 14px;
+    padding: 22px 0 0;
+    position: relative; z-index: 1;
+}
+
+.mark { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 15px; }
+
+/* Глиф — та же волна, что в строке состояния: пять полосок, средние выше. */
+.glyph { display: flex; align-items: center; gap: 2px; height: 15px; }
+.glyph i { width: 2px; border-radius: 1px; background: var(--voice); display: block; }
+.glyph i:nth-child(1), .glyph i:nth-child(5) { height: 5px; }
+.glyph i:nth-child(2), .glyph i:nth-child(4) { height: 10px; }
+.glyph i:nth-child(3) { height: 15px; }
+
+header.top nav { margin-left: auto; display: flex; align-items: center; gap: 18px; font-size: 14px; }
+header.top nav a { color: var(--graphite); }
+header.top nav a:hover { color: var(--ink); text-decoration: none; }
+
+/* --- Герой ------------------------------------------------------------- */
+
+/* Герой во всю ширину окна: эмаль, обрезанная по краю колонки, читалась как
+ * прямоугольная плашка, а не как пятно света. */
+.hero { position: relative; overflow: hidden; padding: 0 0 56px; }
+.hero h1 { margin-top: 68px; }
+
+/* Брендовая эмаль: три размытых пятна, плавающих по 20, 27 и 34 секунды.
+ * Периоды взаимно не кратны, поэтому рисунок не повторяется заметно. Тот же
+ * приём, что в подсказке «Сегодня» внутри приложения. */
+.enamel {
+    position: absolute; inset: -45% -8%; pointer-events: none; z-index: 0;
+    /* Снизу эмаль растворяется в бумаге: без этого у неё был бы честный
+     * горизонтальный обрез по нижней границе героя. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 52%, transparent 88%);
+    mask-image: linear-gradient(to bottom, #000 52%, transparent 88%);
+}
+.enamel span { position: absolute; inset: 0; display: block; }
+.enamel span:nth-child(1) {
+    background: radial-gradient(38% 52% at 22% 44%, var(--enamel-1), transparent 70%);
+    filter: blur(26px);
+    animation: drift-a 20s cubic-bezier(.45, .05, .55, .95) infinite alternate;
+}
+.enamel span:nth-child(2) {
+    background: radial-gradient(34% 46% at 76% 56%, var(--enamel-2), transparent 68%);
+    filter: blur(30px);
+    animation: drift-b 27s cubic-bezier(.45, .05, .55, .95) infinite alternate;
+}
+.enamel span:nth-child(3) {
+    background: radial-gradient(30% 40% at 54% 22%, var(--enamel-3), transparent 72%);
+    filter: blur(34px);
+    animation: drift-b 34s cubic-bezier(.45, .05, .55, .95) infinite alternate-reverse;
+}
+
+@keyframes drift-a {
+    from { transform: translate3d(-9%, -8%, 0) scale(1.04); }
+    to   { transform: translate3d(10%, 7%, 0) scale(1.22); }
+}
+@keyframes drift-b {
+    from { transform: translate3d(11%, 7%, 0) scale(1.18); }
+    to   { transform: translate3d(-9%, -7%, 0) scale(1); }
+}
+
+.hero > *:not(.enamel) { position: relative; z-index: 1; }
+
+h1 {
+    margin: 0;
+    font-size: clamp(34px, 6vw, 54px);
+    line-height: 1.08;
+    letter-spacing: -.02em;
+    font-weight: 600;
+    max-width: 16ch;
+}
+
+.lede {
+    margin: 20px 0 0;
+    max-width: 54ch;
+    font-size: clamp(16px, 2.2vw, 19px);
+    line-height: 1.55;
+    color: var(--ink-2);
+}
+
+/* Клавиши хоткея — как в окне: светлая клавиша с тонкой рамкой. */
+kbd {
+    display: inline-block;
+    padding: 1px 7px;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: var(--card);
+    box-shadow: var(--shadow);
+    font: inherit;
+    font-size: .92em;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+}
+
+.cta { margin: 34px 0 0; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+
+.button {
+    display: inline-flex; align-items: baseline; gap: 9px;
+    background: var(--voice); color: #FFF;
+    padding: 13px 22px; border-radius: 9px;
+    font-weight: 600; font-size: 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+.button:hover { background: var(--voice-deep); text-decoration: none; }
+@media (prefers-color-scheme: dark) {
+    .button { color: #1C1B19; }
+    .button:hover { background: #FFC7B8; }
+}
+.button small { font-weight: 500; font-size: 13px; opacity: .82; }
+
+.cta .meta { font-size: 13.5px; color: var(--graphite); line-height: 1.45; }
+
+/* Капсула записи — единственная живая картинка на странице. */
+/* Капсула — по левому краю, как всё остальное в герое. */
+.capsule { margin: 46px 0 0; display: flex; justify-content: flex-start; }
+.capsule img {
+    /* min-width: 0 обязателен: у элемента флексбокса минимальная
+     * ширина по умолчанию равна собственной ширине картинки, и на
+     * узком экране капсула растягивала всю страницу шире окна. */
+    min-width: 0;
+    width: 100%; max-width: 450px; height: auto;
+    filter: drop-shadow(0 6px 18px rgba(0, 0, 0, .18));
+}
+@media (prefers-color-scheme: dark) {
+    .capsule img {
+        filter: drop-shadow(0 0 1px rgba(255, 255, 255, .22))
+                drop-shadow(0 10px 26px rgba(0, 0, 0, .5));
+    }
+}
+
+/* --- Общая раскладка секций -------------------------------------------- */
+
+section { padding: 64px 0; border-top: 1px solid var(--border); }
+section:first-of-type { border-top: 0; }
+
+h2 {
+    margin: 0 0 8px;
+    font-size: clamp(22px, 3.4vw, 28px);
+    letter-spacing: -.01em;
+    font-weight: 600;
+}
+
+.section-lede { margin: 0 0 34px; max-width: 58ch; color: var(--graphite); }
+
+/* --- Три шага ----------------------------------------------------------- */
+
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin: 0; padding: 0; list-style: none; }
+.steps li {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 22px 22px; box-shadow: var(--shadow);
+}
+.steps .n {
+    display: block; font-size: 12px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--voice); margin-bottom: 10px;
+}
+.steps h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+.steps p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--graphite); }
+
+/* --- Экраны ------------------------------------------------------------- */
+
+figure { margin: 0 0 40px; }
+figure:last-child { margin-bottom: 0; }
+figure img {
+    width: 100%; height: auto; display: block;
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+}
+figcaption { margin: 12px 2px 0; font-size: 14.5px; color: var(--graphite); }
+figcaption b { color: var(--ink); font-weight: 600; }
+
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 26px; align-items: start; }
+
+/* --- Карточки «почему локально» ----------------------------------------- */
+
+.facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+.fact {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 22px; box-shadow: var(--shadow);
+}
+.fact h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.fact p { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--graphite); }
+
+/* --- Сравнение ---------------------------------------------------------- */
+
+.table-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 520px; }
+th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+thead th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--subtle); font-weight: 600; }
+tbody th { font-weight: 500; color: var(--ink-2); }
+td.yes { color: var(--positive); font-weight: 600; }
+td.no { color: var(--graphite); }
+table td:nth-child(2) { font-weight: 600; }
+
+/* --- Установка ---------------------------------------------------------- */
+
+ol.install { margin: 0; padding-left: 1.25em; max-width: 62ch; }
+ol.install li { margin-bottom: 14px; line-height: 1.6; }
+ol.install li:last-child { margin-bottom: 0; }
+
+.note {
+    margin: 26px 0 0; padding: 16px 18px;
+    background: var(--hint); border: 1px solid var(--border); border-radius: 12px;
+    font-size: 14.5px; line-height: 1.55; color: var(--ink-2); max-width: 62ch;
+}
+.note b { font-weight: 600; }
+
+/* --- Подвал ------------------------------------------------------------- */
+
+footer {
+    border-top: 1px solid var(--border);
+    padding: 34px 0 56px;
+    font-size: 13.5px; color: var(--graphite);
+}
+footer .links { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+footer code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; background: var(--hint); padding: 2px 6px; border-radius: 4px;
+    word-break: break-all;
+}
+
+/* --- Узкий экран -------------------------------------------------------- */
+
+@media (max-width: 760px) {
+    .steps, .facts { grid-template-columns: 1fr; }
+    .pair { grid-template-columns: 1fr; }
+    .hero { padding-top: 48px; }
+    section { padding: 48px 0; }
+}
+
+/* Уменьшение движения: эмаль остаётся, но замирает — ровно как в приложении. */
+@media (prefers-reduced-motion: reduce) {
+    .enamel span { animation: none; }
+}

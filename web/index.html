@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dictor — диктовка для macOS, которая не отправляет ваш голос никуда</title>
+<meta name="description" content="Зажмите клавишу, скажите — текст появится там, где стоит курсор. Распознавание идёт на самом Mac, на Apple Neural Engine. Без аккаунта, без подписки, работает без интернета.">
+<meta property="og:title" content="Dictor — диктовка для macOS">
+<meta property="og:description" content="Голос не покидает ваш Mac. Распознавание на Neural Engine, история с поиском, свой словарь. Бесплатно, открытый код.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://dictor.raulgumerov.com/">
+<link rel="alternate" hreflang="en" href="https://dictor.raulgumerov.com/en/">
+<link rel="alternate" hreflang="ru" href="https://dictor.raulgumerov.com/">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+
+<div class="hero">
+<div class="enamel" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="wrap">
+<header class="top">
+  <span class="mark">
+    <span class="glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    Dictor
+  </span>
+  <nav>
+    <a href="https://github.com/abra9987/Dictor">Исходный код</a>
+    <a href="en/">English</a>
+  </nav>
+</header>
+
+  <h1>Диктовка, которая не покидает ваш Mac</h1>
+  <p class="lede">
+    Поставьте курсор в любое поле, зажмите <kbd>⌘</kbd> + <kbd>⌥ прав.</kbd>
+    и говорите. Отпустили — текст встал туда, где стоял курсор. Распознаёт
+    сам Mac, на Neural Engine: без аккаунта, без подписки, без облака.
+  </p>
+  <div class="cta">
+    <a class="button" href="Dictor-{{VERSION}}.dmg">
+      Скачать Dictor {{VERSION}} <small>· {{DMG_SIZE}}</small>
+    </a>
+    <span class="meta">
+      Apple Silicon · macOS 14 или новее<br>
+      Бесплатно, открытый код (MIT)
+    </span>
+  </div>
+  <div class="capsule">
+    <img src="assets/ru/capsule.webp" width="449" height="101"
+         alt="Капсула записи: волна звука движется, пока вы говорите">
+  </div>
+</div>
+</div>
+</div>
+
+<div class="wrap">
+
+<section>
+  <h2>Три движения</h2>
+  <p class="section-lede">Ничего не нужно открывать: приложение живёт в строке
+    меню и ждёт клавишу.</p>
+  <ol class="steps">
+    <li>
+      <span class="n">Шаг 1</span>
+      <h3>Поставьте курсор</h3>
+      <p>Письмо, чат, поле поиска, редактор кода — любое место, куда вы обычно
+        печатаете.</p>
+    </li>
+    <li>
+      <span class="n">Шаг 2</span>
+      <h3>Зажмите и говорите</h3>
+      <p>На экране появится капсула с волной — по ней видно, что вас слышно.
+        Можно и переключателем: нажали — говорите, нажали ещё раз — готово.</p>
+    </li>
+    <li>
+      <span class="n">Шаг 3</span>
+      <h3>Отпустите</h3>
+      <p>Текст встанет под курсор. На полминуты речи уходит около полусекунды
+        обработки.</p>
+    </li>
+  </ol>
+</section>
+
+<section>
+  <h2>Как выглядит</h2>
+  <p class="section-lede">Окно открывается из строки меню — но в обычный день
+    оно не нужно вовсе.</p>
+
+  <figure>
+    <img src="assets/ru/today-light.webp" width="1760" height="1293" loading="lazy"
+         alt="Раздел «Сегодня»: сколько слов надиктовано, сколько времени сэкономлено, последние диктовки">
+    <figcaption><b>Сегодня.</b> Сколько наговорили за день, сколько времени не
+      ушло на клавиатуру и что диктовали последним.</figcaption>
+  </figure>
+
+  <div class="pair">
+    <figure>
+      <img src="assets/ru/history-light.webp" width="1760" height="1293" loading="lazy"
+           alt="Раздел «История»: список диктовок, поиск с подсветкой совпадений, полный текст справа">
+      <figcaption><b>История.</b> До 10 000 диктовок, поиск с подсветкой,
+        закрепление нужного.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/ru/stats-light.webp" width="1760" height="1293" loading="lazy"
+           alt="Раздел «Статистика»: график по дням, календарь привычки, выгрузка в CSV">
+      <figcaption><b>Статистика.</b> По неделям, месяцам и годам, с выгрузкой
+        в CSV.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/ru/dictionary-light.webp" width="1760" height="1293" loading="lazy"
+           alt="Раздел «Словарь»: замены для слов, которые модель слышит неверно">
+      <figcaption><b>Словарь.</b> Имя или термин, который модель слышит не так,
+        поправьте один раз.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/ru/today-dark.webp" width="1760" height="1293" loading="lazy"
+           alt="То же окно «Сегодня» в тёмной теме">
+      <figcaption><b>Тёмная тема.</b> Следует за системной, отдельно включать
+        не нужно.</figcaption>
+    </figure>
+  </div>
+
+  <div class="pair" style="margin-top:40px">
+    <figure>
+      <img src="assets/ru/popover.webp" width="720" height="858" loading="lazy"
+           alt="Панель в строке меню: состояние службы, язык, микрофон, последние диктовки">
+      <figcaption><b>Панель в строке меню.</b> Состояние службы, язык, выбор
+        микрофона и последние диктовки — по левому клику.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/ru/settings-light.webp" width="1760" height="1293" loading="lazy"
+           alt="Настройки внутри окна, семь вкладок">
+      <figcaption><b>Настройки.</b> Семь вкладок внутри того же окна: клавиши,
+        язык, звук, словарь, приватность.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section>
+  <h2>Почему это важно</h2>
+  <p class="section-lede">Программы для диктовки просят доверить компании свой
+    голос. Эта — не просит.</p>
+  <div class="facts">
+    <div class="fact">
+      <h3>Голос остаётся здесь</h3>
+      <p>Аудио распознаётся на вашем Mac и удаляется, как только текст готов.
+        Оно не отправляется ни на какой сервер — ни наш, ни чужой.</p>
+    </div>
+    <div class="fact">
+      <h3>Работает в самолёте</h3>
+      <p>Интернет нужен дважды: один раз скачать модель и раз в шесть часов
+        спросить номер последней версии. Проверку можно выключить — тогда
+        приложение не ходит в сеть вовсе.</p>
+    </div>
+    <div class="fact">
+      <h3>Можно проверить</h3>
+      <p>Исходный код открыт целиком под лицензией MIT: что программа делает с
+        вашим голосом, видно построчно, а не со слов разработчика.</p>
+    </div>
+  </div>
+
+  <div class="table-scroll" style="margin-top:34px">
+    <table>
+      <thead>
+        <tr><th></th><th>Dictor</th><th>Облачная диктовка</th><th>Встроенная в macOS</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>Аудио покидает Mac</th><td class="yes">никогда</td><td class="no">каждая запись</td><td class="no">для части языков</td></tr>
+        <tr><th>Работает без интернета</th><td class="yes">да</td><td class="no">нет</td><td class="no">ограниченно</td></tr>
+        <tr><th>Стоимость</th><td class="yes">нет</td><td class="no">помесячно</td><td class="no">нет</td></tr>
+        <tr><th>История с поиском</th><td class="yes">10 000 диктовок</td><td class="no">по-разному</td><td class="no">нет</td></tr>
+        <tr><th>Свой словарь</th><td class="yes">да</td><td class="no">обычно</td><td class="no">нет</td></tr>
+        <tr><th>Языки</th><td class="yes">русский, английский и ещё ~17</td><td class="no">да</td><td class="no">да</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>Установка</h2>
+  <ol class="install">
+    <li>Скачайте <a href="Dictor-{{VERSION}}.dmg">Dictor-{{VERSION}}.dmg</a> и
+      перетащите приложение в «Программы».</li>
+    <li>Запустите. При первом старте macOS спросит доступ к микрофону,
+      универсальному доступу и мониторингу ввода — без них программа не сможет
+      ни услышать вас, ни вставить текст.</li>
+    <li>Зажмите <kbd>⌘</kbd> + <kbd>⌥ прав.</kbd> в любом поле и скажите пару
+      слов. Сочетание можно поменять в настройках.</li>
+  </ol>
+
+  <div class="note">
+    <b>macOS предупредит о неизвестном разработчике.</b> Приложение подписано,
+    но не заверено у Apple — это платная процедура, и пока она не пройдена.
+    Чтобы открыть: Системные настройки → «Конфиденциальность и безопасность» →
+    рядом с именем Dictor нажать «Открыть всё равно». Один раз, при первой
+    установке; обновления такого вопроса уже не задают.
+  </div>
+
+  <div class="note">
+    <b>Обновления приложение ставит само.</b> Оно проверяет номер версии, само
+    показывает окно с описанием изменений и ждёт вашего согласия. Перед
+    установкой сверяет контрольную сумму скачанного архива и его подпись —
+    подменённый архив просто не будет поставлен.
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/abra9987/Dictor">GitHub</a>
+      <a href="https://github.com/abra9987/Dictor/blob/main/CHANGELOG.md">История версий</a>
+      <a href="https://github.com/abra9987/Dictor/blob/main/PRIVACY.md">Приватность</a>
+      <a href="en/">English</a>
+    </div>
+    <p>Версия {{VERSION}} · Apple Silicon · macOS 14+ · лицензия MIT<br>
+      sha256 архива обновления: <code>{{SHA256}}</code></p>
+  </div>
+</footer>
+
+</body>
+</html>

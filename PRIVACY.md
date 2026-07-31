@@ -15,9 +15,18 @@ Dictor is designed for local dictation.
 
 ## Network access
 
-Dictor uses the network only to download the speech model through
-FluidAudio and to check the public GitHub releases endpoint for updates. The
-installer downloads the application from the same public repository. It has no
+Dictor uses the network only to download the speech model through FluidAudio
+and to ask the update channel at `https://dictor.raulgumerov.com` for the
+latest version number, at most once every six hours. Turn the update check off
+in Settings → General and the app stops using the network altogether.
+
+When an update is installed, the archive is downloaded from that same channel;
+its address is derived from the version number rather than taken from the
+manifest, and both its SHA-256 checksum and its code signature are verified
+before anything is replaced.
+
+The request carries no identifier of you or your machine, and nothing is sent
+back: the app asks for a file and reads a version number out of it. There is no
 account system, advertising, analytics, or telemetry.
 
 ## macOS permissions

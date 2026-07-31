@@ -10,6 +10,7 @@
 #   ./scripts/make-release.sh              # собрать, выложить, поставить тег
 #   ./scripts/make-release.sh --dry-run    # собрать и остановиться
 #   ./scripts/make-release.sh --notes "Что нового"
+#   ./scripts/make-release.sh --site-only  # обновить только страницу канала
 #
 
 set -euo pipefail
@@ -32,6 +33,7 @@ CHANNEL_URL="${DICTOR_CHANNEL_URL:-https://dictor.raulgumerov.com}"
 # приватный репозиторий появится.
 ORIGIN_MATCH="${DICTOR_ORIGIN_MATCH:-abra9987/Dictor}"
 DRY_RUN=0
+SITE_ONLY=0
 NOTES=""
 
 say() { printf 'Dictor: %s\n' "$*"; }
@@ -40,6 +42,7 @@ fail() { printf 'Dictor: %s\n' "$*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=1 ;;
+        --site-only) SITE_ONLY=1 ;;
         --notes) shift; NOTES="${1:-}" ;;
         -h|--help) sed -n '2,13p' "$0" | sed 's|^# \{0,1\}||'; exit 0 ;;
         *) fail "Неизвестный ключ: $1" ;;
@@ -64,7 +67,7 @@ TAG="v$VERSION"
 # Чистота дерева и свободный тег защищают публикацию, а не сборку: сухой
 # прогон ничего не выкладывает и не тегает, поэтому его можно запускать
 # посреди работы — иначе скрипт нельзя было бы проверить, не закоммитив.
-if (( ! DRY_RUN )); then
+if (( ! DRY_RUN && ! SITE_ONLY )); then
     if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
         fail "Тег $TAG уже существует. Подними версию в swift/Info.plist."
     fi
@@ -77,6 +80,27 @@ say "Проверки репозитория…"
 ./scripts/check.sh >/dev/null
 
 # --- Сборка ----------------------------------------------------------------
+
+# Страницу канала правят чаще, чем выходят версии. Перевыпускать ради текста
+# архив, образ и тег незачем — и вредно: у людей поменялась бы контрольная
+# сумма уже выложенной версии. В этом режиме версия и sha берутся с канала,
+# то есть описывают ровно те файлы, что там лежат.
+if (( SITE_ONLY )); then
+    say "Только страница: читаем канал…"
+    CHANNEL_JSON="$(curl -fsS --max-time 20 "$CHANNEL_URL/update.json")" \
+        || fail "Канал $CHANNEL_URL не отвечает."
+    VERSION="$(printf '%s' "$CHANNEL_JSON" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+    SHA256="$(printf '%s' "$CHANNEL_JSON" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])')"
+    PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+        swift/Info.plist)"
+    [[ "$VERSION" == "$PLIST_VERSION" ]] || say \
+        "На канале $VERSION, в Info.plist $PLIST_VERSION — страница опишет выложенную."
+    DMG_BYTES="$(curl -fsSI --max-time 20 "$CHANNEL_URL/Dictor-$VERSION.dmg" \
+        | awk 'tolower($1) == "content-length:" { gsub(/\r/, "", $2); print $2 }' | tail -1)"
+    [[ -n "$DMG_BYTES" ]] || fail "Не удалось узнать размер Dictor-$VERSION.dmg на канале."
+else
 
 say "Собираем ${TAG}…"
 ./scripts/build-app.sh "$ROOT_DIR/dist/Dictor.app"
@@ -107,13 +131,16 @@ trap - EXIT
 
 SHA256="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
 SIZE_MB="$(du -m "$ZIP" | cut -f1)"
+DMG_BYTES="$(stat -f%z "$ROOT_DIR/dist/Dictor-$VERSION.dmg")"
 say "Архив: $(basename "$ZIP"), ${SIZE_MB} МБ, sha256 ${SHA256:0:16}…"
+fi
 
 # --- Манифест и страница ---------------------------------------------------
 
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/dictor-release.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 
+if (( ! SITE_ONLY )); then
 python3 - "$STAGE/update.json" "$VERSION" "$SHA256" "$NOTES" <<'PY'
 import json, sys
 path, version, sha256, notes = sys.argv[1:5]
@@ -122,47 +149,49 @@ with open(path, "w", encoding="utf-8") as handle:
               handle, ensure_ascii=False, indent=2)
     handle.write("\n")
 PY
+fi
 
-cat > "$STAGE/index.html" <<HTML
-<!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dictor $VERSION</title>
-<style>
-  body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, sans-serif;
-         max-width: 34rem; margin: 4rem auto; padding: 0 1.25rem;
-         background: #F5F4F1; color: #1C1B19; }
-  h1 { font-size: 2rem; margin: 0 0 .25rem; }
-  .v { color: #6E6B66; margin: 0 0 2rem; }
-  a.dl { display: inline-block; background: #1C1B19; color: #F5F4F1;
-         text-decoration: none; padding: .7rem 1.4rem; border-radius: .5rem;
-         font-weight: 600; }
-  p.small { color: #6E6B66; font-size: .875rem; }
-  code { background: #EAE7E1; padding: .1rem .35rem; border-radius: .25rem; }
-  @media (prefers-color-scheme: dark) {
-    body { background: #1E1D1B; color: #F2F1EE; }
-    .v, p.small { color: #A3A09A; }
-    a.dl { background: #F2F1EE; color: #1C1B19; }
-    code { background: #2B2A27; }
-  }
-</style>
-<h1>Dictor</h1>
-<p class="v">Версия $VERSION · локальная диктовка для macOS</p>
-<p><a class="dl" href="Dictor-$VERSION.dmg">Скачать Dictor-$VERSION.dmg</a></p>
-<p class="small">Apple Silicon, macOS 14 или новее. При первом запуске macOS
-предупредит о неизвестном разработчике: Системные настройки →
-«Конфиденциальность и безопасность» → «Открыть всё равно».</p>
-<p class="small">Установленное приложение обновляется само и спрашивает
-разрешения перед установкой.</p>
-<p class="small">sha256 архива: <code>$SHA256</code></p>
-HTML
+# Страница живёт в web/ и правится отдельно от выпуска. Здесь только
+# подстановка того, что известно лишь в момент релиза: версия, размер образа
+# и контрольная сумма архива.
+[[ -d "$ROOT_DIR/web" ]] || fail "Нет каталога web/ — выкладывать нечего."
+cp -R "$ROOT_DIR/web/." "$STAGE/"
+
+python3 - "$STAGE" "$VERSION" "$SHA256" "$DMG_BYTES" <<'PY'
+import pathlib, sys
+stage, version, sha256, dmg_bytes = sys.argv[1:5]
+# Размер образа — с десятыми и в правописании языка: «4,5 МБ» и «4.5 MB».
+# Целые мегабайты врали на полмегабайта в обе стороны.
+megabytes = f"{int(dmg_bytes) / 1024 / 1024:.1f}"
+sizes = {"index.html": f"{megabytes.replace('.', ',')} МБ",
+         "en/index.html": f"{megabytes} MB"}
+for name, size in sizes.items():
+    path = pathlib.Path(stage) / name
+    if not path.exists():
+        raise SystemExit(f"страница {name} не найдена в web/")
+    text = path.read_text(encoding="utf-8")
+    for token, value in (("{{VERSION}}", version), ("{{SHA256}}", sha256),
+                         ("{{DMG_SIZE}}", size)):
+        text = text.replace(token, value)
+    if "{{" in text:
+        raise SystemExit(f"в {name} остались незаполненные подстановки")
+    path.write_text(text, encoding="utf-8")
+PY
 
 if (( DRY_RUN )); then
+    # Собранный сайт остаётся на диске: страницу нужно открыть и посмотреть
+    # до того, как она уедет на канал, а во временном каталоге её не найти.
+    rm -rf "$ROOT_DIR/dist/site"
+    mkdir -p "$ROOT_DIR/dist/site"
+    cp -R "$STAGE/." "$ROOT_DIR/dist/site/"
     say "Сухой прогон. Готово локально:"
-    say "  $ZIP"
-    say "  $ROOT_DIR/dist/Dictor-$VERSION.dmg"
-    say "  манифест: $STAGE/update.json"
-    cat "$STAGE/update.json"
+    say "  сайт: $ROOT_DIR/dist/site/index.html"
+    if (( ! SITE_ONLY )); then
+        say "  $ZIP"
+        say "  $ROOT_DIR/dist/Dictor-$VERSION.dmg"
+        say "  манифест: $STAGE/update.json"
+        cat "$STAGE/update.json"
+    fi
     trap - EXIT
     rm -rf "$STAGE"
     exit 0
@@ -179,10 +208,29 @@ ssh "$SSH_HOST" "mkdir -p '$REMOTE_DIR'" \
 
 # Порядок важен: сначала файлы, манифест последним. Иначе приложение успеет
 # увидеть новую версию и уйти качать архив, которого ещё нет.
-scp -q "$ZIP" "$ROOT_DIR/dist/Dictor-$VERSION.dmg" "$SSH_HOST:$REMOTE_DIR/"
-scp -q "$STAGE/index.html" "$SSH_HOST:$REMOTE_DIR/"
-scp -q "$STAGE/update.json" "$SSH_HOST:$REMOTE_DIR/"
-ssh "$SSH_HOST" "chmod 644 '$REMOTE_DIR'/*"
+if (( ! SITE_ONLY )); then
+    scp -q "$ZIP" "$ROOT_DIR/dist/Dictor-$VERSION.dmg" "$SSH_HOST:$REMOTE_DIR/"
+fi
+scp -qr "$STAGE/index.html" "$STAGE/en" "$STAGE/assets" "$SSH_HOST:$REMOTE_DIR/"
+if (( ! SITE_ONLY )); then
+    scp -q "$STAGE/update.json" "$SSH_HOST:$REMOTE_DIR/"
+fi
+# Каталоги должны остаться проходимыми, файлы — читаемыми.
+ssh "$SSH_HOST" "find '$REMOTE_DIR' -type d -exec chmod 755 {} + && \
+                 find '$REMOTE_DIR' -type f -exec chmod 644 {} +"
+
+if (( SITE_ONLY )); then
+    say "Проверяем страницу…"
+    for page in "" "en/"; do
+        curl -fsS --max-time 20 "$CHANNEL_URL/$page" >/dev/null \
+            || fail "Страница $CHANNEL_URL/$page не открывается."
+    done
+    # Ссылка на образ — то единственное, ради чего человек сюда пришёл.
+    curl -fsSI --max-time 20 "$CHANNEL_URL/Dictor-$VERSION.dmg" >/dev/null \
+        || fail "Кнопка скачивания ведёт в никуда: Dictor-$VERSION.dmg не отдаётся."
+    say "Готово: страница обновлена на $CHANNEL_URL"
+    exit 0
+fi
 
 say "Проверяем канал…"
 REMOTE_VERSION="$(curl -fsS --max-time 20 "$CHANNEL_URL/update.json" \

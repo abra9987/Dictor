@@ -73,5 +73,39 @@ fi
 grep -q 'func launchPreparedDictorUpdate' swift/Sources/Dictor/UpdateCheck.swift
 grep -q 'launchPreparedDictorUpdate(prepared' swift/Sources/Dictor/App.swift
 
+# Страница канала. Ломается она тихо: битая ссылка на картинку видна только
+# на выложенном сайте, а незаполненная подстановка — только человеку, который
+# пришёл скачивать.
+python3 - <<'PY'
+import pathlib, re, sys
+
+root = pathlib.Path("web")
+pages = [root / "index.html", root / "en" / "index.html"]
+problems = []
+
+for page in pages:
+    if not page.exists():
+        problems.append(f"{page}: страницы нет")
+        continue
+    text = page.read_text(encoding="utf-8")
+    for token in ("{{VERSION}}", "{{SHA256}}", "{{DMG_SIZE}}"):
+        if token not in text:
+            problems.append(f"{page}: нет подстановки {token} — "
+                            "версия на странице замёрзнет")
+    for leftover in set(re.findall(r"\{\{[A-Z_]+\}\}", text)) - {
+            "{{VERSION}}", "{{SHA256}}", "{{DMG_SIZE}}"}:
+        problems.append(f"{page}: неизвестная подстановка {leftover}")
+    for asset in re.findall(r'(?:src|href)="((?:\.\./)?assets/[^"]+)"', text):
+        target = (page.parent / asset).resolve()
+        if not target.exists():
+            problems.append(f"{page}: нет файла {asset}")
+
+if problems:
+    print("Channel page checks failed:", file=sys.stderr)
+    for problem in problems:
+        print("  " + problem, file=sys.stderr)
+    sys.exit(1)
+PY
+
 git diff --check
 printf 'Dictor checks passed (v%s).\n' "$app_version"

@@ -79,7 +79,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private var serviceOperation: ControlPanelServiceOperation?
     private var updateTask: Task<Void, Never>?
     /// Состояние, навязанное экспортом превью, — в живом окне всегда nil.
-    private var previewStatusOverride: ServiceStatusKind?
+    /// Не private: витрина снимается debug-бинарём, у которого нет бандла, и
+    /// подвал честно докладывал «Установлена версия 0.0.0, служба ещё работает
+    /// на 1.2.0». Для снимков состояние задаётся явно.
+    var previewStatusOverride: ServiceStatusKind?
     /// Пауза перед показом коротких состояний службы (макет 8c).
     private let statusHold = ServiceStatusHold()
     private var statusHoldTimer: Timer?
@@ -4295,11 +4298,24 @@ func exportHistoryPanelPreviews(to directory: URL,
     // (макет 8d) рендером нечем.
     let savedDismissedHints = settings.dismissedHints
     settings.dismissedHints = []
+    // Словарь — тоже сэмплами: у чистой копии он пуст, и «Словарь» снимался
+    // пустым экраном «Пока пусто», хотя показывать надо, как раздел работает.
+    let savedCorrections = settings.transcriptCorrections
+    settings.transcriptCorrections = settings.interfaceLanguage == .english
+        ? [TranscriptCorrection(source: "kubernetis", replacement: "Kubernetes"),
+           TranscriptCorrection(source: "postgres ql", replacement: "PostgreSQL"),
+           TranscriptCorrection(source: "raoul", replacement: "Raul"),
+           TranscriptCorrection(source: "dictor app", replacement: "Dictor")]
+        : [TranscriptCorrection(source: "кубернетис", replacement: "Kubernetes"),
+           TranscriptCorrection(source: "постгрес", replacement: "PostgreSQL"),
+           TranscriptCorrection(source: "раул", replacement: "Раул"),
+           TranscriptCorrection(source: "диктор", replacement: "Dictor")]
     defer {
         settings.interfaceLanguage = savedLanguage
         settings.recentTranscriptEntries = savedEntries
         settings.dailyDictationUsage = savedUsage
         settings.dismissedHints = savedDismissedHints
+        settings.transcriptCorrections = savedCorrections
     }
     // Сэмплы на языке интерфейса: английские снимки с русскими диктовками
     // внутри выглядят как незаконченный перевод.
@@ -4340,6 +4356,9 @@ func exportHistoryPanelPreviews(to directory: URL,
     settings.dailyDictationUsage = usage
 
     let panel = DictorControlPanelApp()
+    // Витрина показывает рабочее состояние службы. Без этого подвал сообщал бы
+    // о расхождении версий — правду про запуск из /tmp, но не про программу.
+    panel.previewStatusOverride = .ready(latencyMilliseconds: 180)
     let size = MAIN_WINDOW_SIZE
     let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                           styleMask: [.borderless],
