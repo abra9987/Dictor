@@ -87,6 +87,20 @@ if launchArguments.first == "--export-onboarding-preview" {
         exit(EXIT_FAILURE)
     }
 }
+if launchArguments.first == "--export-update-preview" {
+    guard launchArguments.count == 2 else {
+        fputs("usage: Dictor --export-update-preview <directory>\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+    do {
+        try exportUpdateWindowPreviews(to: URL(fileURLWithPath: launchArguments[1],
+                                               isDirectory: true))
+        exit(EXIT_SUCCESS)
+    } catch {
+        fputs("update preview export failed: \(error.localizedDescription)\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+}
 if launchArguments.first == "--export-popover-preview" {
     guard launchArguments.count == 2 else {
         fputs("usage: Dictor --export-popover-preview <directory>\n", stderr)

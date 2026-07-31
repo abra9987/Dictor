@@ -939,7 +939,7 @@ func formattedUsageInteger(_ value: Int) -> String {
 }
 
 @MainActor
-final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, UpdateWindowDelegate {
     private struct CachedInsertionTarget {
         let target: FocusedInsertionTargetFrame
         let windowFrame: NSRect?
@@ -1062,6 +1062,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// идёт работа, а не молчало на десятках мегабайт скачивания.
     private var updateInstallTask: Task<Void, Never>?
     private var installingUpdateVersion: String?
+    private var updateAvailableWindow: UpdateAvailableWindow?
     private var reminderPausedUpdateVersion: String?
     private var reminderPausedUntil: Date?
 
@@ -6209,6 +6210,29 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         log("update available: \(current) → v\(release.version)")
         pendingUpdate = release
         rebuildMenu()
+        presentUpdateWindow(for: release, currentVersion: current)
+    }
+
+    /// Окно с предложением обновиться. Пункт в меню-баре для этого не годился:
+    /// меню открывается правым кликом по иконке в строке состояния, а до этого
+    /// не додумывается почти никто — предложение обновиться существовало
+    /// примерно нигде.
+    private func presentUpdateWindow(for release: DictorRelease, currentVersion: String) {
+        guard updateAvailableWindow == nil else { return }
+        let window = UpdateAvailableWindow(release: release,
+                                           currentVersion: currentVersion,
+                                           language: settings.interfaceLanguage)
+        window.updateDelegate = self
+        updateAvailableWindow = window
+        window.center()
+        showAppForModal()
+        window.makeKeyAndOrderFront(nil)
+        log("update window shown for v\(release.version)")
+    }
+
+    private func closeUpdateWindow() {
+        updateAvailableWindow?.close()
+        updateAvailableWindow = nil
     }
 
 
@@ -6450,6 +6474,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         log("update: installing v\(version)")
         installingUpdateVersion = version
         rebuildMenu()
+        updateAvailableWindow?.showProgress(
+            localizedText("Скачиваю и проверяю архив…",
+                          "Downloading and verifying the archive…",
+                          language: settings.interfaceLanguage))
         updateInstallTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -6471,7 +6499,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 let detail = (error as? DictorUpdateInstallerError)?
                     .message(language: self.settings.interfaceLanguage)
                     ?? error.localizedDescription
-                self.showUpdateCouldNotStart(version: version, detail: detail)
+                if let window = self.updateAvailableWindow {
+                    window.showFailure(detail)
+                } else {
+                    self.showUpdateCouldNotStart(version: version, detail: detail)
+                }
             }
         }
     }
@@ -6646,6 +6678,31 @@ extension DictorApp: QuickPanelDelegate {
 
     func quickPanelOpenHistory() {
         openControlPanelFromAgent(section: "history")
+    }
+
+    // MARK: - Окно обновления
+
+    func updateWindowDidChooseInstall(version: String) {
+        guard let release = pendingUpdate, release.version == version else { return }
+        startUpdate(for: release)
+    }
+
+    func updateWindowDidChooseLater(version: String) {
+        guard let release = pendingUpdate, release.version == version else { return }
+        closeUpdateWindow()
+        pauseUpdateReminder(for: release)
+    }
+
+    func updateWindowDidChooseSkip(version: String) {
+        closeUpdateWindow()
+        var skipped = settings.skippedVersions
+        if !skipped.contains(version) {
+            skipped.append(version)
+            settings.skippedVersions = skipped
+            log("user skipped v\(version) from the update window")
+        }
+        pendingUpdate = nil
+        rebuildMenu()
     }
 
     /// «Выйти» в поповере — та кнопка, которой люди действительно выходят:
