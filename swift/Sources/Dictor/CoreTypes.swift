@@ -450,6 +450,41 @@ enum DictationLanguage: String, CaseIterable {
     }
 }
 
+/// Три варианта, которые человек видит в окне и в узкой панели.
+///
+/// Настройка называется «язык», а делает «разреши только этот алфавит»:
+/// внутри FluidAudio подсказка языка включает `TokenLanguageFilter`, и токен,
+/// не подходящий по script'у, заменяется подходящим. Выбрав «RU», человек
+/// думал «я говорю по-русски», а буквально запрещал латиницу — английские
+/// слова после этого не могли выйти иначе как кириллицей. Поэтому пилюли
+/// говорят про алфавит, а `.auto` стоит первым: смешанная речь — это он.
+///
+/// Полный список из 18 языков остаётся в меню-баре: там он и был.
+struct DictationScriptOption {
+    let language: DictationLanguage
+    /// Для окна, где места хватает.
+    let title: String
+    /// Для узкой панели: «Кир.» / «Лат.».
+    let shortTitle: String
+}
+
+func dictationScriptOptions(interfaceLanguage: InterfaceLanguage) -> [DictationScriptOption] {
+    func t(_ russian: String, _ english: String) -> String {
+        localizedText(russian, english, language: interfaceLanguage)
+    }
+    return [
+        DictationScriptOption(language: .auto,
+                              title: t("Авто", "Auto"),
+                              shortTitle: t("Авто", "Auto")),
+        DictationScriptOption(language: .russian,
+                              title: t("Кириллица", "Cyrillic"),
+                              shortTitle: t("Кир.", "Cyr.")),
+        DictationScriptOption(language: .english,
+                              title: t("Латиница", "Latin"),
+                              shortTitle: t("Лат.", "Lat.")),
+    ]
+}
+
 let DICTATION_LANGUAGE_DISPLAY: [DictationLanguage: String] = [
     .auto: "Auto-detect",
     .english: "English",

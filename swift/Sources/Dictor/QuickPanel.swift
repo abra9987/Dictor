@@ -480,13 +480,13 @@ final class DictorQuickPanel: NSPanel {
     private func languageRow() -> NSView {
         // Макет: подпись 12 graphite шириной 72, пилюли как в настройках.
         let row = NSView()
-        let caption = label(t("Язык", "Language"), size: 12, color: SD.C.graphite)
+        let caption = label(t("Алфавит", "Script"), size: 12, color: SD.C.graphite)
 
-        var options: [(String, DictationLanguage)] = [
-            ("RU", .russian),
-            ("EN", .english),
-            (t("Авто", "Auto"), .auto),
-        ]
+        // Те же три варианта, что в окне, — только подписи короче: панель
+        // узкая, а «Кириллица» целиком в неё не влезает.
+        var options: [(String, DictationLanguage)] =
+            dictationScriptOptions(interfaceLanguage: state.interfaceLanguage)
+                .map { ($0.shortTitle, $0.language) }
         if !options.contains(where: { $0.1 == state.language }) {
             options.insert((state.language.rawValue.uppercased(), state.language), at: 0)
         }
