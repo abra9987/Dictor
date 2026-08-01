@@ -157,21 +157,24 @@ fi
 [[ -d "$ROOT_DIR/web" ]] || fail "Нет каталога web/ — выкладывать нечего."
 cp -R "$ROOT_DIR/web/." "$STAGE/"
 
-python3 - "$STAGE" "$VERSION" "$SHA256" "$DMG_BYTES" <<'PY'
+SITE_DATE="$(date -u +%Y-%m-%d)"
+python3 - "$STAGE" "$VERSION" "$SHA256" "$DMG_BYTES" "$SITE_DATE" <<'PY'
 import pathlib, sys
-stage, version, sha256, dmg_bytes = sys.argv[1:5]
+stage, version, sha256, dmg_bytes, site_date = sys.argv[1:6]
 # Размер образа — с десятыми и в правописании языка: «4,5 МБ» и «4.5 MB».
 # Целые мегабайты врали на полмегабайта в обе стороны.
 megabytes = f"{int(dmg_bytes) / 1024 / 1024:.1f}"
 sizes = {"index.html": f"{megabytes.replace('.', ',')} МБ",
          "en/index.html": f"{megabytes} MB"}
+sizes["sitemap.xml"] = ""  # размера образа в карте сайта нет, дата — есть
+
 for name, size in sizes.items():
     path = pathlib.Path(stage) / name
     if not path.exists():
         raise SystemExit(f"страница {name} не найдена в web/")
     text = path.read_text(encoding="utf-8")
     for token, value in (("{{VERSION}}", version), ("{{SHA256}}", sha256),
-                         ("{{DMG_SIZE}}", size)):
+                         ("{{DMG_SIZE}}", size), ("{{DATE}}", site_date)):
         text = text.replace(token, value)
     if "{{" in text:
         raise SystemExit(f"в {name} остались незаполненные подстановки")
@@ -213,8 +216,8 @@ if (( ! SITE_ONLY )); then
 fi
 # favicon.ico — отдельной строкой: браузер просит его сам, из корня сайта,
 # и в разметке его может не быть вовсе.
-scp -qr "$STAGE/index.html" "$STAGE/favicon.ico" "$STAGE/en" "$STAGE/assets" \
-    "$SSH_HOST:$REMOTE_DIR/"
+scp -qr "$STAGE/index.html" "$STAGE/favicon.ico" "$STAGE/robots.txt" \
+    "$STAGE/sitemap.xml" "$STAGE/en" "$STAGE/assets" "$SSH_HOST:$REMOTE_DIR/"
 if (( ! SITE_ONLY )); then
     scp -q "$STAGE/update.json" "$SSH_HOST:$REMOTE_DIR/"
 fi
@@ -231,6 +234,10 @@ if (( SITE_ONLY )); then
     # Ссылка на образ — то единственное, ради чего человек сюда пришёл.
     curl -fsSI --max-time 20 "$CHANNEL_URL/Dictor-$VERSION.dmg" >/dev/null \
         || fail "Кнопка скачивания ведёт в никуда: Dictor-$VERSION.dmg не отдаётся."
+    for extra in robots.txt sitemap.xml favicon.ico; do
+        curl -fsS --max-time 20 "$CHANNEL_URL/$extra" >/dev/null \
+            || fail "$extra не отдаётся."
+    done
     say "Готово: страница обновлена на $CHANNEL_URL"
     exit 0
 fi

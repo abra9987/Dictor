@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Файлы раздачи индексировать незачем: человеку нужна страница, а не архив.
+Disallow: /Dictor-
+Disallow: /update.json
+
+Sitemap: https://dictor.raulgumerov.com/sitemap.xml
