@@ -474,7 +474,10 @@ func normalizedTranscriptCorrectionSource(_ source: String) -> String {
         .lowercased()
 }
 
-func normalizedTranscriptCorrections(_ corrections: [TranscriptCorrection]) -> [TranscriptCorrection] {
+func normalizedTranscriptCorrections(
+    _ corrections: [TranscriptCorrection],
+    limit: Int = MAX_TRANSCRIPT_CORRECTIONS
+) -> [TranscriptCorrection] {
     var result: [TranscriptCorrection] = []
     var indexBySource: [String: Int] = [:]
 
@@ -496,7 +499,7 @@ func normalizedTranscriptCorrections(_ corrections: [TranscriptCorrection]) -> [
         if let existing = indexBySource[key] {
             result[existing] = cleaned
         } else {
-            guard result.count < MAX_TRANSCRIPT_CORRECTIONS else { continue }
+            guard result.count < limit else { continue }
             indexBySource[key] = result.count
             result.append(cleaned)
         }

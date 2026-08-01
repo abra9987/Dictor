@@ -2354,10 +2354,39 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             list.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
 
-        let column = NSStackView(views: [card])
+        // Встроенный набор написаний. Он правит текст молча, поэтому о нём
+        // надо сказать вслух — и дать выключить.
+        let spellingsToggle = SDToggle()
+        spellingsToggle.isOn = settings.builtInSpellingsEnabled
+        spellingsToggle.onToggle = { [weak self] enabled in
+            self?.settings.builtInSpellingsEnabled = enabled
+        }
+        let spellingsCard = SDCardBackgroundView()
+        let spellingsRow = SDRowView(
+            title: t("Написание названий", "Name spelling"),
+            subtitle: t("\(BuiltInSpellings.count) технических названий пишутся правильно: "
+                        + "postgres → PostgreSQL, sql → SQL, macos → macOS",
+                        "\(BuiltInSpellings.count) technical names come out spelled properly: "
+                        + "postgres → PostgreSQL, sql → SQL, macos → macOS"),
+            control: spellingsToggle,
+            hairline: false
+        )
+        spellingsRow.translatesAutoresizingMaskIntoConstraints = false
+        spellingsCard.addSubview(spellingsRow)
+        NSLayoutConstraint.activate([
+            spellingsRow.leadingAnchor.constraint(equalTo: spellingsCard.leadingAnchor,
+                                                  constant: 16),
+            spellingsRow.trailingAnchor.constraint(equalTo: spellingsCard.trailingAnchor,
+                                                   constant: -16),
+            spellingsRow.topAnchor.constraint(equalTo: spellingsCard.topAnchor, constant: 4),
+            spellingsRow.bottomAnchor.constraint(equalTo: spellingsCard.bottomAnchor,
+                                                 constant: -4),
+        ])
+
+        let column = NSStackView(views: [card, spellingsCard])
         column.orientation = .vertical
         column.alignment = .leading
-        column.spacing = 0
+        column.spacing = 14
         column.edgeInsets = NSEdgeInsets(top: 22, left: 28, bottom: 24, right: 28)
         column.translatesAutoresizingMaskIntoConstraints = false
         header.translatesAutoresizingMaskIntoConstraints = false
@@ -2373,6 +2402,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
         ])
         card.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -56).isActive = true
+        spellingsCard.widthAnchor.constraint(equalTo: column.widthAnchor,
+                                             constant: -56).isActive = true
         return root
     }
 

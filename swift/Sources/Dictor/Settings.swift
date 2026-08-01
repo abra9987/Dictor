@@ -237,6 +237,26 @@ final class Settings: @unchecked Sendable {
 
     /// Закрытые подсказки экрана «Сегодня». Правило макета 6e: закрыли —
     /// больше не возвращается.
+    /// Встроенный набор написаний технических названий. Включён по
+    /// умолчанию: он меняет только форму записи латиницей («postgres» →
+    /// «PostgreSQL»), смысла текста не трогает, и человек, диктующий про
+    /// работу, ожидает увидеть названия написанными правильно.
+    var builtInSpellingsEnabled: Bool {
+        get {
+            guard defaults.object(forKey: "built_in_spellings_enabled_v1") != nil
+            else { return true }
+            return defaults.bool(forKey: "built_in_spellings_enabled_v1")
+        }
+        set { defaults.set(newValue, forKey: "built_in_spellings_enabled_v1") }
+    }
+
+    /// Что уходит в правку расшифровки: слова человека плюс встроенный
+    /// набор, если он включён.
+    var dictationTranscriptCorrections: [TranscriptCorrection] {
+        dictationCorrections(user: transcriptCorrections,
+                             includeBuiltInSpellings: builtInSpellingsEnabled)
+    }
+
     /// Плавающая капсула (макет 6c). По умолчанию выключена: это постоянный
     /// объект поверх чужих окон, и появиться он должен потому, что человек
     /// его позвал, а не потому, что вышло обновление.
