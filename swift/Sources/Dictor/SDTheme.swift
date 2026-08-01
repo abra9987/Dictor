@@ -10,6 +10,13 @@ enum SD {
         /// Акцент = запись. Продукт и его главное действие делят один цвет.
         static let voice = adaptive(light: 0xE8502F, dark: 0xFF6B47)
         static let ink = adaptive(light: 0x1C1B19, dark: 0xF2F1EE)
+        /// Текст поверх акцентной заливки. В светлой теме акцент тёмный
+        /// (#E8502F) и белый по нему читается; в тёмной акцент светлее
+        /// (#FF6B47), и белая надпись на нём расплывается — там текст
+        /// чернильный. Пара выведена: в макете тёмной темы окна нет.
+        static let onVoice = NSColor(name: nil) { appearance in
+            appearance.isDark ? NSColor(hex: 0x1C1B19) : NSColor.white
+        }
         static let graphite = adaptive(light: 0x6E6B66, dark: 0xA3A09A)
         static let paper = adaptive(light: 0xF5F4F1, dark: 0x1E1D1B)
         /// Фон окна настроек по макету 2c/4b: #F5F4F1 / #262523.

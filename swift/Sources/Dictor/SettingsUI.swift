@@ -129,7 +129,7 @@ final class SDSolidButton: NSButton {
         layer?.cornerRadius = 8
         font = .systemFont(ofSize: 12, weight: .semibold)
         layer?.backgroundColor = resolvedCGColor(SD.C.voice)
-        contentTintColor = NSColor.white
+        contentTintColor = SD.C.onVoice
         alphaValue = isEnabled ? 1 : 0.4
     }
 
