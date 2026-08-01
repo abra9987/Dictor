@@ -44,10 +44,41 @@ Dictor делает это на машине. Аудио её не покида�
 
 ![Сегодня](docs/screenshots/today-light.png)
 
-Остальные экраны — «История» с поиском по всему архиву, «Статистика» с
-календарём привычки и выгрузкой в CSV, «Словарь» автозамен, настройки внутри
-окна семью вкладками, панель меню-бара и собственное окно обновления — показаны
-в [английской версии](README.md#what-it-looks-like).
+<details>
+<summary>Остальные экраны</summary>
+
+**История** — три колонки: поиск по всему архиву, результаты с подсветкой
+совпадений, полный текст с копированием и закреплением.
+
+![История](docs/screenshots/history-light.png)
+
+**Статистика** — периоды, сравнение с прошлым, календарь привычки, время суток,
+кварталы и выгрузка в CSV.
+
+![Статистика](docs/screenshots/stats-light.png)
+
+**Словарь** — свои автозамены поверх двух встроенных наборов.
+
+![Словарь](docs/screenshots/dictionary-light.png)
+
+**Настройки** — семь вкладок внутри окна, без отдельных панелей.
+
+![Настройки](docs/screenshots/settings-light.png)
+
+**Панель меню-бара** — состояние службы, алфавит вывода, микрофон, последние
+диктовки и статистика дня.
+
+![Панель](docs/screenshots/popover.png)
+
+**Окно обновления** — что нового, загрузка, проверка и установка в один клик.
+
+![Обновление](docs/screenshots/update-window.png)
+
+**Тёмная тема** — везде.
+
+![Тёмная тема](docs/screenshots/today-dark.png)
+
+</details>
 
 ## Что умеет
 
@@ -108,8 +139,30 @@ swift build --package-path swift            # check.sh не компилируе
 swift/.build/debug/Dictor --self-test all
 ```
 
-Подробности о канале обновлений — в [docs/updates.md](docs/updates.md), история
-версий — в [CHANGELOG.md](CHANGELOG.md).
+Каждый экран проверяется рендером, а не на глаз — приложение снимает себя само,
+в светлой и тёмной теме:
+
+```bash
+swift/.build/debug/Dictor --export-settings-preview   <dir>          # 14 PNG
+swift/.build/debug/Dictor --export-history-preview    <dir> [ru|en]
+swift/.build/debug/Dictor --export-onboarding-preview <dir>
+swift/.build/debug/Dictor --export-popover-preview    <dir> [ru|en]
+swift/.build/debug/Dictor --export-update-preview     <dir>
+swift/.build/debug/Dictor --export-status-preview     <dir>
+swift/.build/debug/Dictor --export-capsule-preview    <dir> [ru|en]
+swift/.build/debug/Dictor --export-hud-animation      <dir> [ru|en]
+```
+
+Выпуск — `./scripts/make-release.sh --notes "…"` из чистого дерева: скрипт
+соберёт приложение, образ и архив, проверит подпись тем же требованием, что и
+апдейтер, выложит на канал, скачает обратно и сверит контрольную сумму,
+поставит тег. `--dry-run` собирает и останавливается, `--site-only` обновляет
+только страницу, не трогая уже выложенный релиз.
+
+Как всё устроено внутри — [ARCHITECTURE.md](ARCHITECTURE.md). Канал обновлений —
+[docs/updates.md](docs/updates.md). История версий —
+[CHANGELOG.md](CHANGELOG.md). Что нужно знать, прежде чем присылать
+изменения, — [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Благодарности
 
