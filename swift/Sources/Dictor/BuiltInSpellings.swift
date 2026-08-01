@@ -136,21 +136,3 @@ enum BuiltInSpellings {
         ("ci cd", "CI/CD"), ("devops", "DevOps"), ("b2b", "B2B"), ("b2c", "B2C"),
     ]
 }
-
-/// Что уходит в правку расшифровки: слова человека и, если набор включён,
-/// встроенные написания. Пользовательская запись всегда сильнее — иначе
-/// поправить встроенное написание было бы нечем.
-func dictationCorrections(user: [TranscriptCorrection],
-                          includeBuiltInSpellings: Bool) -> [TranscriptCorrection] {
-    let manual = normalizedTranscriptCorrections(user)
-    guard includeBuiltInSpellings else { return manual }
-    var seen = Set(manual.map { normalizedTranscriptCorrectionSource($0.source) })
-    var result = manual
-    for spelling in BuiltInSpellings.all {
-        let key = normalizedTranscriptCorrectionSource(spelling.source)
-        guard !seen.contains(key) else { continue }
-        seen.insert(key)
-        result.append(spelling)
-    }
-    return result
-}
