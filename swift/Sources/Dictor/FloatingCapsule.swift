@@ -493,8 +493,12 @@ final class FloatingCapsuleController {
         view?.language = language
         applyState(state, animated: false)
         if !panel.isVisible {
-            panel.setFrameOrigin(restoredOrigin(for: panel))
+            let origin = restoredOrigin(for: panel)
+            panel.setFrameOrigin(origin)
             panel.orderFrontRegardless()
+            let remembered = storedOrigin() != nil
+            log("floating capsule shown at \(Int(origin.x)),\(Int(origin.y)) "
+                + (remembered ? "(remembered)" : "(default corner)"))
         }
     }
 
@@ -626,8 +630,8 @@ final class FloatingCapsuleController {
         let screen = NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return .zero }
         let visible = screen.visibleFrame
-        if let stored = settings.floatingCapsulePositions[screenKey(for: screen)] {
-            return FloatingCapsuleMetrics.clampedOrigin(NSPoint(x: stored.x, y: stored.y),
+        if let stored = storedOrigin() {
+            return FloatingCapsuleMetrics.clampedOrigin(stored,
                                                         windowSize: panel.frame.size,
                                                         visibleFrame: visible)
         }
@@ -637,11 +641,19 @@ final class FloatingCapsuleController {
                        y: visible.minY - inset + FloatingCapsuleMetrics.snapMargin + 40)
     }
 
+    /// Запомненное место на текущем мониторе, если оно есть.
+    private func storedOrigin() -> NSPoint? {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
+        return settings.floatingCapsulePositions[screenKey(for: screen)]
+    }
+
     private func storeOrigin() {
         guard let panel, let screen = currentScreen() else { return }
         var positions = settings.floatingCapsulePositions
         positions[screenKey(for: screen)] = panel.frame.origin
         settings.floatingCapsulePositions = positions
+        log("floating capsule parked at \(Int(panel.frame.origin.x)),"
+            + "\(Int(panel.frame.origin.y)) on \(screenKey(for: screen))")
     }
 
     private func clampIntoScreen() {
