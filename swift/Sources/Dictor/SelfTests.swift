@@ -4409,7 +4409,8 @@ enum DictorSelfTest {
             TranscriptCorrector.apply(
                 to: text,
                 corrections: dictationCorrections(user: user,
-                                                  includeBuiltInSpellings: enabled)).text
+                                                  includeBuiltInSpellings: enabled,
+                                                  includeLatinTermRestorations: false)).text
         }
 
         // Ровно те промахи, что нашлись в живом архиве диктовок.
@@ -4438,7 +4439,8 @@ enum DictorSelfTest {
         try expect(TranscriptCorrector.apply(
                     to: "открыл GitHub",
                     corrections: dictationCorrections(user: [],
-                                                      includeBuiltInSpellings: true)).appliedCount,
+                                                      includeBuiltInSpellings: true,
+                                                      includeLatinTermRestorations: false)).appliedCount,
                    equals: 0,
                    "text already spelled correctly must not count as a correction")
 
@@ -4447,7 +4449,8 @@ enum DictorSelfTest {
         let many = (0..<MAX_TRANSCRIPT_CORRECTIONS).map {
             TranscriptCorrection(source: "слово\($0)", replacement: "Слово\($0)")
         }
-        let merged = dictationCorrections(user: many, includeBuiltInSpellings: true)
+        let merged = dictationCorrections(user: many, includeBuiltInSpellings: true,
+                                        includeLatinTermRestorations: false)
         try expect(merged.count, equals: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count,
                    "the built-in set must not push out the user's own words")
 

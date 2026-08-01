@@ -87,7 +87,8 @@ enum TranscriptCorrector {
         // набор написаний, который в настройках не хранится.
         let active = normalizedTranscriptCorrections(
             corrections,
-            limit: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count)
+            limit: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count
+                + LatinTermRestorations.count)
             .sorted { lhs, rhs in
                 if lhs.source.count != rhs.source.count { return lhs.source.count > rhs.source.count }
                 return lhs.source.localizedCaseInsensitiveCompare(rhs.source) == .orderedAscending

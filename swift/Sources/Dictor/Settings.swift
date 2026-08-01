@@ -250,11 +250,23 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "built_in_spellings_enabled_v1") }
     }
 
-    /// Что уходит в правку расшифровки: слова человека плюс встроенный
-    /// набор, если он включён.
+    /// Названия, услышанные по-русски: «гитхаб» → GitHub. Включён по
+    /// умолчанию — в наборе только имена собственные, у которых нет принятого
+    /// русского написания, и портить в русском тексте им нечего.
+    var latinTermRestorationsEnabled: Bool {
+        get {
+            guard defaults.object(forKey: "latin_term_restorations_v1") != nil
+            else { return true }
+            return defaults.bool(forKey: "latin_term_restorations_v1")
+        }
+        set { defaults.set(newValue, forKey: "latin_term_restorations_v1") }
+    }
+
+    /// Что уходит в правку расшифровки: слова человека плюс встроенные наборы.
     var dictationTranscriptCorrections: [TranscriptCorrection] {
         dictationCorrections(user: transcriptCorrections,
-                             includeBuiltInSpellings: builtInSpellingsEnabled)
+                             includeBuiltInSpellings: builtInSpellingsEnabled,
+                             includeLatinTermRestorations: latinTermRestorationsEnabled)
     }
 
     /// Плавающая капсула (макет 6c). По умолчанию выключена: это постоянный
