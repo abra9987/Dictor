@@ -29,6 +29,21 @@ The request carries no identifier of you or your machine, and nothing is sent
 back: the app asks for a file and reads a version number out of it. There is no
 account system, advertising, analytics, or telemetry.
 
+## The update server's logs
+
+Like any web server, the update channel records an ordinary access log: the
+time, the file requested, and the IP address the request came from. It is used
+for one thing — counting how many times a release was downloaded and how many
+people opened the page.
+
+Those logs are not kept. An hourly job reduces them to per-day counts —
+downloads per version, page views, number of distinct addresses — and stores
+only those numbers; no address is written to the summary. The container's own
+log holds at most 30 MB and rotates away on its own.
+
+Nothing in this comes from the app. It reports nothing, and adding a way for it
+to do so would contradict the reason it exists.
+
 ## macOS permissions
 
 - **Microphone** records speech while dictation is active.
