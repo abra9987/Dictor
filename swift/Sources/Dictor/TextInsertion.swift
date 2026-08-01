@@ -850,7 +850,15 @@ enum TextInserter {
 enum ClipboardPasteInserter {
     private static let virtualKeyCommand: CGKeyCode = 0x37  // left Command
     private static let virtualKeyV: CGKeyCode = 0x09  // ANSI 'v'
-    private static let restoreDelay: TimeInterval = 0.35
+    /// Сколько ждать после того, как приёмник забрал текст. Ему может
+    /// понадобиться ещё один заход за другим типом данных, поэтому не ноль.
+    static let restoreDelayAfterRead: TimeInterval = 0.12
+    /// И сколько ждать, если он не забрал текст вовсе: буфер человека нельзя
+    /// оставлять занятым навсегда из-за приложения, которое не отвечает.
+    static let restoreTimeout: TimeInterval = 10
+    /// Незавершённая вставка. Диктовок может быть две подряд, и вторая обязана
+    /// вернуть буфер за первую, иначе прежнее содержимое потеряется совсем.
+    private static var pending: ClipboardPasteTransaction?
 
     static func write(_ text: String, to pb: NSPasteboard) -> Bool {
         pb.clearContents()
@@ -858,39 +866,50 @@ enum ClipboardPasteInserter {
     }
 
     static func insert(_ text: String) -> Bool {
-        let pasteboard = NSPasteboard.general
-        let previous = PasteboardSnapshot.capture(from: pasteboard)
-        guard write(text, to: pasteboard) else {
+        insert(text, into: NSPasteboard.general, postingKeystroke: true)
+    }
+
+    /// Кладёт текст в буфер **лениво** и жмёт Cmd+V.
+    ///
+    /// Прежний порядок был другим: текст писался строкой, а прежнее содержимое
+    /// возвращалось через 0,35 с по таймеру. Приёмник, который читает буфер
+    /// медленнее, — Electron, Java, удалённый рабочий стол, просто занятая
+    /// машина — успевал получить уже восстановленное старое содержимое и
+    /// вставлял не то, что человек продиктовал. Диктовка при этом выглядела
+    /// успешной, и найти причину по логу было нечем.
+    ///
+    /// Теперь в буфер кладётся обещание: текст отдаётся в тот момент, когда
+    /// приёмник за ним приходит, и только после этого запускается возврат.
+    /// Слепой таймер остаётся лишь страховкой на случай, когда не пришёл никто.
+    @discardableResult
+    static func insert(_ text: String,
+                       into pasteboard: NSPasteboard,
+                       postingKeystroke: Bool) -> Bool {
+        pending?.restoreNow(reason: "superseded by another dictation")
+        let transaction = ClipboardPasteTransaction(
+            text: text,
+            pasteboard: pasteboard,
+            previous: PasteboardSnapshot.capture(from: pasteboard),
+            restoreDelayAfterRead: restoreDelayAfterRead,
+            restoreTimeout: restoreTimeout)
+        transaction.onFinish = {
+            if pending === transaction { pending = nil }
+        }
+        guard transaction.install() else {
             log("pasteboard write failed")
             return false
         }
-        let transientChangeCount = pasteboard.changeCount
+        pending = transaction
 
+        guard postingKeystroke else { return true }
         let steps = clipboardPasteKeyboardEventSteps(commandKey: virtualKeyCommand,
                                                      pasteKey: virtualKeyV)
         guard post(steps) else {
             log("paste event creation failed")
-            previous.restore(to: pasteboard)
+            transaction.restoreNow(reason: "paste event creation failed")
             return false
         }
-        restorePasteboard(previous,
-                          ifStillTemporaryText: text,
-                          changeCount: transientChangeCount,
-                          pasteboard: pasteboard)
         return true
-    }
-
-    private static func restorePasteboard(_ snapshot: PasteboardSnapshot,
-                                          ifStillTemporaryText text: String,
-                                          changeCount: Int,
-                                          pasteboard: NSPasteboard) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + restoreDelay) {
-            guard pasteboard.changeCount == changeCount,
-                  pasteboard.string(forType: .string) == text else {
-                return
-            }
-            snapshot.restore(to: pasteboard)
-        }
     }
 
     private static func post(_ steps: [KeyboardEventStep]) -> Bool {
@@ -898,6 +917,103 @@ enum ClipboardPasteInserter {
         // events with .maskCommand. Sleep/wake can leave session modifier
         // state unreliable for flag-only synthetic shortcuts.
         return postKeyboardEventSteps(steps)
+    }
+}
+
+/// Одна вставка через буфер обмена: положили обещание, дождались, пока его
+/// прочитают, вернули прежнее содержимое.
+///
+/// Живёт ровно столько, сколько буфер держит наш `NSPasteboardItem`: провайдер
+/// данных — это она сама, и умереть раньше чтения она не имеет права.
+@MainActor
+final class ClipboardPasteTransaction: NSObject, NSPasteboardItemDataProvider {
+    nonisolated let text: String
+    private let pasteboard: NSPasteboard
+    private let previous: PasteboardSnapshot
+    private let restoreDelayAfterRead: TimeInterval
+    private let restoreTimeout: TimeInterval
+    /// Сообщает владельцу, что транзакция закончилась и ссылку можно отпустить.
+    var onFinish: (() -> Void)?
+    /// Для самотеста: текст запросили хотя бы раз.
+    private(set) var didProvideText = false
+    private(set) var isFinished = false
+
+    private var ownedChangeCount: Int?
+    private var restoreWork: DispatchWorkItem?
+
+    init(text: String,
+         pasteboard: NSPasteboard,
+         previous: PasteboardSnapshot,
+         restoreDelayAfterRead: TimeInterval,
+         restoreTimeout: TimeInterval) {
+        self.text = text
+        self.pasteboard = pasteboard
+        self.previous = previous
+        self.restoreDelayAfterRead = restoreDelayAfterRead
+        self.restoreTimeout = restoreTimeout
+    }
+
+    func install() -> Bool {
+        let item = NSPasteboardItem()
+        guard item.setDataProvider(self, forTypes: [.string]) else {
+            finish()
+            return false
+        }
+        pasteboard.clearContents()
+        guard pasteboard.writeObjects([item]) else {
+            previous.restore(to: pasteboard)
+            finish()
+            return false
+        }
+        ownedChangeCount = pasteboard.changeCount
+        scheduleRestore(after: restoreTimeout, reason: "nobody asked for the text")
+        return true
+    }
+
+    nonisolated func pasteboard(_ pasteboard: NSPasteboard?,
+                                item: NSPasteboardItem,
+                                provideDataForType type: NSPasteboard.PasteboardType) {
+        // Момент, ради которого всё затевалось: приёмник пришёл за текстом.
+        guard type == .string else { return }
+        item.setString(text, forType: .string)
+        MainActor.assumeIsolated {
+            didProvideText = true
+            scheduleRestore(after: restoreDelayAfterRead, reason: "text was read")
+        }
+    }
+
+    /// Вернуть буфер немедленно — если он всё ещё наш.
+    func restoreNow(reason: String) {
+        guard !isFinished else { return }
+        restoreWork?.cancel()
+        restoreWork = nil
+        // Человек мог скопировать что-то своё, пока мы ждали. Тогда буфер уже
+        // не наш, и возвращать в него старое — значит стереть его работу.
+        if let owned = ownedChangeCount, pasteboard.changeCount == owned {
+            previous.restore(to: pasteboard)
+        } else {
+            log("pasteboard restore skipped (\(reason)): clipboard changed meanwhile")
+        }
+        finish()
+    }
+
+    private func scheduleRestore(after delay: TimeInterval, reason: String) {
+        guard !isFinished else { return }
+        restoreWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.restoreNow(reason: reason) }
+        }
+        restoreWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func finish() {
+        guard !isFinished else { return }
+        isFinished = true
+        restoreWork?.cancel()
+        restoreWork = nil
+        onFinish?()
+        onFinish = nil
     }
 }
 
