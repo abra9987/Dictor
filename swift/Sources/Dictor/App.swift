@@ -1098,6 +1098,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// Хоткеи агент раньше читал только при старте, поэтому их смена
     /// требовала перезапуска службы. Таймер подхватывает их на лету.
     private var settingsWatchTimer: Timer?
+    /// Что служба видела в настройках в прошлый тик. Нужны, чтобы отличать
+    /// «человек поменял в окне» от «ничего не изменилось»: без сравнения
+    /// перезапуск аудиовхода случался бы раз в секунду.
+    private var lastSeenInputDevice: String?
+    private var lastSeenCorrections: [TranscriptCorrection]?
     private var lastAppliedHotkeySignature = ""
     private var correctionSyncFileFingerprint: CorrectionSyncFileFingerprint?
     private var correctionSyncBaselineCorrections: [TranscriptCorrection] = []
@@ -1970,6 +1975,37 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         _ = settings.refreshFromDisk()
         applyHotkeySettings(force: false)
         applyFloatingCapsuleSettings()
+        applyLiveSettings()
+    }
+
+    /// Настройки, которые окно меняет, а служба обязана подхватить сама.
+    ///
+    /// Хоткеи и капсула умели это и раньше, а вот микрофон и словарь — нет:
+    /// человек выбирал в окне другой микрофон, окно молчало, и диктовка
+    /// продолжала писать со старого до перезапуска службы. Со словарём было
+    /// зеркально: запись, добавленная из окна, не попадала в файл
+    /// синхронизации, потому что писал его только тот, кто правил словарь в
+    /// самой службе.
+    ///
+    /// Сравнение с прошлым значением здесь не оптимизация, а условие
+    /// работоспособности: таймер тикает раз в секунду, а перезапуск аудиовхода
+    /// стоит дорого.
+    private func applyLiveSettings() {
+        let device = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if shouldRestartAudioInput(previous: lastSeenInputDevice, current: device) {
+            log("input device changed in settings: restarting audio")
+            restartAudioForInputDeviceChange()
+        }
+        lastSeenInputDevice = device
+
+        // Сравнение самого списка: `TranscriptCorrection` равнимая, а разница в
+        // числе записей отсекается первой — раз в секунду это ничего не стоит.
+        let corrections = settings.transcriptCorrections
+        if let previous = lastSeenCorrections, previous != corrections {
+            log("corrections changed outside the agent: writing the sync file")
+            _ = writeCorrectionsToSyncFile(presentErrors: false)
+        }
+        lastSeenCorrections = corrections
     }
 
     // MARK: - Плавающая капсула (макет 6c)

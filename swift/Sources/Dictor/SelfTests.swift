@@ -3537,6 +3537,22 @@ enum DictorSelfTest {
     }
 
     private static func testRecordingLifecycle() throws {
+        // Смена микрофона в окне обязана дойти до службы, но не ценой
+        // перезапуска аудиовхода раз в секунду: таймер настроек тикает
+        // постоянно, и решение принимается сравнением с прошлым значением.
+        try expect(shouldRestartAudioInput(previous: nil, current: "AppleUSB"),
+                   equals: false,
+                   "the first tick has nothing to compare against and must not restart")
+        try expect(shouldRestartAudioInput(previous: "AppleUSB", current: "AppleUSB"),
+                   equals: false,
+                   "an unchanged device must not restart the input")
+        try expect(shouldRestartAudioInput(previous: "AppleUSB", current: "Yeti"),
+                   equals: true,
+                   "a device picked in the window must reach the service without a restart")
+        try expect(shouldRestartAudioInput(previous: "Yeti", current: ""),
+                   equals: true,
+                   "going back to the system default is a change too")
+
         try expect(
             recordingReleaseAction(capturedSampleCount: 3_999,
                                    sampleRate: 16_000,

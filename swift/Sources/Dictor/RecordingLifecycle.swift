@@ -54,3 +54,16 @@ func processedDictationText(rawTranscript: String,
                                          removedFillerWordCount: stripped.removedCount)
 }
 
+
+/// Пора ли перезапускать аудиовход из-за того, что в настройках выбрали другой
+/// микрофон.
+///
+/// Отдельной функцией — потому что цена ошибки высокая и незаметная: таймер
+/// службы тикает раз в секунду, и «перезапускать всегда» выглядело бы как
+/// работающая настройка ровно до первой диктовки. Первый тик после запуска
+/// тоже ничего не перезапускает: сравнивать не с чем, а вход уже открыт с той
+/// самой настройкой.
+func shouldRestartAudioInput(previous: String?, current: String) -> Bool {
+    guard let previous else { return false }
+    return previous != current
+}

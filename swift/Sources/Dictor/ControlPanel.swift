@@ -3222,16 +3222,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             verticalPadding: 12
         ))
 
-        let soundToggle = SDToggle()
-        soundToggle.isOn = settings.playFeedbackSounds
-        soundToggle.onToggle = { [weak self] isOn in
-            self?.settings.playFeedbackSounds = isOn
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Звук старта и остановки", "Start and stop sound"),
-            control: soundToggle,
-            verticalPadding: 12
-        ))
+        // Тумблер звуков живёт во вкладке «Основное» и только там. Здесь стоял
+        // второй, для той же настройки: два места неизбежно начинают
+        // расходиться — сначала подписью, потом поведением.
 
         root.addArrangedSubview(advancedSectionHeader(t("Производительность", "Performance")))
         root.addArrangedSubview(performanceTilesRow())
