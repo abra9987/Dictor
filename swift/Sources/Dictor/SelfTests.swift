@@ -63,6 +63,12 @@ enum DictorSelfTest {
             return runSuite("spellings", testBuiltInSpellings)
         case "latin-terms":
             return runSuite("latin-terms", testLatinTermRestorations)
+        case "clipboard-paste":
+            return runSuite("clipboard-paste", testClipboardPasteTransaction)
+        case "clipboard-paste-live":
+            return runSuite("clipboard-paste-live", testClipboardPasteLive)
+        case "corrections-cost":
+            return runSuite("corrections-cost", testTranscriptCorrectionsCost)
         case "audio-route":
             return runSuite("audio-route", testAudioRouteChangeDecision)
         case "recording-lifecycle":
@@ -124,6 +130,7 @@ enum DictorSelfTest {
         try testFloatingCapsuleGeometry()
         try testBuiltInSpellings()
         try testLatinTermRestorations()
+        try testClipboardPasteTransaction()
         try testAudioRouteChangeDecision()
         try testRecordingLifecycle()
         try testPowerStateRecoveryDecision()
@@ -4551,9 +4558,50 @@ enum DictorSelfTest {
                    equals: "сделай зум и посмотри на юпитер",
                    "zoom and Jupiter belong to ordinary speech")
 
-        // Морфологии нет и не будет: «в гитхабе» — не «в GitHubе».
-        try expect(run("лежит в гитхабе"), equals: "лежит в гитхабе",
-                   "the set replaces listed forms only, it does not decline anything")
+        // Падежи: русское окончание проглатывается, но не сохраняется.
+        try expect(run("лежит в гитхабе"), equals: "лежит в GitHub",
+                   "a Russian case ending must not hide the name behind it")
+        try expect(run("работаю с докером"), equals: "работаю с Docker",
+                   "a Russian case ending must not hide the name behind it")
+        try expect(run("задачу в джире закрыл"), equals: "задачу в Jira закрыл",
+                   "a name ending in -а keeps its stem, so «в джире» is the same name")
+        try expect(run("поднял кубернетес"), equals: "поднял Kubernetes",
+                   "the plain form must keep working")
+
+        // И ровно то, чего окончания не дают: суффиксы словообразования.
+        // Список закрыт, поэтому «гитхабный» — не форма названия, а другое
+        // слово, и трогать его нельзя.
+        try expect(run("гитхабный пайплайн"), equals: "гитхабный пайплайн",
+                   "a derived word is not a case form")
+        try expect(run("докерище какое-то"), equals: "докерище какое-то",
+                   "a derived word is not a case form")
+
+        // Каждая порождаемая форма проверяется против списка русских слов —
+        // тот же тест безопасности, что поймал «скалу» и «редис», только
+        // теперь на всём множестве форм, а не на исходных записях.
+        var generated: [String] = []
+        for entry in LatinTermRestorations.all {
+            let source = entry.source
+            let stem = (source.hasSuffix("а") || source.hasSuffix("я"))
+                ? String(source.dropLast())
+                : source
+            generated.append(source)
+            for ending in TranscriptCorrector.RUSSIAN_CASE_ENDINGS {
+                generated.append(stem + ending)
+            }
+        }
+        let collisions = generated.filter { RUSSIAN_WORDS_NEVER_RESTORED.contains($0) }
+        try expect(collisions.isEmpty, equals: true,
+                   "a generated case form collides with an ordinary Russian word: \(collisions)")
+        try expect(generated.count >= LatinTermRestorations.count, equals: true,
+                   "every entry must generate at least its own plain form")
+
+        // Написания латиницей окончаний не получают: английское слово русских
+        // падежей не носит, и «postgres» должен вести себя как раньше.
+        try expect(run("поставил postgres"), equals: "поставил PostgreSQL",
+                   "Latin-script spellings must keep working untouched")
+        try expect(run("поставил postgresом"), equals: "поставил postgresом",
+                   "a Latin-script spelling must not swallow a Russian ending")
 
         // Уже написанное правильно не считается правкой — иначе счётчик
         // сообщал бы о работе, которой не было.
@@ -4739,6 +4787,189 @@ enum DictorSelfTest {
             try expect(emptyBox.subviews.contains(where: { $0 is NSButton }), equals: false,
                        "an empty query should show no clear button")
         }
+    }
+
+    /// Вставка через буфер обмена: текст отдаётся по запросу приёмника, а
+    /// прежнее содержимое возвращается после того, как его забрали.
+    ///
+    /// Проверять это живьём почти нечем: нужен приёмник, который читает буфер
+    /// медленно, а именно на быстрых приёмниках старый порядок и выглядел
+    /// работающим. Весь тест идёт на **своём** буфере — общий буфер человека
+    /// самотест трогать не имеет права.
+    private static func testClipboardPasteTransaction() throws {
+        try MainActor.assumeIsolated {
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.raul.dictor.selftest"))
+            defer { pasteboard.releaseGlobally() }
+
+            func wait(_ seconds: TimeInterval) {
+                RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+            }
+
+            @MainActor
+            func makeTransaction(_ text: String,
+                                 timeout: TimeInterval = 5,
+                                 afterRead: TimeInterval = 0.05) -> ClipboardPasteTransaction {
+                ClipboardPasteTransaction(
+                    text: text,
+                    pasteboard: pasteboard,
+                    previous: PasteboardSnapshot.capture(from: pasteboard),
+                    restoreDelayAfterRead: afterRead,
+                    restoreTimeout: timeout)
+            }
+
+            // 1. Текст доходит до приёмника, и только после чтения буфер
+            //    возвращается к прежнему содержимому.
+            pasteboard.clearContents()
+            pasteboard.setString("прежнее содержимое", forType: .string)
+            let first = makeTransaction("продиктованный текст")
+            try expect(first.install(), equals: true, "the transaction must claim the pasteboard")
+            try expect(first.didProvideText, equals: false,
+                       "the text must not be handed out before anybody asks")
+            try expect(pasteboard.string(forType: .string), equals: "продиктованный текст",
+                       "a reader must get the dictated text, not the previous clipboard")
+            try expect(first.didProvideText, equals: true,
+                       "reading the pasteboard must go through the provider")
+            wait(0.2)
+            try expect(pasteboard.string(forType: .string), equals: "прежнее содержимое",
+                       "the previous clipboard must come back once the text was read")
+            try expect(first.isFinished, equals: true, "a restored transaction is over")
+
+            // 2. Никто не пришёл за текстом — буфер всё равно возвращается,
+            //    иначе чужое приложение оставило бы человека без его буфера.
+            pasteboard.clearContents()
+            pasteboard.setString("другое прежнее", forType: .string)
+            let ignored = makeTransaction("никем не прочитанное", timeout: 0.05)
+            try expect(ignored.install(), equals: true, "the transaction must claim the pasteboard")
+            wait(0.25)
+            try expect(pasteboard.string(forType: .string), equals: "другое прежнее",
+                       "an unread transaction must still give the clipboard back")
+            try expect(ignored.didProvideText, equals: false,
+                       "nobody read it, so the provider must not have fired")
+
+            // 3. Человек скопировал своё, пока мы ждали, — не трогаем. Вернуть
+            //    сюда старое значило бы стереть его работу.
+            pasteboard.clearContents()
+            pasteboard.setString("было моё", forType: .string)
+            let overtaken = makeTransaction("продиктованное", timeout: 0.05)
+            try expect(overtaken.install(), equals: true, "the transaction must claim the pasteboard")
+            pasteboard.clearContents()
+            pasteboard.setString("человек скопировал сам", forType: .string)
+            wait(0.25)
+            try expect(pasteboard.string(forType: .string), equals: "человек скопировал сам",
+                       "a clipboard the person changed themselves must stay theirs")
+
+            // 4. Две диктовки подряд: вторая возвращает буфер за первую, иначе
+            //    прежнее содержимое потерялось бы совсем.
+            pasteboard.clearContents()
+            pasteboard.setString("исходное", forType: .string)
+            _ = ClipboardPasteInserter.insert("первая диктовка",
+                                              into: pasteboard,
+                                              postingKeystroke: false)
+            _ = ClipboardPasteInserter.insert("вторая диктовка",
+                                              into: pasteboard,
+                                              postingKeystroke: false)
+            try expect(pasteboard.string(forType: .string), equals: "вторая диктовка",
+                       "the second dictation must own the clipboard")
+            wait(0.3)
+            try expect(pasteboard.string(forType: .string), equals: "исходное",
+                       "after both dictations the original clipboard must be back")
+        }
+    }
+
+    /// Живая проверка того же на **общем** буфере и чужим процессом.
+    ///
+    /// Самотест на своём буфере доказывает логику, но не то, ради чего она
+    /// написана: текст кладётся лениво, и забрать его должен посторонний
+    /// процесс через межпроцессный механизм AppKit. Здесь за ним приходит
+    /// `pbpaste` — то же самое делает любое приложение, куда идёт диктовка.
+    ///
+    /// Общий буфер человека при этом снимается и возвращается, как история в
+    /// экспорте превью. В `testAll` не регистрируется: трогать общий буфер без
+    /// спроса рядовой прогон тестов не должен.
+    private static func testClipboardPasteLive() throws {
+        try MainActor.assumeIsolated {
+            let pasteboard = NSPasteboard.general
+            let saved = PasteboardSnapshot.capture(from: pasteboard)
+            defer { saved.restore(to: pasteboard) }
+
+            let dictated = "живая проверка вставки \(Int(Date().timeIntervalSince1970))"
+            _ = ClipboardPasteInserter.insert(dictated,
+                                              into: pasteboard,
+                                              postingKeystroke: false)
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/pbpaste")
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            try process.run()
+            // Главный поток обязан остаться живым: запрос за текстом придёт
+            // через межпроцессный механизм AppKit и обслуживается на нём же.
+            // Заблокируешь его ожиданием — и чужой процесс получит пустоту с
+            // «promise keeping timed out». В приложении это условие выполнено:
+            // пауза перед Enter — асинхронная (`await Task.sleep`), а не
+            // `Thread.sleep`. Поставишь туда блокирующее ожидание — сломаешь
+            // вставку, и этот тест первым это покажет.
+            let deadline = Date().addingTimeInterval(5)
+            while process.isRunning, Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            let read = String(data: data, encoding: .utf8) ?? ""
+
+            try expect(read, equals: dictated,
+                       "another process must receive the dictated text, not the old clipboard")
+            print("clipboard-paste-live: pbpaste got \(read.count) chars")
+
+            // И буфер возвращается сам, без нашего участия.
+            RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+            let after = pasteboard.string(forType: .string) ?? ""
+            try expect(after == dictated, equals: false,
+                       "the dictated text must not stay in the clipboard afterwards")
+        }
+    }
+
+    /// Сколько стоит вся правка расшифровки. Не сторож, а измеритель: печатает
+    /// время и не проверяет ничего, поэтому в `testAll` не регистрируется.
+    ///
+    /// Понадобился, когда набору восстановлений разрешили глотать русские
+    /// окончания: шаблонов стало столько же, но каждый чуть длиннее, и
+    /// утверждение «дороже не стало» должно быть числом, а не обещанием.
+    /// Замер показал 143,8 мс до правки против 144,9 после — разница в шуме.
+    ///
+    /// ⚠️ Число сравнительное, не абсолютное. Самотесты живут только в
+    /// debug-сборке, где нет оптимизации всего модуля, и та же работа здесь
+    /// занимает примерно в пятьдесят раз больше времени, чем в готовом
+    /// приложении: в живом журнале строка `postprocess=` показывает 2–6 мс при
+    /// распознавании около 380 мс. Сравнивать этим бенчем можно только два
+    /// прогона в одинаковых условиях.
+    private static func testTranscriptCorrectionsCost() throws {
+        // Корпус под живой архив: 132 диктовки, в среднем 125 символов.
+        let sentences = [
+            "Привет! По итогам звонка присылаю короткое резюме и три следующих шага, посмотри до пятницы",
+            "Запушил в гитхаб и починил постгрес, завтра разберусь с докером и терраформом",
+            "Давай созвонимся в четверг в три, я закину приглашение и повестку",
+            "Собираем бету в пятницу, режем скоуп до словаря и режимов, остальное потом",
+        ]
+        let corpus = (0..<132).map { sentences[$0 % sentences.count] + " \($0)" }
+        let corrections = dictationCorrections(
+            user: [TranscriptCorrection(source: "линктрина", replacement: "LinkedIn"),
+                   TranscriptCorrection(source: "индид", replacement: "Indeed")],
+            includeBuiltInSpellings: true,
+            includeLatinTermRestorations: true)
+
+        var total = 0.0
+        let rounds = 5
+        for _ in 0..<rounds {
+            let started = Date()
+            for text in corpus {
+                _ = TranscriptCorrector.apply(to: text, corrections: corrections)
+            }
+            total += Date().timeIntervalSince(started)
+        }
+        let perDictation = total / Double(rounds * corpus.count) * 1000
+        print(String(format: "corrections: %d rules, %.3f ms per dictation",
+                     corrections.count, perDictation))
     }
 
     /// Кнопки строки «Сегодня»: копировать и открыть запись целиком.

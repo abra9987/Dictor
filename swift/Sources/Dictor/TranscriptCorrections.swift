@@ -100,7 +100,7 @@ enum TranscriptCorrector {
         var matches: [Match] = []
 
         for correction in active {
-            guard let pattern = pattern(for: correction.source),
+            guard let pattern = pattern(for: correction),
                   let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
             else { continue }
 
@@ -125,12 +125,56 @@ enum TranscriptCorrector {
         return (rewritten as String, matches.count)
     }
 
-    private static func pattern(for source: String) -> String? {
-        let parts = source
+    private static func pattern(for correction: TranscriptCorrection) -> String? {
+        var parts = correction.source
             .split(whereSeparator: { $0.isWhitespace })
             .map { NSRegularExpression.escapedPattern(for: String($0)) }
         guard !parts.isEmpty else { return nil }
+        if russianInflectionAllowed(for: correction), let last = parts.last {
+            parts[parts.count - 1] = inflectedWordPattern(for: last)
+        }
         return #"(?<![\p{L}\p{N}_])"# + parts.joined(separator: #"\s+"#) + #"(?![\p{L}\p{N}_])"#
+    }
+
+    /// Русские окончания, которые разрешено проглотить вместе с названием.
+    ///
+    /// Список закрыт нарочно. Регулярка вида «гитхаб\w*» подобрала бы и
+    /// «гитхабный», и «гитхабище», то есть выдумывала бы за человека; здесь же
+    /// множество форм конечно и его можно распечатать целиком — на этом
+    /// держится самотест `latin-terms`, который проверяет каждую порождённую
+    /// форму против списка русских слов.
+    static let RUSSIAN_CASE_ENDINGS: [String] = [
+        "а", "е", "у", "ом", "ы", "ов", "ам", "ами", "ах", "ой", "ою", "и", "я", "ю", "ем",
+    ]
+
+    /// Падеж проглатывается, но не сохраняется: «запушил в гитхабе» → «запушил
+    /// в GitHub», а не «в GitHubе». Латинское название с русским хвостом
+    /// читается хуже, и живые люди пишут именно так.
+    ///
+    /// Право на окончание даёт форма самой записи, а не её происхождение:
+    /// источник целиком кириллический и не короче пяти букв, замена — без
+    /// единой кириллической буквы. Поэтому ручная запись «кубернетис →
+    /// Kubernetes» получает падежи наравне со встроенным набором, а написания
+    /// латиницей («postgres → PostgreSQL») под правило не попадают вовсе:
+    /// английское слово русских окончаний не носит.
+    static func russianInflectionAllowed(for correction: TranscriptCorrection) -> Bool {
+        func isCyrillic(_ scalar: Unicode.Scalar) -> Bool {
+            (0x0400...0x04FF).contains(Int(scalar.value))
+        }
+        let letters = correction.source.unicodeScalars.filter { !CharacterSet.whitespaces.contains($0) }
+        guard letters.count >= 5, letters.allSatisfy(isCyrillic) else { return false }
+        return !correction.replacement.unicodeScalars.contains(where: isCyrillic)
+    }
+
+    /// Хвост слова, к которому можно приписать окончание. Слово на -а/-я само
+    /// стоит в именительном падеже («джира», «фигма»), поэтому основа — без
+    /// последней буквы, и «в джире» находится наравне с «джира».
+    private static func inflectedWordPattern(for escapedWord: String) -> String {
+        let endings = RUSSIAN_CASE_ENDINGS.joined(separator: "|")
+        guard let last = escapedWord.last, last == "а" || last == "я" else {
+            return escapedWord + "(?:" + endings + ")?"
+        }
+        return String(escapedWord.dropLast()) + "(?:" + endings + ")"
     }
 }
 
