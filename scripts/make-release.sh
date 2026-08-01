@@ -211,7 +211,10 @@ ssh "$SSH_HOST" "mkdir -p '$REMOTE_DIR'" \
 if (( ! SITE_ONLY )); then
     scp -q "$ZIP" "$ROOT_DIR/dist/Dictor-$VERSION.dmg" "$SSH_HOST:$REMOTE_DIR/"
 fi
-scp -qr "$STAGE/index.html" "$STAGE/en" "$STAGE/assets" "$SSH_HOST:$REMOTE_DIR/"
+# favicon.ico — отдельной строкой: браузер просит его сам, из корня сайта,
+# и в разметке его может не быть вовсе.
+scp -qr "$STAGE/index.html" "$STAGE/favicon.ico" "$STAGE/en" "$STAGE/assets" \
+    "$SSH_HOST:$REMOTE_DIR/"
 if (( ! SITE_ONLY )); then
     scp -q "$STAGE/update.json" "$SSH_HOST:$REMOTE_DIR/"
 fi
