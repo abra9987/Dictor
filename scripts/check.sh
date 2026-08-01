@@ -81,6 +81,8 @@ import pathlib, re, sys
 
 root = pathlib.Path("web")
 pages = [root / "index.html", root / "en" / "index.html"]
+install_pages = [root / "install" / "index.html",
+                 root / "en" / "install" / "index.html"]
 problems = []
 
 for page in pages:
@@ -109,6 +111,18 @@ for page in pages:
             problems.append(f"{page}: og:image ссылается на {absolute}, которого нет")
     if "og:image" not in text:
         problems.append(f"{page}: нет og:image — ссылка развернётся пустой карточкой")
+
+for page in install_pages:
+    if not page.exists():
+        problems.append(f"{page}: страницы установки нет")
+        continue
+    text = page.read_text(encoding="utf-8")
+    if "{{VERSION}}" not in text:
+        problems.append(f"{page}: нет подстановки версии")
+    # Ради этой страницы всё и затевалось: если ссылка на образ потерялась,
+    # загрузка не начнётся и человек останется с инструкцией без файла.
+    if "Dictor-{{VERSION}}.dmg" not in text:
+        problems.append(f"{page}: нет ссылки на образ — загрузка не начнётся")
 
 if problems:
     print("Channel page checks failed:", file=sys.stderr)

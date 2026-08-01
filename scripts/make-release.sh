@@ -166,6 +166,9 @@ stage, version, sha256, dmg_bytes, site_date = sys.argv[1:6]
 megabytes = f"{int(dmg_bytes) / 1024 / 1024:.1f}"
 sizes = {"index.html": f"{megabytes.replace('.', ',')} МБ",
          "en/index.html": f"{megabytes} MB"}
+# Страницы установки показывают и версию, и размер образа.
+sizes["install/index.html"] = sizes["index.html"]
+sizes["en/install/index.html"] = sizes["en/index.html"]
 sizes["sitemap.xml"] = ""  # размера образа в карте сайта нет, дата — есть
 
 for name, size in sizes.items():
@@ -217,7 +220,8 @@ fi
 # favicon.ico — отдельной строкой: браузер просит его сам, из корня сайта,
 # и в разметке его может не быть вовсе.
 scp -qr "$STAGE/index.html" "$STAGE/favicon.ico" "$STAGE/robots.txt" \
-    "$STAGE/sitemap.xml" "$STAGE/en" "$STAGE/assets" "$SSH_HOST:$REMOTE_DIR/"
+    "$STAGE/sitemap.xml" "$STAGE/install" "$STAGE/en" "$STAGE/assets" \
+    "$SSH_HOST:$REMOTE_DIR/"
 if (( ! SITE_ONLY )); then
     scp -q "$STAGE/update.json" "$SSH_HOST:$REMOTE_DIR/"
 fi
@@ -227,7 +231,7 @@ ssh "$SSH_HOST" "find '$REMOTE_DIR' -type d -exec chmod 755 {} + && \
 
 if (( SITE_ONLY )); then
     say "Проверяем страницу…"
-    for page in "" "en/"; do
+    for page in "" "en/" "install/" "en/install/"; do
         curl -fsS --max-time 20 "$CHANNEL_URL/$page" >/dev/null \
             || fail "Страница $CHANNEL_URL/$page не открывается."
     done
