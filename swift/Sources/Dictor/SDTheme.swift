@@ -350,6 +350,11 @@ final class PaperBackgroundView: NSView {
 extension SD {
     /// Заголовок окна 22/700 c тонким трекингом — «Заголовок окна» из
     /// типографической шкалы дизайна.
+    ///
+    /// `@MainActor` обязателен: `NSTextField` главноактёрный, и Swift 6.1
+    /// считает это ошибкой там, где 6.2 ограничивается предупреждением.
+    /// Проект собирают и тем, и другим — значит строже.
+    @MainActor
     static func windowTitleLabel(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = NSFont.systemFont(ofSize: 22, weight: .bold)

@@ -1,0 +1,56 @@
+# Проверка выложенного релиза снаружи, глазами приложения.
+#
+# Апдейтер перед подменой бандла делает четыре вещи: сверяет версию с
+# манифестом, выводит адрес архива из версии (а не берёт из манифеста, чтобы
+# подменённый манифест не увёл загрузку на чужой хост), проверяет SHA-256 и
+# требует подпись с пиннингом листового сертификата. Здесь ровно эти проверки
+# выполняются снаружи, без доступа к серверу и без единого секрета: если
+# что-то на канале выложено криво, узнать об этом должен не пользователь.
+#
+# Запускается руками после выпуска. По расписанию не гоняем: канал стоит на
+# своём сервере, и его ночное падение не должно красить бейдж проекта.
+name: release-smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  channel:
+    name: what the updater would install
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Verify the published release
+        run: |
+          set -euo pipefail
+          channel=https://dictor.raulgumerov.com
+          curl -fsSL "$channel/update.json" -o "$RUNNER_TEMP/update.json"
+          version="$(plutil -extract version raw -o - "$RUNNER_TEMP/update.json")"
+          sha="$(plutil -extract sha256 raw -o - "$RUNNER_TEMP/update.json")"
+          echo "channel says $version"
+
+          # Адрес выводится из версии — так же, как это делает updateArchiveURL.
+          curl -fsSL "$channel/Dictor-$version.zip" -o "$RUNNER_TEMP/Dictor.zip"
+          echo "$sha  $RUNNER_TEMP/Dictor.zip" | shasum -a 256 -c -
+
+          ditto -x -k "$RUNNER_TEMP/Dictor.zip" "$RUNNER_TEMP/unpacked"
+          app="$RUNNER_TEMP/unpacked/Dictor.app"
+          test -d "$app"
+
+          # То же требование к подписи, что стоит в апдейтере: не просто
+          # «подписано», а «подписано этим сертификатом и этим идентификатором».
+          pinned="$(sed -n 's/^let UPDATE_SIGNING_CERT_SHA1 = "\([0-9A-F]*\)"$/\1/p' \
+              swift/Sources/Dictor/CoreTypes.swift)"
+          test -n "$pinned"
+          codesign --verify --deep --strict \
+            -R "=identifier \"com.raul.dictor\" and certificate leaf = H\"$pinned\"" \
+            "$app"
+
+          # Первая установка идёт образом, а не архивом: он тоже обязан лежать.
+          curl -fsSI "$channel/Dictor-$version.dmg" > /dev/null
+          echo "release $version verified"
