@@ -8,6 +8,7 @@ Hold a key, say what you mean, let go — the text appears where your cursor is.
 Recognition runs on the Apple Neural Engine, on your Mac. No account, no
 subscription, no cloud, works on a plane.
 
+[![build](https://github.com/abra9987/Dictor/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/abra9987/Dictor/actions/workflows/build.yml)
 [![Download](https://img.shields.io/badge/download-.dmg-E8502F?style=flat-square)](https://dictor.raulgumerov.com/)
 ![Platform](https://img.shields.io/badge/macOS%2014%2B-Apple%20Silicon-1C1B19?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-1C1B19?style=flat-square)

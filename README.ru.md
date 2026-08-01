@@ -8,9 +8,11 @@
 Распознавание идёт на Apple Neural Engine, прямо на Mac. Без аккаунта, без
 подписки, без облака, работает в самолёте.
 
+[![build](https://github.com/abra9987/Dictor/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/abra9987/Dictor/actions/workflows/build.yml)
 [![Скачать](https://img.shields.io/badge/скачать-.dmg-E8502F?style=flat-square)](https://dictor.raulgumerov.com/)
 ![Платформа](https://img.shields.io/badge/macOS%2014%2B-Apple%20Silicon-1C1B19?style=flat-square)
 ![Лицензия](https://img.shields.io/badge/лицензия-MIT-1C1B19?style=flat-square)
+![Swift](https://img.shields.io/badge/Swift-AppKit-1C1B19?style=flat-square)
 
 ![Капсула записи](docs/screenshots/capsule.gif)
 
