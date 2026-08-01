@@ -33,8 +33,12 @@ account system, advertising, analytics, or telemetry.
 
 Like any web server, the update channel records an ordinary access log: the
 time, the file requested, and the IP address the request came from. It is used
-for one thing — counting how many times a release was downloaded and how many
-people opened the page.
+for two things — counting how many times a release was downloaded and how many
+times the page was opened.
+
+Requests the app makes to the update manifest are deliberately **not** counted.
+They would show how many installs are alive and when they are in use, and that
+is watching people rather than watching a download page.
 
 Those logs are not kept. An hourly job reduces them to per-day counts —
 downloads per version, page views, number of distinct addresses — and stores
