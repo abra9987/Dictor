@@ -702,6 +702,27 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             control: soundsToggle
         ))
 
+        // Выключить автопроверку было можно и раньше — но только через меню по
+        // правому клику на иконке в строке меню. Первый же человек со стороны
+        // попросил «чтобы проверку обновлений можно было убрать»: настройка,
+        // которую нельзя найти там, где её ищут, всё равно что отсутствует.
+        let updatesToggle = SDToggle()
+        updatesToggle.isOn = settings.checkForUpdates
+        updatesToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            self.settings.checkForUpdates = enabled
+            log("update checks \(enabled ? "enabled" : "disabled") from settings")
+            self.refresh(force: true)
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Проверять обновления", "Check for updates"),
+            subtitle: t("Раз в 6 часов приложение спрашивает номер последней версии. "
+                        + "Выключите — и оно не ходит в сеть вовсе.",
+                        "Every 6 hours the app asks for the latest version number. "
+                        + "Turn it off and it stops using the network at all."),
+            control: updatesToggle
+        ))
+
         root.addArrangedSubview(versionRow())
     }
 

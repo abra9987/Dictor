@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installing Dictor {{VERSION}}</title>
+<meta name="robots" content="noindex">
+<meta name="description" content="The download has started. While it runs, four steps of installing — including the macOS warning about an unidentified developer.">
+<link rel="icon" href="../../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../../assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="../../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../../assets/site.css">
+<style>
+  .started { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 6px; }
+  .started h1 { font-size: clamp(28px, 4.5vw, 40px); max-width: none; }
+  .again { font-size: 14px; color: var(--graphite); }
+  ol.walk { counter-reset: step; list-style: none; margin: 38px 0 0; padding: 0; }
+  ol.walk > li {
+      counter-increment: step; position: relative;
+      padding: 0 0 30px 52px; border-left: 1px solid var(--border); margin-left: 15px;
+  }
+  ol.walk > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  ol.walk > li::before {
+      counter-increment: none; content: counter(step);
+      position: absolute; left: -16px; top: -2px;
+      width: 31px; height: 31px; border-radius: 50%;
+      background: var(--voice); color: #FFF;
+      font-size: 14px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+  }
+  ol.walk h2 { font-size: 17px; margin: 2px 0 7px; }
+  ol.walk p { margin: 0 0 10px; color: var(--graphite); font-size: 14.5px; line-height: 1.55; }
+  ol.walk p:last-child { margin-bottom: 0; }
+  @media (prefers-color-scheme: dark) { ol.walk > li::before { color: #1C1B19; } }
+
+  /* Схема окна «Конфиденциальность и безопасность» — рисунок, а не снимок
+     чужого экрана: показывает, куда нажимать, и ничем не притворяется. */
+  .sheet {
+      margin: 14px 0 4px; max-width: 460px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 11px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .sheet .bar { display: flex; gap: 6px; padding: 10px 13px; border-bottom: 1px solid var(--border); }
+  .sheet .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--border); display: block; }
+  .sheet .body { padding: 15px 17px; font-size: 13.5px; line-height: 1.5; }
+  .sheet .body b { display: block; font-weight: 600; margin-bottom: 5px; }
+  .sheet .body span { color: var(--graphite); }
+  .sheet .row { display: flex; align-items: center; gap: 12px; margin-top: 13px; }
+  .sheet .fake-button {
+      background: var(--voice); color: #FFF; border-radius: 7px;
+      padding: 7px 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
+  }
+  @media (prefers-color-scheme: dark) { .sheet .fake-button { color: #1C1B19; } }
+  .sheet .hint { font-size: 12.5px; color: var(--subtle); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+<div class="enamel" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="wrap">
+<header class="top">
+  <a class="mark" href="../" style="color:inherit">
+    <span class="glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    Dictor
+  </a>
+  <nav>
+    <a href="../">Home</a>
+    <a href="../../install/">Русский</a>
+  </nav>
+</header>
+
+  <div class="started">
+    <h1>The download has started</h1>
+  </div>
+  <p class="lede">
+    Dictor {{VERSION}} · {{DMG_SIZE}} · while it runs, here is what comes next.
+    Installing takes a minute, but at step two macOS will ask a question — and
+    it is easier when you know about it in advance.
+  </p>
+  <p class="again">
+    Nothing happening? <a href="../../Dictor-{{VERSION}}.dmg">Download manually</a>.
+  </p>
+</div>
+</div>
+
+<div class="wrap">
+<section>
+  <ol class="walk">
+    <li>
+      <h2>Drag it into Applications</h2>
+      <p>Open the downloaded file — a window appears with the app and the
+        Applications folder. Drag one into the other.</p>
+      <p><b>Do not</b> launch Dictor from that window. macOS would run it from a
+        throwaway copy, and every permission you grant would belong to a copy
+        that is about to vanish.</p>
+    </li>
+    <li>
+      <h2>At first launch macOS warns you</h2>
+      <p>You will see “cannot verify the developer”. It does not mean something
+        is wrong with the app: it is signed, but not notarised by Apple — that
+        is a paid procedure and it has not been done yet.</p>
+      <p>Open <b>System Settings → Privacy &amp; Security</b>, scroll down to the
+        line about Dictor and click “Open Anyway”.</p>
+      <div class="sheet" aria-hidden="true">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <div class="body">
+          <b>Security</b>
+          <div class="row">
+            <span>“Dictor” was blocked to protect your Mac.</span>
+            <span class="fake-button">Open Anyway</span>
+          </div>
+        </div>
+      </div>
+      <p class="again">That is roughly how it looks. You are asked once —
+        updates never ask again.</p>
+    </li>
+    <li>
+      <h2>Grant three permissions</h2>
+      <p>Microphone, to hear you. Accessibility, to paste the text where your
+        cursor is. Input Monitoring, to catch the shortcut. Without any one of
+        them the app cannot work, and it will tell you which one is missing.</p>
+    </li>
+    <li>
+      <h2>Say something</h2>
+      <p>Put the cursor in any text field, hold <kbd>⌘</kbd> +
+        <kbd>right ⌥</kbd> and speak. Let go — the text appears where the cursor
+        was. The shortcut is yours to change in settings.</p>
+    </li>
+  </ol>
+</section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="../">About the app</a>
+      <a href="https://github.com/abra9987/Dictor">GitHub</a>
+      <a href="https://github.com/abra9987/Dictor/blob/main/PRIVACY.md">Privacy</a>
+    </div>
+    <p>Version {{VERSION}} · Apple Silicon · macOS 14+ · MIT licence</p>
+  </div>
+</footer>
+
+<script>
+  // The download starts by itself — this page is for reading while it runs,
+  // not for clicking a second time.
+  setTimeout(function () {
+    window.location.href = "../../Dictor-{{VERSION}}.dmg";
+  }, 700);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Установка Dictor {{VERSION}}</title>
+<meta name="robots" content="noindex">
+<meta name="description" content="Загрузка началась. Пока файл качается — четыре шага установки, включая предупреждение macOS о неизвестном разработчике.">
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../assets/favicon-32.png" sizes="32x32">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="stylesheet" href="../assets/site.css">
+<style>
+  .started { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin: 0 0 6px; }
+  .started h1 { font-size: clamp(28px, 4.5vw, 40px); max-width: none; }
+  .again { font-size: 14px; color: var(--graphite); }
+  ol.walk { counter-reset: step; list-style: none; margin: 38px 0 0; padding: 0; }
+  ol.walk > li {
+      counter-increment: step; position: relative;
+      padding: 0 0 30px 52px; border-left: 1px solid var(--border); margin-left: 15px;
+  }
+  ol.walk > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+  ol.walk > li::before {
+      counter-increment: none; content: counter(step);
+      position: absolute; left: -16px; top: -2px;
+      width: 31px; height: 31px; border-radius: 50%;
+      background: var(--voice); color: #FFF;
+      font-size: 14px; font-weight: 600;
+      display: flex; align-items: center; justify-content: center;
+  }
+  ol.walk h2 { font-size: 17px; margin: 2px 0 7px; }
+  ol.walk p { margin: 0 0 10px; color: var(--graphite); font-size: 14.5px; line-height: 1.55; }
+  ol.walk p:last-child { margin-bottom: 0; }
+  @media (prefers-color-scheme: dark) { ol.walk > li::before { color: #1C1B19; } }
+
+  /* Схема окна «Конфиденциальность и безопасность» — рисунок, а не снимок
+     чужого экрана: показывает, куда нажимать, и ничем не притворяется. */
+  .sheet {
+      margin: 14px 0 4px; max-width: 460px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 11px; box-shadow: var(--shadow); overflow: hidden;
+  }
+  .sheet .bar { display: flex; gap: 6px; padding: 10px 13px; border-bottom: 1px solid var(--border); }
+  .sheet .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--border); display: block; }
+  .sheet .body { padding: 15px 17px; font-size: 13.5px; line-height: 1.5; }
+  .sheet .body b { display: block; font-weight: 600; margin-bottom: 5px; }
+  .sheet .body span { color: var(--graphite); }
+  .sheet .row { display: flex; align-items: center; gap: 12px; margin-top: 13px; }
+  .sheet .fake-button {
+      background: var(--voice); color: #FFF; border-radius: 7px;
+      padding: 7px 14px; font-size: 13px; font-weight: 600; white-space: nowrap;
+  }
+  @media (prefers-color-scheme: dark) { .sheet .fake-button { color: #1C1B19; } }
+  .sheet .hint { font-size: 12.5px; color: var(--subtle); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+<div class="enamel" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="wrap">
+<header class="top">
+  <a class="mark" href="../" style="color:inherit">
+    <span class="glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    Dictor
+  </a>
+  <nav>
+    <a href="../">На главную</a>
+    <a href="../en/install/">English</a>
+  </nav>
+</header>
+
+  <div class="started">
+    <h1>Загрузка началась</h1>
+  </div>
+  <p class="lede">
+    Dictor {{VERSION}} · {{DMG_SIZE}} · пока файл качается, вот что будет дальше.
+    Установка занимает минуту, но на втором шаге macOS задаст вопрос — и лучше
+    знать о нём заранее.
+  </p>
+  <p class="again">
+    Не началась? <a href="../Dictor-{{VERSION}}.dmg">Скачайте вручную</a>.
+  </p>
+</div>
+</div>
+
+<div class="wrap">
+<section>
+  <ol class="walk">
+    <li>
+      <h2>Перетащите в «Программы»</h2>
+      <p>Откройте скачанный файл — появится окно с приложением и папкой
+        «Программы». Перетащите одно в другое.</p>
+      <p><b>Важно:</b> не запускайте Dictor прямо из этого окна. macOS в таком
+        случае открывает программу из временной копии, и все выданные
+        разрешения достанутся копии, которая исчезнет.</p>
+    </li>
+    <li>
+      <h2>При первом запуске macOS предупредит</h2>
+      <p>Вы увидите «не удалось проверить разработчика». Это не значит, что с
+        программой что-то не так: приложение подписано, но не заверено у Apple —
+        это платная процедура, и она пока не пройдена.</p>
+      <p>Откройте <b>Системные настройки → Конфиденциальность и безопасность</b>,
+        пролистайте вниз до строки про Dictor и нажмите «Открыть всё равно».</p>
+      <div class="sheet" aria-hidden="true">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <div class="body">
+          <b>Безопасность</b>
+          <div class="row">
+            <span>Приложение «Dictor» заблокировано, так как его разработчик
+              не является установленным.</span>
+            <span class="fake-button">Открыть всё равно</span>
+          </div>
+        </div>
+      </div>
+      <p class="again">Так это выглядит. Вопрос задаётся один раз — обновления
+        его больше не покажут.</p>
+    </li>
+    <li>
+      <h2>Выдайте три разрешения</h2>
+      <p>Микрофон — чтобы слышать. Универсальный доступ — чтобы вставлять текст
+        туда, где стоит курсор. Мониторинг ввода — чтобы ловить сочетание
+        клавиш. Без любого из трёх программа не сможет работать, и она сама
+        объяснит, какое именно отсутствует.</p>
+    </li>
+    <li>
+      <h2>Скажите что-нибудь</h2>
+      <p>Поставьте курсор в любое поле ввода, зажмите <kbd>⌘</kbd> +
+        <kbd>⌥ прав.</kbd> и говорите. Отпустите — текст появится там, где
+        стоял курсор. Сочетание меняется в настройках.</p>
+    </li>
+  </ol>
+</section>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="../">Про программу</a>
+      <a href="https://github.com/abra9987/Dictor">GitHub</a>
+      <a href="https://github.com/abra9987/Dictor/blob/main/PRIVACY.md">Приватность</a>
+    </div>
+    <p>Версия {{VERSION}} · Apple Silicon · macOS 14+ · лицензия MIT</p>
+  </div>
+</footer>
+
+<script>
+  // Загрузка начинается сама — страница нужна, чтобы прочитать про установку,
+  // пока файл качается, а не чтобы нажимать ещё раз.
+  setTimeout(function () {
+    window.location.href = "../Dictor-{{VERSION}}.dmg";
+  }, 700);
+</script>
+
+</body>
+</html>
