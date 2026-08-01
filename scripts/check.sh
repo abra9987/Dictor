@@ -95,10 +95,20 @@ for page in pages:
     for leftover in set(re.findall(r"\{\{[A-Z_]+\}\}", text)) - {
             "{{VERSION}}", "{{SHA256}}", "{{DMG_SIZE}}"}:
         problems.append(f"{page}: неизвестная подстановка {leftover}")
-    for asset in re.findall(r'(?:src|href)="((?:\.\./)?assets/[^"]+)"', text):
+    for asset in re.findall(r'(?:src|href)="((?:\.\./)?(?:assets/[^"]+|favicon\.ico))"',
+                            text):
         target = (page.parent / asset).resolve()
         if not target.exists():
             problems.append(f"{page}: нет файла {asset}")
+
+    # Карточка превью указывается полным адресом — соцсети относительных не
+    # понимают. Проверяем, что за адресом лежит наш файл: битую карточку
+    # видно только там, где ссылку уже отправили.
+    for absolute in re.findall(r'content="https://[^"]+/(assets/[^"]+)"', text):
+        if not (root / absolute).exists():
+            problems.append(f"{page}: og:image ссылается на {absolute}, которого нет")
+    if "og:image" not in text:
+        problems.append(f"{page}: нет og:image — ссылка развернётся пустой карточкой")
 
 if problems:
     print("Channel page checks failed:", file=sys.stderr)
