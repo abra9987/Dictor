@@ -237,6 +237,36 @@ final class Settings: @unchecked Sendable {
 
     /// Закрытые подсказки экрана «Сегодня». Правило макета 6e: закрыли —
     /// больше не возвращается.
+    /// Плавающая капсула (макет 6c). По умолчанию выключена: это постоянный
+    /// объект поверх чужих окон, и появиться он должен потому, что человек
+    /// его позвал, а не потому, что вышло обновление.
+    var floatingCapsuleEnabled: Bool {
+        get { defaults.bool(forKey: "floating_capsule_enabled_v1") }
+        set { defaults.set(newValue, forKey: "floating_capsule_enabled_v1") }
+    }
+
+    /// Где капсула стоит на каждом мониторе. Ключ — номер дисплея: у человека
+    /// с ноутбуком и внешним экраном привычное место у них разное, и таскать
+    /// капсулу заново при каждом подключении — работа за программу.
+    var floatingCapsulePositions: [String: NSPoint] {
+        get {
+            guard let raw = defaults.dictionary(forKey: "floating_capsule_positions_v1")
+                    as? [String: [CGFloat]] else { return [:] }
+            return raw.compactMapValues { pair in
+                pair.count == 2 ? NSPoint(x: pair[0], y: pair[1]) : nil
+            }
+        }
+        set {
+            // Мониторы приходят и уходят, а запись о каждом остаётся навсегда:
+            // держим последние шестнадцать.
+            let trimmed = newValue.prefix(16)
+            let raw = Dictionary(uniqueKeysWithValues: trimmed.map { key, point in
+                (key, [point.x, point.y])
+            })
+            defaults.set(raw, forKey: "floating_capsule_positions_v1")
+        }
+    }
+
     var dismissedHints: [String] {
         get { defaults.stringArray(forKey: "dismissed_hints_v1") ?? [] }
         set {

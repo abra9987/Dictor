@@ -119,6 +119,24 @@ if launchArguments.first == "--export-status-preview" {
         exit(EXIT_FAILURE)
     }
 }
+if launchArguments.first == "--export-capsule-preview" {
+    guard launchArguments.count == 2 || launchArguments.count == 3 else {
+        fputs("usage: Dictor --export-capsule-preview <directory> [ru|en]\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+    do {
+        let capsuleLanguage: InterfaceLanguage = launchArguments.count > 2
+            ? (launchArguments[2].lowercased().hasPrefix("en") ? .english : .russian)
+            : .russian
+        try exportFloatingCapsulePreviews(to: URL(fileURLWithPath: launchArguments[1],
+                                                  isDirectory: true),
+                                          language: capsuleLanguage)
+        exit(EXIT_SUCCESS)
+    } catch {
+        fputs("capsule preview export failed: \(error.localizedDescription)\n", stderr)
+        exit(EXIT_FAILURE)
+    }
+}
 if launchArguments.first == "--export-popover-preview" {
     guard launchArguments.count == 2 || launchArguments.count == 3 else {
         fputs("usage: Dictor --export-popover-preview <directory> [ru|en]\n", stderr)
