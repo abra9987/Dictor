@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Отчёт по каналу раздачи: скачивания, страницы, проверки обновлений.
+"""Отчёт по каналу раздачи: скачивания и заходы на страницу.
 
 Считает по журналу доступа nginx — тому самому, что ведёт любой веб-сервер.
 Приложение для этого ничего не отправляет: в нём нет ни аналитики, ни
 идентификаторов, и появиться они здесь не должны.
+
+Считаются две вещи: сколько раз скачали программу и сколько раз открыли
+страницу. Запросы приложения к манифесту обновлений НЕ считаются — по ним
+видно, сколько установок живо и когда ими пользуются, а это наблюдение за
+людьми, а не за раздачей.
 
 Адреса используются только для подсчёта «сколько разных» и никуда не
 записываются: в сводку уходят одни числа.
@@ -61,8 +66,6 @@ def summarize(entries):
         "download_uniques": collections.defaultdict(set),
         "pages": collections.Counter(),
         "page_uniques": collections.defaultdict(set),
-        "update_checks": 0,
-        "update_check_uniques": set(),
         "bots": collections.Counter(),
     })
 
@@ -81,9 +84,6 @@ def summarize(entries):
         elif path in PAGES and not bot:
             bucket["pages"][PAGES[path]] += 1
             bucket["page_uniques"][PAGES[path]].add(entry["ip"])
-        elif path == "/update.json":
-            bucket["update_checks"] += 1
-            bucket["update_check_uniques"].add(entry["ip"])
 
     result = {}
     for day, bucket in sorted(per_day.items()):
@@ -97,8 +97,6 @@ def summarize(entries):
                 name: {"views": count, "uniques": len(bucket["page_uniques"][name])}
                 for name, count in sorted(bucket["pages"].items())
             },
-            "update_checks": {"requests": bucket["update_checks"],
-                              "uniques": len(bucket["update_check_uniques"])},
             "bots": dict(bucket["bots"].most_common(5)),
         }
     return result
@@ -140,10 +138,8 @@ def print_report(summary):
                        if name.endswith(".dmg"))
         views = sum(stats["views"] for stats in entry["pages"].values())
         uniques = sum(stats["uniques"] for stats in entry["pages"].values())
-        checks = entry["update_checks"]
         print(f"  {day}  установок {installs:3} · страница {views:4} "
-              f"({uniques} адресов) · проверок обновлений {checks['requests']:4} "
-              f"с {checks['uniques']} адресов")
+              f"({uniques} адресов)")
 
     last = summary[days[-1]]
     if last["bots"]:
@@ -171,11 +167,7 @@ def merge(old: dict, new: dict) -> dict:
                     for key in set(stats) | set(before)
                 }
             result[day][section] = merged
-        checks = stored.get("update_checks", {})
-        result[day]["update_checks"] = {
-            key: max(fresh["update_checks"].get(key, 0), checks.get(key, 0))
-            for key in set(fresh["update_checks"]) | set(checks)
-        }
+        result[day].pop("update_checks", None)
         result[day]["bots"] = fresh.get("bots", stored.get("bots", {}))
     return result
 
