@@ -218,25 +218,6 @@ final class SDSidebarItemView: NSControl {
 
 // MARK: - Мелкие поверхности
 
-/// Точка состояния службы в подвале сайдбара (7pt, макет 6a).
-final class SDStatusDotView: NSView {
-    var color: NSColor = SD.C.positive {
-        didSet { needsDisplay = true }
-    }
-
-    override var intrinsicContentSize: NSSize { NSSize(width: 7, height: 7) }
-
-    override func draw(_ dirtyRect: NSRect) {
-        color.setFill()
-        NSBezierPath(ovalIn: NSRect(x: 0, y: bounds.midY - 3.5, width: 7, height: 7)).fill()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        needsDisplay = true
-    }
-}
-
 /// Белая карточка-контейнер: радиус 12, рамка rgba(0,0,0,.07).
 final class SDCardBackgroundView: NSView {
     override init(frame frameRect: NSRect) {
@@ -315,8 +296,6 @@ final class SDBadgeLabel: NSView {
 /// Карточка «Слов сегодня» / «Сэкономлено» / «Дней подряд».
 /// Макет: белая, рамка rgba(0,0,0,.07), радиус 12, padding 16×18.
 final class SDStatCardView: NSView {
-    private let border = CAShapeLayer()
-
     struct Delta {
         let text: String
         let isPositive: Bool

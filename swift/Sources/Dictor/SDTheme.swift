@@ -307,13 +307,6 @@ func dictationMinutesLabel(_ count: Int, language: InterfaceLanguage) -> String 
     return "\(count) \(noun)"
 }
 
-/// Хоткей в середине предложения: без завершающей точки, иначе
-/// получается «⌘ прав..».
-func inlineShortcutText(_ caps: [String]) -> String {
-    let joined = caps.joined(separator: " + ")
-    return joined.hasSuffix(".") ? String(joined.dropLast()) : joined
-}
-
 // MARK: - Поверхность «бумага»
 
 /// Непрозрачный фон окон по дизайну: paper #F5F4F1 / #1E1D1B.

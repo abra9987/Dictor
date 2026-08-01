@@ -137,16 +137,6 @@ enum DictorControlPanelRegistry {
         return false
     }
 
-    static func terminateExistingPanelIfPresent() -> Bool {
-        guard let pid = currentPanelPID() else { return false }
-        if let app = NSRunningApplication(processIdentifier: pid),
-           app.terminate() {
-            return true
-        }
-        kill(pid, SIGTERM)
-        return true
-    }
-
     static func claimCurrentPanel() {
         do {
             try "\(getpid())\n".write(to: url, atomically: true, encoding: .utf8)
