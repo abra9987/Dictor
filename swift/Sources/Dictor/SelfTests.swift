@@ -55,6 +55,8 @@ enum DictorSelfTest {
             return runSuite("service-status", testServiceStatusHold)
         case "search-clear":
             return runSuite("search-clear", testHistorySearchClearButton)
+        case "floating-capsule":
+            return runSuite("floating-capsule", testFloatingCapsuleGeometry)
         case "audio-route":
             return runSuite("audio-route", testAudioRouteChangeDecision)
         case "recording-lifecycle":
@@ -112,6 +114,7 @@ enum DictorSelfTest {
         try testSpeechModelStartupStatus()
         try testServiceStatusHold()
         try testHistorySearchClearButton()
+        try testFloatingCapsuleGeometry()
         try testAudioRouteChangeDecision()
         try testRecordingLifecycle()
         try testPowerStateRecoveryDecision()
@@ -4391,6 +4394,76 @@ enum DictorSelfTest {
             flagsRawValue: flags,
             isAutoRepeat: isAutoRepeat
         )
+    }
+
+    /// Плавающая капсула (макет 6c): прилипание к краям и удержание в
+    /// пределах экрана. Проверить это мышью нельзя — нужен второй монитор,
+    /// терпение и хорошая память на пиксели.
+    private static func testFloatingCapsuleGeometry() throws {
+        let m = FloatingCapsuleMetrics.self
+        // Экран без Дока и строки меню: visibleFrame, а не frame.
+        let visible = NSRect(x: 0, y: 60, width: 1440, height: 840)
+        let size = NSSize(width: 200 + m.shadowInset * 2, height: 30 + m.shadowInset * 2)
+
+        func window(capsuleAt point: NSPoint) -> NSRect {
+            // Из положения капсулы — положение окна: оно шире на поле под тень.
+            NSRect(origin: NSPoint(x: point.x - m.shadowInset, y: point.y - m.shadowInset),
+                   size: size)
+        }
+
+        // Отпущена в семи точках от левого края — прилипает и встаёт на 16.
+        let nearLeft = FloatingCapsuleMetrics.snappedOrigin(
+            windowFrame: window(capsuleAt: NSPoint(x: visible.minX + 7, y: 400)),
+            visibleFrame: visible)
+        try expect(nearLeft.x + m.shadowInset, equals: visible.minX + m.snapMargin,
+                   "a capsule dropped near the left edge should snap to it")
+
+        // Отпущена посреди экрана — остаётся там, где её отпустили.
+        let middlePoint = NSPoint(x: 600, y: 400)
+        let middle = FloatingCapsuleMetrics.snappedOrigin(
+            windowFrame: window(capsuleAt: middlePoint), visibleFrame: visible)
+        try expect(middle, equals: window(capsuleAt: middlePoint).origin,
+                   "a capsule dropped in the open should stay where it was left")
+
+        // Правый край: прилипает правым боком капсулы, а не окна.
+        let nearRight = FloatingCapsuleMetrics.snappedOrigin(
+            windowFrame: window(capsuleAt: NSPoint(x: visible.maxX - 200 - 5, y: 400)),
+            visibleFrame: visible)
+        try expect(nearRight.x + m.shadowInset + 200,
+                   equals: visible.maxX - m.snapMargin,
+                   "the capsule's own right edge should land on the margin")
+
+        // Низ экрана: над Доком, а не под ним.
+        let nearBottom = FloatingCapsuleMetrics.snappedOrigin(
+            windowFrame: window(capsuleAt: NSPoint(x: 600, y: visible.minY + 9)),
+            visibleFrame: visible)
+        try expect(nearBottom.y + m.shadowInset, equals: visible.minY + m.snapMargin,
+                   "a capsule near the bottom should sit above the Dock, not under it")
+
+        // Уехавшую за экран возвращаем: монитор мог отключиться или сменить
+        // разрешение, и капсула осталась бы недосягаемой.
+        let offscreen = FloatingCapsuleMetrics.clampedOrigin(
+            NSPoint(x: 5000, y: -3000), windowSize: size, visibleFrame: visible)
+        try expect(offscreen.x + m.shadowInset + 200, equals: visible.maxX,
+                   "a capsule off the right side should come back to the edge")
+        try expect(offscreen.y + m.shadowInset, equals: visible.minY,
+                   "a capsule below the screen should come back to the bottom")
+
+        // Состояния растут в одну сторону: покой → наведение → запись.
+        try MainActor.assumeIsolated {
+            let view = FloatingCapsuleView(frame: .zero)
+            view.hotkeyTitle = "⌘ ⌥"
+            let idle = view.capsuleWidth(for: .idle)
+            let hover = view.capsuleWidth(for: .hover)
+            let recording = view.capsuleWidth(for: .recording)
+            try expect(idle < hover, equals: true,
+                       "hover shows actions and must be wider than rest: \(idle) vs \(hover)")
+            try expect(hover < recording || recording > idle, equals: true,
+                       "recording must not collapse: \(recording)")
+            try expect(FloatingCapsuleMetrics.height(for: .idle)
+                        < FloatingCapsuleMetrics.height(for: .recording), equals: true,
+                       "the capsule grows from rest to recording, never shrinks")
+        }
     }
 
     /// Крестик очистки поиска по истории.

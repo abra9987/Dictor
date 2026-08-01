@@ -2989,6 +2989,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
+        // Плавающая капсула (макет 6c). Выключена по умолчанию: это объект
+        // поверх чужих окон, и появляться он должен по приглашению.
+        let capsuleToggle = SDToggle()
+        capsuleToggle.isOn = settings.floatingCapsuleEnabled
+        capsuleToggle.onToggle = { [weak self] enabled in
+            self?.settings.floatingCapsuleEnabled = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Плавающая капсула", "Floating capsule"),
+            subtitle: t("Всегда под рукой: перетаскивается, прилипает к краям и помнит место",
+                        "Always at hand: drag it, it sticks to the edges and remembers its place"),
+            control: capsuleToggle
+        ))
+
         // Размер капсулы переехал в «Продвинутые» — там он стоит рядом с
         // положением и живым превью, как в макете 6d. Два места для одной
         // настройки неизбежно начинают расходиться.

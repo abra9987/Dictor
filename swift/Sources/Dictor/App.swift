@@ -967,6 +967,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// в подвале окна, чтобы шапка панели и подвал не расходились словами.
     private let quickPanelStatusHold = ServiceStatusHold()
     private var quickPanelStatusHoldTimer: Timer?
+    /// Плавающая капсула (макет 6c). Живёт, только пока включена в настройках.
+    private let floatingCapsule = FloatingCapsuleController()
     private var isDictationPaused = false
     private var menuBarGlyphPhase: CGFloat = 0
     private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
@@ -1228,6 +1230,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         setMenuBarState(.loading)
         startCorrectionSyncIfConfigured()
         rebuildMenu()
+        applyFloatingCapsuleSettings()
 
         audio.onConfigurationChange = { [weak self] in
             Task { @MainActor in
@@ -1966,6 +1969,31 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         guard !isRecording, !isBusy, !isTerminating else { return }
         _ = settings.refreshFromDisk()
         applyHotkeySettings(force: false)
+        applyFloatingCapsuleSettings()
+    }
+
+    // MARK: - Плавающая капсула (макет 6c)
+
+    /// Капсулу включают и выключают из настроек, как и хоткеи, — без
+    /// перезапуска службы.
+    func applyFloatingCapsuleSettings() {
+        guard settings.floatingCapsuleEnabled else {
+            if floatingCapsule.isVisible { floatingCapsule.close() }
+            return
+        }
+        floatingCapsule.delegate = self
+        let title = capsuleHotkeyTitle()
+        if floatingCapsule.isVisible {
+            floatingCapsule.updateHotkey(title, language: settings.interfaceLanguage)
+        } else {
+            floatingCapsule.show(hotkeyTitle: title, language: settings.interfaceLanguage)
+        }
+    }
+
+    /// В покое капсула показывает ровно то, что человек нажимает.
+    private func capsuleHotkeyTitle() -> String {
+        keycapLabels(for: settings.configuredHotkey, language: settings.interfaceLanguage)
+            .joined(separator: " ")
     }
 
     private func hotkeySignature() -> String {
@@ -2164,6 +2192,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         lastMenuBarGlyphUpdateAt = 0
         recordingHUDView?.resetWave()
         setMenuBarState(.recording)
+        // Капсула переходит в состояние записи тем же движением, что и растёт:
+        // человек видит, что это она, а не новое окно.
+        floatingCapsule.setRecording(true)
         let timer = Timer(timeInterval: 1.0 / 24.0,
                           target: self,
                           selector: #selector(recordingLevelTimerFired(_:)),
@@ -2198,6 +2229,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
         if hideHUD {
             hideRecordingHUD()
+            // Капсула возвращается к покою (или к действиям, если курсор всё
+            // ещё на ней) — тем же переходом в 180 мс.
+            floatingCapsule.setRecording(false)
         }
         if resetImage, isRecording {
             setMenuBarState(.recording)
@@ -2234,6 +2268,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             recordingImage = image
             statusItem.button?.image = image
         }
+        // Плавающая капсула сама растёт под голос — это тот же объект, а не
+        // второе окно (макет 6c). Пока она на экране, отдельный HUD не нужен.
+        if floatingCapsule.isVisible {
+            floatingCapsule.update(level: recordingVisualLevel,
+                                   phase: CGFloat(menuBarGlyphPhase),
+                                   elapsedSeconds: Int(now - (recordingStartedAtUptime ?? now)))
+        }
         refreshRecordingHUDInsertionTargetIfNeeded(at: now)
         if settings.showRecordingWaveform {
             guard !recordingHUDWaitingForInitialTarget else { return }
@@ -2254,6 +2295,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private func showRecordingHUD(mode: RecordingHUDMode,
                                   level: Float) {
         guard settings.showRecordingWaveform else { return }
+        // «Один и тот же объект меняет размер — не появляется новое окно»
+        // (макет 6c): при включённой капсуле запись показывается в ней.
+        guard !floatingCapsule.isVisible else { return }
         let panel = recordingHUDPanel ?? makeRecordingHUDPanel()
         recordingHUDPanel = panel
         let shouldAnimate = !panel.isVisible
@@ -6885,5 +6929,29 @@ extension DictorApp: QuickPanelDelegate {
     private func refreshQuickPanel() {
         guard let panel = quickPanel, panel.isVisible else { return }
         panel.apply(state: quickPanelState())
+    }
+}
+
+// MARK: - Плавающая капсула
+
+extension DictorApp: FloatingCapsuleDelegate {
+    /// Кнопка «Диктовать» — переключатель, независимо от того, как настроен
+    /// хоткей: удерживать мышь на кнопке всю диктовку никто не станет.
+    func floatingCapsuleDidRequestDictation() {
+        if isRecording {
+            handleRelease()
+        } else {
+            handlePress()
+        }
+    }
+
+    func floatingCapsuleDidRequestHistory() {
+        openControlPanelFromAgent(section: MainWindowSection.history.rawValue)
+    }
+
+    func floatingCapsuleDidRequestMenu(at point: NSPoint) {
+        // То же меню, что по правому клику на иконке в строке меню: второго
+        // набора команд у приложения быть не должно.
+        buildMenu().popUp(positioning: nil, at: point, in: nil)
     }
 }
