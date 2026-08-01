@@ -4753,6 +4753,7 @@ enum DictorSelfTest {
             view.frame = NSRect(origin: .zero, size: MAIN_WINDOW_SIZE)
             view.layoutSubtreeIfNeeded()
 
+            @MainActor
             func firstSearchField(in view: NSView) -> NSSearchField? {
                 if let field = view as? NSSearchField { return field }
                 for subview in view.subviews {
@@ -5007,6 +5008,7 @@ enum DictorSelfTest {
             row.frame = NSRect(x: 0, y: 0, width: 700, height: 48)
             row.layoutSubtreeIfNeeded()
 
+            @MainActor
             func icons(in view: NSView) -> [SDRowIconButton] {
                 if let button = view as? SDRowIconButton { return [button] }
                 return view.subviews.flatMap(icons(in:))
@@ -5034,6 +5036,7 @@ enum DictorSelfTest {
             // Значки не должны наезжать на время: макет 6a кладёт их правее,
             // и пересечение означало бы, что одно из двух не нажать.
             let timeLabel = { () -> NSTextField? in
+                @MainActor
                 func fields(in view: NSView) -> [NSTextField] {
                     if let field = view as? NSTextField { return [field] }
                     return view.subviews.flatMap(fields(in:))
