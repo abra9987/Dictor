@@ -1,0 +1,140 @@
+# Что этот файл проверяет на каждый push и pull request.
+#
+# Две джобы вместо одной сознательно: debug и release не переиспользуют
+# артефакты друг друга, а под `#if DEBUG` в проекте живут пять тысяч строк
+# самотестов. Регрессию «символ из SelfTests уехал в продакшн-путь» видит
+# только release-сборка, и она же собирает бандл, который получают люди.
+#
+# Чего здесь нет и почему:
+#   - образ .dmg — `scripts/make-dmg.sh` расставляет окно Finder через
+#     osascript и требует разрешения на автоматизацию, которого у раннера нет;
+#   - выпуск — `scripts/make-release.sh` требует scripts/release.env и SSH-ключа
+#     к каналу обновлений; ни того, ни другого в репозитории нет и быть не
+#     должно;
+#   - `--export-hud-animation` — он снимает 1200 кадров капсулы, это минуты
+#     и сотни мегабайт артефакта. Остальные семь ключей экспорта прогоняются.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  # Ветку main не отменяем: её прогон — это то, что показывает бейдж.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: checks and self-tests
+    # Не macos-latest: scripts/build-app.sh отказывается работать не на Apple
+    # Silicon, а самотесты меряют геометрию окон — версия ОС должна быть
+    # предсказуемой.
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Первым делом — версии. Если однажды прогон упадёт из-за тулчейна,
+      # это должно быть видно в первой строке лога, а не в трейсе компилятора.
+      - name: Toolchain
+        run: |
+          sw_vers
+          uname -m
+          swift --version
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          # Кэшируются только зависимости. Ключ — Package.resolved: он пиннит
+          # ревизию FluidAudio, значит промах кэша означает смену зависимости,
+          # а не случайность. Скомпилированный .build не кэшируем: полгигабайта
+          # и ломается о смену тулчейна.
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            swift/.build/checkouts
+            swift/.build/repositories
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-
+
+      - name: Static checks
+        run: ./scripts/check.sh
+
+      - name: Build (debug)
+        run: swift build -c debug --package-path swift
+
+      # Самотестов 30, в `all` входит 27. Три остальных требуют живой машины:
+      # два трогают систему (универсальный доступ, общий буфер обмена), третий
+      # печатает замер и ничего не проверяет. Они перечислены в CONTRIBUTING.md.
+      - name: Self-tests
+        run: swift/.build/debug/Dictor --self-test all
+
+      # README обещает, что каждый экран проверяется рендером. Пусть CI хотя бы
+      # доказывает, что рендер не падает, — сами картинки смотрит человек.
+      - name: Render every screen
+        run: |
+          out="$RUNNER_TEMP/previews"
+          mkdir -p "$out"
+          swift/.build/debug/Dictor --export-settings-preview   "$out"
+          swift/.build/debug/Dictor --export-history-preview    "$out" ru
+          swift/.build/debug/Dictor --export-onboarding-preview "$out"
+          swift/.build/debug/Dictor --export-popover-preview    "$out" ru
+          swift/.build/debug/Dictor --export-update-preview     "$out"
+          swift/.build/debug/Dictor --export-status-preview     "$out"
+          swift/.build/debug/Dictor --export-capsule-preview    "$out" ru
+          ls -1 "$out" | wc -l
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: screens
+          path: ${{ runner.temp }}/previews
+          retention-days: 7
+
+  bundle:
+    name: app bundle
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            swift/.build/checkouts
+            swift/.build/repositories
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('swift/Package.resolved') }}
+          restore-keys: swiftpm-${{ runner.os }}-
+
+      # Связки ключей с сертификатом «Dictor Dev» на раннере нет, поэтому
+      # build-app.sh уходит в ad-hoc — ровно тот путь, которым собирает человек,
+      # у которого сертификата тоже нет. Проверяется, что этот путь работает.
+      - name: Build the app bundle
+        run: ./scripts/build-app.sh "$RUNNER_TEMP/Dictor.app"
+
+      - name: Verify the bundle
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/Dictor.app"
+          test -x "$app/Contents/MacOS/Dictor"
+          file "$app/Contents/MacOS/Dictor" | grep -q arm64
+          bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist")"
+          test "$bundle_id" = com.raul.dictor
+          # Версия в собранном бандле обязана совпадать с источником правды:
+          # из неё выводится и тег, и адрес архива обновления.
+          packed="$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")"
+          source="$(plutil -extract CFBundleShortVersionString raw -o - swift/Info.plist)"
+          test "$packed" = "$source"
+          codesign --verify --deep --strict "$app"
+          # Оба ключа микрофона: audio-input нужен на Tahoe, microphone — на
+          # системах до неё. Потеря любого ломает запись у части людей.
+          codesign -d --entitlements :- --xml "$app" > "$RUNNER_TEMP/entitlements.plist"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.audio-input' "$RUNNER_TEMP/entitlements.plist"
+          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.microphone' "$RUNNER_TEMP/entitlements.plist"
+          # MIT требует, чтобы лицензия и атрибуция ехали вместе с бинарником.
+          test -f "$app/Contents/Resources/LICENSE.txt"
+          test -f "$app/Contents/Resources/NOTICE.md"
+          echo "bundle $packed verified"
