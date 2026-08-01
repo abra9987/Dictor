@@ -533,27 +533,141 @@ final class SDPrimaryActionButton: NSControl {
     }
 }
 
+// MARK: - Кнопка-значок в строке списка
+
+/// Квадрат 22×22 с символом внутри: рамка, как у прежнего бейджа
+/// «Копировать», но места занимает столько, что рядом помещается вторая.
+/// Значок без подписи молчит, поэтому tooltip здесь обязателен, а не «по
+/// возможности».
+final class SDRowIconButton: NSView {
+    private let icon = NSImageView()
+    private let symbolName: String
+    private var revertWorkItem: DispatchWorkItem?
+    private var isHovered = false {
+        didSet { restyle() }
+    }
+    var onClick: (() -> Void)?
+
+    init(symbolName: String, tooltip: String) {
+        self.symbolName = symbolName
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.borderWidth = 1
+        toolTip = tooltip
+        setAccessibilityLabel(tooltip)
+
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(icon)
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 22),
+            heightAnchor.constraint(equalToConstant: 22),
+            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 12),
+            icon.heightAnchor.constraint(equalToConstant: 12),
+        ])
+        showSymbol(symbolName)
+        restyle()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// Ответ на нажатие: значок на секунду становится галочкой. Без этого
+    /// копирование выглядит как ничего не произошедшее.
+    func flashSymbol(_ name: String, revertingAfter seconds: TimeInterval = 1.2) {
+        revertWorkItem?.cancel()
+        showSymbol(name)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.showSymbol(self.symbolName)
+        }
+        revertWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    private func showSymbol(_ name: String) {
+        let symbol = NSImage(systemSymbolName: name, accessibilityDescription: toolTip)
+        icon.image = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 11, weight: .medium))
+        icon.contentTintColor = SD.C.ink
+    }
+
+    private func restyle() {
+        layer?.borderColor = resolvedCGColor(
+            NSColor(name: nil) { appearance in
+                appearance.isDark
+                    ? NSColor.white.withAlphaComponent(self.isHovered ? 0.34 : 0.18)
+                    : NSColor.black.withAlphaComponent(self.isHovered ? 0.26 : 0.13)
+            })
+        layer?.backgroundColor = resolvedCGColor(
+            isHovered
+                ? NSColor(name: nil) { appearance in
+                    appearance.isDark
+                        ? NSColor.white.withAlphaComponent(0.08)
+                        : NSColor.black.withAlphaComponent(0.05)
+                }
+                : .clear)
+        icon.contentTintColor = SD.C.ink
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeInKeyWindow],
+                                       owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
 // MARK: - Строка «Последние диктовки»
 
 /// Строка списка на «Сегодня»: цветной значок 22×22, текст в одну строку,
-/// время и кнопка «Копировать», которая проявляется по наведению (макет 6a).
+/// время и две кнопки-значка, которые проявляются по наведению (макет 6a):
+/// скопировать и открыть запись целиком в «Истории». Двойной клик по строке
+/// делает то же, что «открыть».
 final class SDRecentEntryRowView: NSControl {
     let transcript: String
-    private let copyBadge = NSView()
+    /// Индекс в `settings.recentTranscriptEntries` — по нему «История»
+    /// находит ту же запись. Образец рядом: `SDHistoryResultRow`.
+    let entryIndex: Int
+    private let actions = NSStackView()
+    private let copyButton: SDRowIconButton
+    private let openAction: Selector
     private var isHovered = false {
         didSet { updateHoverState() }
     }
 
+    /// Показывать кнопки, не дожидаясь мыши. Нужно только экспорту превью:
+    /// снимок делается без курсора, и иначе иконок на нём не увидеть.
+    static var previewForcesActionsVisible = false
+
     init(transcript: String,
+         entryIndex: Int,
          preview: String,
          time: String,
-         copyTitle: String,
+         copyTooltip: String,
+         openTooltip: String,
          target: AnyObject?,
-         action: Selector) {
+         copyAction: Selector,
+         openAction: Selector) {
         self.transcript = transcript
+        self.entryIndex = entryIndex
+        self.openAction = openAction
+        copyButton = SDRowIconButton(symbolName: "doc.on.doc", tooltip: copyTooltip)
         super.init(frame: .zero)
         self.target = target
-        self.action = action
+        self.action = copyAction
         wantsLayer = true
 
         // В макете здесь иконка приложения, в котором диктовали. Источник
@@ -595,18 +709,23 @@ final class SDRecentEntryRowView: NSControl {
         timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         timeLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let copyLabel = NSTextField(labelWithString: copyTitle)
-        copyLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
-        copyLabel.textColor = SD.C.ink
-        copyLabel.translatesAutoresizingMaskIntoConstraints = false
-        copyBadge.wantsLayer = true
-        copyBadge.layer?.cornerRadius = 6
-        copyBadge.layer?.borderWidth = 1
-        copyBadge.alphaValue = 0
-        copyBadge.translatesAutoresizingMaskIntoConstraints = false
-        copyBadge.addSubview(copyLabel)
+        let openButton = SDRowIconButton(symbolName: "arrow.up.forward.square",
+                                         tooltip: openTooltip)
+        copyButton.onClick = { [weak self] in
+            guard let self else { return }
+            self.sendRowAction(copyAction)
+            self.copyButton.flashSymbol("checkmark")
+        }
+        openButton.onClick = { [weak self] in self?.sendRowAction(openAction) }
 
-        for view in [badge, text, timeLabel, copyBadge] {
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 6
+        actions.setViews([copyButton, openButton], in: .leading)
+        actions.alphaValue = SDRecentEntryRowView.previewForcesActionsVisible ? 1 : 0
+        actions.translatesAutoresizingMaskIntoConstraints = false
+
+        for view in [badge, text, timeLabel, actions] {
             addSubview(view)
         }
 
@@ -619,19 +738,22 @@ final class SDRecentEntryRowView: NSControl {
             text.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 14),
             text.centerYAnchor.constraint(equalTo: centerYAnchor),
             text.trailingAnchor.constraint(lessThanOrEqualTo: timeLabel.leadingAnchor, constant: -14),
-            timeLabel.trailingAnchor.constraint(equalTo: copyBadge.leadingAnchor, constant: -14),
+            timeLabel.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -14),
             timeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            copyBadge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            copyBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            copyBadge.heightAnchor.constraint(equalToConstant: 22),
-            copyLabel.leadingAnchor.constraint(equalTo: copyBadge.leadingAnchor, constant: 11),
-            copyLabel.trailingAnchor.constraint(equalTo: copyBadge.trailingAnchor, constant: -11),
-            copyLabel.centerYAnchor.constraint(equalTo: copyBadge.centerYAnchor),
+            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            actions.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         restyle()
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// Кнопки шлют действие от имени строки, а не от своего: получателю
+    /// нужен `SDRecentEntryRowView` — в нём и текст, и индекс записи.
+    private func sendRowAction(_ selector: Selector) {
+        guard let target else { return }
+        NSApp.sendAction(selector, to: target, from: self)
+    }
 
     private func restyle() {
         layer?.backgroundColor = resolvedCGColor(
@@ -641,16 +763,11 @@ final class SDRecentEntryRowView: NSControl {
                         .withAlphaComponent(0.045)
                 }
                 : .clear)
-        copyBadge.layer?.borderColor = resolvedCGColor(
-            NSColor(name: nil) { appearance in
-                appearance.isDark
-                    ? NSColor.white.withAlphaComponent(0.18)
-                    : NSColor.black.withAlphaComponent(0.13)
-            })
     }
 
     private func updateHoverState() {
-        copyBadge.alphaValue = isHovered ? 1 : 0
+        actions.alphaValue =
+            (isHovered || SDRecentEntryRowView.previewForcesActionsVisible) ? 1 : 0
         restyle()
     }
 
@@ -671,6 +788,12 @@ final class SDRecentEntryRowView: NSControl {
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
+        // Двойной клик открывает запись целиком — то же, что кнопка со
+        // стрелкой. Одиночный, как и прежде, копирует.
+        if event.clickCount >= 2 {
+            sendRowAction(openAction)
+            return
+        }
         guard let action, let target else { return }
         NSApp.sendAction(action, to: target, from: self)
     }

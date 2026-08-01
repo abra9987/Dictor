@@ -4778,7 +4778,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     private func buildDictationLanguageSettingsItem() -> NSMenuItem {
-        let langParent = NSMenuItem(title: "Language Hint", action: nil, keyEquivalent: "")
+        // Пункт называется по тому, что делает: подсказка языка — это фильтр
+        // по алфавиту внутри декодера, а не выбор словаря.
+        let langParent = NSMenuItem(title: "Output Script", action: nil, keyEquivalent: "")
         let langSub = NSMenu()
         langSub.autoenablesItems = false
         for lang in DictationLanguage.allCases {

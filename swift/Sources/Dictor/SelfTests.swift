@@ -55,10 +55,14 @@ enum DictorSelfTest {
             return runSuite("service-status", testServiceStatusHold)
         case "search-clear":
             return runSuite("search-clear", testHistorySearchClearButton)
+        case "today-actions":
+            return runSuite("today-actions", testTodayRecentRowActions)
         case "floating-capsule":
             return runSuite("floating-capsule", testFloatingCapsuleGeometry)
         case "spellings":
             return runSuite("spellings", testBuiltInSpellings)
+        case "latin-terms":
+            return runSuite("latin-terms", testLatinTermRestorations)
         case "audio-route":
             return runSuite("audio-route", testAudioRouteChangeDecision)
         case "recording-lifecycle":
@@ -116,8 +120,10 @@ enum DictorSelfTest {
         try testSpeechModelStartupStatus()
         try testServiceStatusHold()
         try testHistorySearchClearButton()
+        try testTodayRecentRowActions()
         try testFloatingCapsuleGeometry()
         try testBuiltInSpellings()
+        try testLatinTermRestorations()
         try testAudioRouteChangeDecision()
         try testRecordingLifecycle()
         try testPowerStateRecoveryDecision()
@@ -4465,6 +4471,150 @@ enum DictorSelfTest {
                    "the set rewrites spelling, not language: \(cyrillic.map(\.source))")
     }
 
+    /// Названия, услышанные по-русски. Этот набор меняет алфавит, а не форму
+    /// записи, поэтому проверять надо не пользу, а безопасность: каждое
+    /// правило отбора из `LatinTermRestorations` здесь отдельным тестом, и
+    /// половина проверок сторожит не то, что набор делает, а то, чего он
+    /// делать не должен.
+    private static func testLatinTermRestorations() throws {
+        func run(_ text: String,
+                 user: [TranscriptCorrection] = [],
+                 enabled: Bool = true) -> String {
+            TranscriptCorrector.apply(
+                to: text,
+                corrections: dictationCorrections(user: user,
+                                                  includeBuiltInSpellings: true,
+                                                  includeLatinTermRestorations: enabled)).text
+        }
+
+        func isCyrillic(_ scalar: Unicode.Scalar) -> Bool {
+            (0x0400...0x04FF).contains(Int(scalar.value))
+        }
+
+        // Правило 1: слева кириллица, справа — ни одной кириллической буквы.
+        // Набор существует ровно ради перехода между алфавитами; правка
+        // формы записи — дело `BuiltInSpellings`.
+        for entry in LatinTermRestorations.all {
+            try expect(entry.source.unicodeScalars.allSatisfy(isCyrillic), equals: true,
+                       "source must be plain Cyrillic: \(entry.source)")
+            try expect(entry.replacement.unicodeScalars.contains(where: isCyrillic),
+                       equals: false,
+                       "replacement must not fall back into Cyrillic: \(entry.replacement)")
+        }
+
+        // Правило 3: не короче пяти букв. Короткое слово рано или поздно
+        // столкнётся с обычным русским — «зум», «нода», «гугл» уже столкнулись.
+        let short = LatinTermRestorations.all.filter { $0.source.count < 5 }
+        try expect(short.isEmpty, equals: true,
+                   "short sources collide with ordinary speech: \(short.map(\.source))")
+
+        let sources = LatinTermRestorations.all.map {
+            normalizedTranscriptCorrectionSource($0.source)
+        }
+
+        // Дубль источника — это молчаливая неопределённость, какая из двух
+        // записей победит.
+        try expect(Set(sources).count, equals: sources.count,
+                   "the set must not carry two entries for one source")
+
+        // Правило 2 и главная проверка безопасности: русское слово в наборе
+        // портит текст, а не чинит его.
+        let forbidden = sources.filter { RUSSIAN_WORDS_NEVER_RESTORED.contains($0) }
+        try expect(forbidden.isEmpty, equals: true,
+                   "these are Russian words, not misheard names: \(forbidden)")
+
+        // Наборы не спорят между собой: у написаний источник латиницей, у
+        // восстановлений — кириллицей, пересечься им негде.
+        let spelled = Set(BuiltInSpellings.all.map {
+            normalizedTranscriptCorrectionSource($0.source)
+        })
+        let overlap = sources.filter { spelled.contains($0) }
+        try expect(overlap.isEmpty, equals: true,
+                   "a source claimed by both sets: \(overlap)")
+
+        // То, ради чего всё затевалось.
+        try expect(run("запушил в гитхаб и починил постгрес"),
+                   equals: "запушил в GitHub и починил PostgreSQL",
+                   "names heard in Russian should go back to their own spelling")
+
+        // Русские слова остаются русскими. Первые три — из блок-листа,
+        // остальные — те, что однажды в наборе полежали.
+        try expect(run("это баг в коде"), equals: "это баг в коде",
+                   "ordinary Russian words must survive untouched")
+        try expect(run("сервер лёг перед дедлайном"), equals: "сервер лёг перед дедлайном",
+                   "ordinary Russian words must survive untouched")
+        try expect(run("скала над рекой"), equals: "скала над рекой",
+                   "a rock is a rock, not a programming language")
+        try expect(run("купил редис"), equals: "купил редис",
+                   "a radish is a radish, not a key-value store")
+        try expect(run("сделай зум и посмотри на юпитер"),
+                   equals: "сделай зум и посмотри на юпитер",
+                   "zoom and Jupiter belong to ordinary speech")
+
+        // Морфологии нет и не будет: «в гитхабе» — не «в GitHubе».
+        try expect(run("лежит в гитхабе"), equals: "лежит в гитхабе",
+                   "the set replaces listed forms only, it does not decline anything")
+
+        // Уже написанное правильно не считается правкой — иначе счётчик
+        // сообщал бы о работе, которой не было.
+        try expect(TranscriptCorrector.apply(
+                    to: "запушил в GitHub",
+                    corrections: dictationCorrections(user: [],
+                                                      includeBuiltInSpellings: true,
+                                                      includeLatinTermRestorations: true)).appliedCount,
+                   equals: 0,
+                   "text already spelled correctly must not count as a correction")
+
+        // Повторный проход по своему же результату ничего не добавляет.
+        let once = run("запушил в гитхаб")
+        try expect(run(once), equals: once, "applying the set twice must be a no-op")
+
+        // Слово человека сильнее набора: иначе поправить его нечем.
+        let mine = [TranscriptCorrection(source: "гитхаб", replacement: "Гитхаб")]
+        try expect(run("запушил в гитхаб", user: mine), equals: "запушил в Гитхаб",
+                   "a manual entry must win over the built-in restoration")
+
+        // Выключенный набор молчит — но написания продолжают работать: это
+        // два разных тумблера, и путать их нельзя.
+        try expect(run("запушил в гитхаб", enabled: false), equals: "запушил в гитхаб",
+                   "with the set off nothing should be rewritten")
+        try expect(run("поставил postgres", enabled: false), equals: "поставил PostgreSQL",
+                   "turning restorations off must not turn spellings off")
+
+        // Пользовательский предел не съедается ни одним из встроенных наборов.
+        let many = (0..<MAX_TRANSCRIPT_CORRECTIONS).map {
+            TranscriptCorrection(source: "слово\($0)", replacement: "Слово\($0)")
+        }
+        let merged = dictationCorrections(user: many,
+                                          includeBuiltInSpellings: true,
+                                          includeLatinTermRestorations: true)
+        try expect(merged.count,
+                   equals: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count
+                       + LatinTermRestorations.count,
+                   "the built-in sets must not push out the user's own words")
+
+        // Пилюли алфавита. Окно и узкая панель берут их из одного места —
+        // тест сторожит сам набор: три варианта, `.auto` первым (смешанная
+        // речь — это он), значения переживают round-trip через rawValue,
+        // короткая подпись не длиннее полной.
+        for interfaceLanguage in [InterfaceLanguage.russian, .english] {
+            let options = dictationScriptOptions(interfaceLanguage: interfaceLanguage)
+            try expect(options.map(\.language), equals: [.auto, .russian, .english],
+                       "the script pills must start with auto and offer both scripts")
+            for option in options {
+                try expect(DictationLanguage(rawValue: option.language.rawValue),
+                           equals: option.language,
+                           "a pill value must parse back into DictationLanguage")
+                try expect(option.title.isEmpty || option.shortTitle.isEmpty, equals: false,
+                           "a pill without a title is a pill nobody can read")
+                try expect(option.shortTitle.count <= option.title.count, equals: true,
+                           "the short title is for the narrow panel: \(option.shortTitle)")
+            }
+            try expect(Set(options.map(\.title)).count, equals: options.count,
+                       "two pills with the same title are indistinguishable")
+        }
+    }
+
     /// Плавающая капсула (макет 6c): прилипание к краям и удержание в
     /// пределах экрана. Проверить это мышью нельзя — нужен второй монитор,
     /// терпение и хорошая память на пиксели.
@@ -4588,6 +4738,124 @@ enum DictorSelfTest {
             }
             try expect(emptyBox.subviews.contains(where: { $0 is NSButton }), equals: false,
                        "an empty query should show no clear button")
+        }
+    }
+
+    /// Кнопки строки «Сегодня»: копировать и открыть запись целиком.
+    ///
+    /// Тест действия прошёл бы и на кнопке, до которой нельзя дотянуться —
+    /// ровно так однажды и вышло с крестиком в поиске. Поэтому проверяется
+    /// достижимость: у строки есть адресат обоих селекторов, значки не
+    /// налезают на время, и `hitTest` в центре значка возвращает значок, а не
+    /// лежащий поверх текст.
+    private static func testTodayRecentRowActions() throws {
+        try MainActor.assumeIsolated {
+            let panel = DictorControlPanelApp()
+            let copySelector = Selector(("todayRecentRowClicked:"))
+            let openSelector = Selector(("todayRecentRowOpen:"))
+            try expect(panel.responds(to: copySelector), equals: true,
+                       "the copy action has no receiver")
+            try expect(panel.responds(to: openSelector), equals: true,
+                       "the open action has no receiver")
+
+            // Значки живут под наведением мыши; курсора в тесте нет, поэтому
+            // включаем тот же режим, которым пользуется экспорт превью.
+            SDRecentEntryRowView.previewForcesActionsVisible = true
+            defer { SDRecentEntryRowView.previewForcesActionsVisible = false }
+
+            let row = SDRecentEntryRowView(
+                transcript: "Привет! По итогам звонка присылаю короткое резюме",
+                entryIndex: 0,
+                preview: "Привет! По итогам звонка присылаю короткое резюме",
+                time: "14:32",
+                copyTooltip: "Копировать",
+                openTooltip: "Открыть целиком",
+                target: panel,
+                copyAction: copySelector,
+                openAction: openSelector)
+            row.frame = NSRect(x: 0, y: 0, width: 700, height: 48)
+            row.layoutSubtreeIfNeeded()
+
+            func icons(in view: NSView) -> [SDRowIconButton] {
+                if let button = view as? SDRowIconButton { return [button] }
+                return view.subviews.flatMap(icons(in:))
+            }
+            let buttons = icons(in: row)
+            try expect(buttons.count, equals: 2,
+                       "the row should offer copy and open, nothing else")
+
+            for button in buttons {
+                // Значок без подписи молчит: tooltip здесь — единственное,
+                // что объясняет, что случится по нажатию.
+                try expect(button.toolTip?.isEmpty == false, equals: true,
+                           "an icon button without a tooltip explains nothing")
+                // Строка лежит в начале координат, поэтому её собственная
+                // система совпадает с той, в которой считает `hitTest`.
+                let centre = button.convert(NSPoint(x: button.bounds.midX,
+                                                    y: button.bounds.midY),
+                                            to: row)
+                let hit = row.hitTest(centre)
+                let reachable = hit === button || (hit?.isDescendant(of: button) ?? false)
+                try expect(reachable, equals: true,
+                           "a click in the middle of the icon lands on \(hit.map { "\(type(of: $0))" } ?? "nothing")")
+            }
+
+            // Значки не должны наезжать на время: макет 6a кладёт их правее,
+            // и пересечение означало бы, что одно из двух не нажать.
+            let timeLabel = { () -> NSTextField? in
+                func fields(in view: NSView) -> [NSTextField] {
+                    if let field = view as? NSTextField { return [field] }
+                    return view.subviews.flatMap(fields(in:))
+                }
+                return fields(in: row).first { $0.stringValue == "14:32" }
+            }()
+            guard let timeLabel else {
+                throw SelfTestFailure.failed("the row lost its time label")
+            }
+            for button in buttons {
+                let frame = button.convert(button.bounds, to: row)
+                try expect(frame.minX >= timeLabel.frame.maxX, equals: true,
+                           "an icon overlaps the time: icon at \(frame.minX), "
+                           + "time ends at \(timeLabel.frame.maxX)")
+                try expect(frame.maxX <= row.bounds.maxX, equals: true,
+                           "an icon hangs off the row: \(frame.maxX) > \(row.bounds.maxX)")
+            }
+
+            // И последнее звено: действие доходит до эффекта. Кнопка с живым
+            // адресатом, которая никуда не переключает, — тот же мёртвый код,
+            // только с виду рабочий.
+            let settings = Settings.shared
+            let savedEntries = settings.recentTranscriptEntries
+            defer { settings.recentTranscriptEntries = savedEntries }
+            settings.recentTranscriptEntries = [
+                TranscriptHistoryEntry(text: "первая диктовка",
+                                       transcriptionDurationSeconds: 1,
+                                       createdAt: Date(timeIntervalSince1970: 1_700_000_000)),
+                TranscriptHistoryEntry(text: "вторая диктовка",
+                                       transcriptionDurationSeconds: 1,
+                                       createdAt: Date(timeIntervalSince1970: 1_700_000_100)),
+            ]
+            panel.mainSection = .today
+            // Запрос с прошлого раза не должен спрятать выбранную запись.
+            panel.mainHistorySearch = "ничего такого в истории нет"
+            let secondRow = SDRecentEntryRowView(
+                transcript: "вторая диктовка",
+                entryIndex: 1,
+                preview: "вторая диктовка",
+                time: "14:33",
+                copyTooltip: "Копировать",
+                openTooltip: "Открыть целиком",
+                target: panel,
+                copyAction: copySelector,
+                openAction: openSelector)
+            panel.perform(openSelector, with: secondRow)
+            try expect(panel.mainSection.rawValue, equals: MainWindowSection.history.rawValue,
+                       "opening an entry must switch the window to History")
+            try expect(panel.mainHistorySearch, equals: "",
+                       "a stale search query would hide the entry that was just opened")
+            try expect(panel.historySelectionKey?.contains("вторая диктовка"), equals: true,
+                       "History must select the very entry that was clicked, "
+                       + "got \(panel.historySelectionKey ?? "nothing")")
         }
     }
 

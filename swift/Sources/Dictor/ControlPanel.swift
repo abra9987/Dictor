@@ -106,7 +106,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// Раздел главного окна (макет 6a): «Сегодня» открывается первым.
     var mainSection: MainWindowSection = .today
     /// Выбранная запись в «Истории» и фильтр «Закреплённые» (макет 6b).
-    private var historySelectionKey: String?
+    /// Не private: самотест `today-actions` проверяет, что переход из
+    /// «Сегодня» выбирает именно ту запись, по которой щёлкнули.
+    var historySelectionKey: String?
     private var pendingSettingsApply: DispatchWorkItem?
     /// Выбранный период в «Статистике» (макет 7a).
     var statsPeriod: StatsPeriod = .month
@@ -625,17 +627,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             control: serviceToggle
         ))
 
-        let langPills = SDPills(options: [
-            .init(title: "RU", value: DictationLanguage.russian.rawValue),
-            .init(title: "EN", value: DictationLanguage.english.rawValue),
-            .init(title: t("Авто", "Auto"), value: DictationLanguage.auto.rawValue),
-        ], selected: settings.dictationLanguage.rawValue)
+        let scriptOptions = dictationScriptOptions(interfaceLanguage: language)
+        let langPills = SDPills(options: scriptOptions.map {
+            .init(title: $0.title, value: $0.language.rawValue)
+        }, selected: settings.dictationLanguage.rawValue)
         langPills.onSelect = { [weak self] raw in
             guard let language = DictationLanguage(rawValue: raw) else { return }
             self?.settings.dictationLanguage = language
         }
         root.addArrangedSubview(SDRowView(
-            title: t("Язык распознавания", "Dictation language"),
+            title: t("Алфавит вывода", "Output script"),
+            subtitle: t("Авто — смешанная речь. Кириллица — английские слова "
+                        + "запишутся по-русски",
+                        "Auto handles mixed speech. Cyrillic makes English words "
+                        + "come out in Russian letters"),
             control: langPills
         ))
 
@@ -1651,6 +1656,19 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         pasteboard.setString(sender.transcript, forType: .string)
     }
 
+    /// Из «Сегодня» — в «Историю», на ту же самую запись. В строке текст
+    /// обрезан одной строкой, и длинную диктовку прочесть больше негде.
+    @objc private func todayRecentRowOpen(_ sender: SDRecentEntryRowView) {
+        let entries = settings.recentTranscriptEntries
+        guard entries.indices.contains(sender.entryIndex) else { return }
+        // Поиск в «Истории» мог остаться набранным с прошлого раза — с ним
+        // выбранная запись не попадёт в список и выбор будет не виден.
+        mainHistorySearch = ""
+        historySelectionKey = historyEntryKey(entries[sender.entryIndex])
+        mainSection = .history
+        refresh(force: true)
+    }
+
     // MARK: - Раздел «Сегодня» (макет 6a)
 
     private func makeTodayView() -> NSView {
@@ -2375,36 +2393,61 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             list.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
 
-        // Встроенный набор написаний. Он правит текст молча, поэтому о нём
-        // надо сказать вслух — и дать выключить.
-        let spellingsToggle = SDToggle()
-        spellingsToggle.isOn = settings.builtInSpellingsEnabled
-        spellingsToggle.onToggle = { [weak self] enabled in
-            self?.settings.builtInSpellingsEnabled = enabled
+        // Встроенные наборы правят текст молча, поэтому о них надо сказать
+        // вслух — и дать выключить. Обе карточки устроены одинаково.
+        func toggleCard(title: String,
+                        subtitle: String,
+                        isOn: Bool,
+                        onToggle: @escaping (Bool) -> Void) -> NSView {
+            let toggle = SDToggle()
+            toggle.isOn = isOn
+            toggle.onToggle = onToggle
+            let cardBackground = SDCardBackgroundView()
+            let row = SDRowView(title: title,
+                                subtitle: subtitle,
+                                control: toggle,
+                                hairline: false)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            cardBackground.addSubview(row)
+            NSLayoutConstraint.activate([
+                row.leadingAnchor.constraint(equalTo: cardBackground.leadingAnchor,
+                                             constant: 16),
+                row.trailingAnchor.constraint(equalTo: cardBackground.trailingAnchor,
+                                              constant: -16),
+                row.topAnchor.constraint(equalTo: cardBackground.topAnchor, constant: 4),
+                row.bottomAnchor.constraint(equalTo: cardBackground.bottomAnchor,
+                                            constant: -4),
+            ])
+            return cardBackground
         }
-        let spellingsCard = SDCardBackgroundView()
-        let spellingsRow = SDRowView(
+
+        let spellingsCard = toggleCard(
             title: t("Написание названий", "Name spelling"),
             subtitle: t("\(BuiltInSpellings.count) технических названий пишутся правильно: "
                         + "postgres → PostgreSQL, sql → SQL, macos → macOS",
                         "\(BuiltInSpellings.count) technical names come out spelled properly: "
                         + "postgres → PostgreSQL, sql → SQL, macos → macOS"),
-            control: spellingsToggle,
-            hairline: false
-        )
-        spellingsRow.translatesAutoresizingMaskIntoConstraints = false
-        spellingsCard.addSubview(spellingsRow)
-        NSLayoutConstraint.activate([
-            spellingsRow.leadingAnchor.constraint(equalTo: spellingsCard.leadingAnchor,
-                                                  constant: 16),
-            spellingsRow.trailingAnchor.constraint(equalTo: spellingsCard.trailingAnchor,
-                                                   constant: -16),
-            spellingsRow.topAnchor.constraint(equalTo: spellingsCard.topAnchor, constant: 4),
-            spellingsRow.bottomAnchor.constraint(equalTo: spellingsCard.bottomAnchor,
-                                                 constant: -4),
-        ])
+            isOn: settings.builtInSpellingsEnabled,
+            onToggle: { [weak self] enabled in
+                self?.settings.builtInSpellingsEnabled = enabled
+            })
 
-        let column = NSStackView(views: [card, spellingsCard])
+        // Второй набор меняет алфавит, а не форму записи, — и это заметнее.
+        // Пример в подписи именно поэтому: человек должен увидеть, что
+        // произойдёт с его текстом, до того как это произойдёт.
+        let restorationsCard = toggleCard(
+            title: t("Названия латиницей", "Names in Latin script"),
+            subtitle: t("\(LatinTermRestorations.count) названий, услышанных по-русски, "
+                        + "возвращаются к своему написанию: гитхаб → GitHub, "
+                        + "постгрес → PostgreSQL",
+                        "\(LatinTermRestorations.count) names heard in Russian go back to "
+                        + "their own spelling: гитхаб → GitHub, постгрес → PostgreSQL"),
+            isOn: settings.latinTermRestorationsEnabled,
+            onToggle: { [weak self] enabled in
+                self?.settings.latinTermRestorationsEnabled = enabled
+            })
+
+        let column = NSStackView(views: [card, spellingsCard, restorationsCard])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 14
@@ -2425,6 +2468,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         card.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -56).isActive = true
         spellingsCard.widthAnchor.constraint(equalTo: column.widthAnchor,
                                              constant: -56).isActive = true
+        restorationsCard.widthAnchor.constraint(equalTo: column.widthAnchor,
+                                                constant: -56).isActive = true
         return root
     }
 
@@ -2482,11 +2527,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 }
                 let row = SDRecentEntryRowView(
                     transcript: entry.text,
+                    entryIndex: index,
                     preview: entry.text.replacingOccurrences(of: "\n", with: " "),
                     time: recentEntryTimeText(entry),
-                    copyTitle: t("Копировать", "Copy"),
+                    copyTooltip: t("Копировать", "Copy"),
+                    openTooltip: t("Открыть целиком в «Истории»", "Open in full in History"),
                     target: self,
-                    action: #selector(todayRecentRowClicked(_:)))
+                    copyAction: #selector(todayRecentRowClicked(_:)),
+                    openAction: #selector(todayRecentRowOpen(_:)))
                 column.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
             }
@@ -4376,12 +4424,16 @@ func exportHistoryPanelPreviews(to directory: URL,
            TranscriptCorrection(source: "постгрес", replacement: "PostgreSQL"),
            TranscriptCorrection(source: "раул", replacement: "Раул"),
            TranscriptCorrection(source: "диктор", replacement: "Dictor")]
+    // Кнопки строки «Сегодня» проявляются по наведению, а снимок делается
+    // без курсора — иначе иконки не проверить рендером вовсе.
+    SDRecentEntryRowView.previewForcesActionsVisible = true
     defer {
         settings.interfaceLanguage = savedLanguage
         settings.recentTranscriptEntries = savedEntries
         settings.dailyDictationUsage = savedUsage
         settings.dismissedHints = savedDismissedHints
         settings.transcriptCorrections = savedCorrections
+        SDRecentEntryRowView.previewForcesActionsVisible = false
     }
     // Сэмплы на языке интерфейса: английские снимки с русскими диктовками
     // внутри выглядят как незаконченный перевод.
