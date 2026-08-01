@@ -152,6 +152,8 @@ swift/.build/debug/Dictor --export-settings-preview   <dir>
 swift/.build/debug/Dictor --export-onboarding-preview <dir>
 swift/.build/debug/Dictor --export-update-preview     <dir>
 swift/.build/debug/Dictor --export-popover-preview    <dir>
+swift/.build/debug/Dictor --export-status-preview     <dir>
+swift/.build/debug/Dictor --export-capsule-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-hud-animation      <dir> [ru|en]
 ```
 

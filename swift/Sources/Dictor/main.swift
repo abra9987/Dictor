@@ -10,8 +10,8 @@
 // in Xcode jumps between them. Keep them honest as you edit.
 //
 // Architectural invariants the build relies on are documented in
-// ../../AGENTS.md — read that before refactoring concurrency,
-// resource loading, or codesigning. In particular:
+// ARCHITECTURE.md at the repository root — read that before refactoring
+// concurrency, resource loading, or codesigning. In particular:
 //   - `AudioCapture` is *not* @MainActor (AVAudioEngine tap fires on
 //     an audio thread; main-actor entry would SIGTRAP under Swift 6
 //     strict concurrency).
