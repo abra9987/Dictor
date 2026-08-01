@@ -83,7 +83,11 @@ enum TranscriptCorrector {
     }
 
     static func apply(to text: String, corrections: [TranscriptCorrection]) -> (text: String, appliedCount: Int) {
-        let active = normalizedTranscriptCorrections(corrections)
+        // Предел шире пользовательского: сюда приходит и встроенный
+        // набор написаний, который в настройках не хранится.
+        let active = normalizedTranscriptCorrections(
+            corrections,
+            limit: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count)
             .sorted { lhs, rhs in
                 if lhs.source.count != rhs.source.count { return lhs.source.count > rhs.source.count }
                 return lhs.source.localizedCaseInsensitiveCompare(rhs.source) == .orderedAscending
@@ -102,6 +106,11 @@ enum TranscriptCorrector {
             regex.enumerateMatches(in: text, range: fullRange) { match, _, _ in
                 guard let range = match?.range, range.location != NSNotFound else { return }
                 guard !matches.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) else { return }
+                // Уже написанное правильно пропускаем: замена «SQL» на «SQL»
+                // ничего не меняет, но попадает в счётчик правок.
+                if let found = Range(range, in: text), text[found] == correction.replacement {
+                    return
+                }
                 matches.append(Match(range: range, replacement: correction.replacement))
             }
         }

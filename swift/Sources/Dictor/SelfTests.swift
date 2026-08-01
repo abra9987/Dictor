@@ -57,6 +57,8 @@ enum DictorSelfTest {
             return runSuite("search-clear", testHistorySearchClearButton)
         case "floating-capsule":
             return runSuite("floating-capsule", testFloatingCapsuleGeometry)
+        case "spellings":
+            return runSuite("spellings", testBuiltInSpellings)
         case "audio-route":
             return runSuite("audio-route", testAudioRouteChangeDecision)
         case "recording-lifecycle":
@@ -115,6 +117,7 @@ enum DictorSelfTest {
         try testServiceStatusHold()
         try testHistorySearchClearButton()
         try testFloatingCapsuleGeometry()
+        try testBuiltInSpellings()
         try testAudioRouteChangeDecision()
         try testRecordingLifecycle()
         try testPowerStateRecoveryDecision()
@@ -4394,6 +4397,69 @@ enum DictorSelfTest {
             flagsRawValue: flags,
             isAutoRepeat: isAutoRepeat
         )
+    }
+
+    /// Встроенный набор написаний. Проверяем не «список не пуст», а то,
+    /// чего от него ждут: имена приходят в канонический вид, слово человека
+    /// сильнее встроенного, и ничего не меняется внутри других слов.
+    private static func testBuiltInSpellings() throws {
+        func run(_ text: String,
+                 user: [TranscriptCorrection] = [],
+                 enabled: Bool = true) -> String {
+            TranscriptCorrector.apply(
+                to: text,
+                corrections: dictationCorrections(user: user,
+                                                  includeBuiltInSpellings: enabled)).text
+        }
+
+        // Ровно те промахи, что нашлись в живом архиве диктовок.
+        try expect(run("поставил postgres и msql"), equals: "поставил PostgreSQL и MySQL",
+                   "database names should come out spelled the way they are written")
+        try expect(run("выгрузил в csv через api"), equals: "выгрузил в CSV через API",
+                   "abbreviations dictated in lower case should come out upper case")
+        try expect(run("собрал на macos в xcode"), equals: "собрал на macOS в Xcode",
+                   "Apple names have their own casing and it is not sentence case")
+
+        // Слово человека сильнее встроенного: иначе поправить набор нечем.
+        let mine = [TranscriptCorrection(source: "postgres", replacement: "Постгрес")]
+        try expect(run("поставил postgres", user: mine), equals: "поставил Постгрес",
+                   "a manual entry must win over the built-in spelling")
+
+        // Выключенный набор молчит.
+        try expect(run("поставил postgres", enabled: false), equals: "поставил postgres",
+                   "with the set off nothing should be rewritten")
+
+        // Границы слова: «api» внутри слова — не аббревиатура.
+        try expect(run("это рапира и api"), equals: "это рапира и API",
+                   "a match inside another word must not be replaced")
+
+        // Уже написанное правильно не считается правкой — иначе счётчик
+        // сообщал бы о работе, которой не было.
+        try expect(TranscriptCorrector.apply(
+                    to: "открыл GitHub",
+                    corrections: dictationCorrections(user: [],
+                                                      includeBuiltInSpellings: true)).appliedCount,
+                   equals: 0,
+                   "text already spelled correctly must not count as a correction")
+
+        // Набор не съедает пользовательский предел: слова человека остаются
+        // все до единого.
+        let many = (0..<MAX_TRANSCRIPT_CORRECTIONS).map {
+            TranscriptCorrection(source: "слово\($0)", replacement: "Слово\($0)")
+        }
+        let merged = dictationCorrections(user: many, includeBuiltInSpellings: true)
+        try expect(merged.count, equals: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count,
+                   "the built-in set must not push out the user's own words")
+
+        // В наборе нет замен «кириллица → латиница»: «код» и «баг» — русские
+        // слова, а не ошибки распознавания.
+        let cyrillic = BuiltInSpellings.all.filter {
+            $0.source.unicodeScalars.contains { scalar in
+                (0x0400...0x04FF).contains(Int(scalar.value))
+            }
+        }
+        try expect(cyrillic.isEmpty, equals: true,
+                   "the set rewrites spelling, not language: \(cyrillic.map(\.source))")
     }
 
     /// Плавающая капсула (макет 6c): прилипание к краям и удержание в

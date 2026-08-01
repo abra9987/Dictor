@@ -1571,7 +1571,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 let completedAt = ProcessInfo.processInfo.systemUptime
                 let timing = transcription.timing(totalSeconds: completedAt - requestedAt)
                 let processed = processedDictationText(rawTranscript: transcription.text,
-                                                       corrections: settings.transcriptCorrections,
+                                                       corrections: settings.dictationTranscriptCorrections,
                                                        removeFillerWords: settings.removeFillerWords,
                                                        language: settings.dictationLanguage)
                 if !processed.text.isEmpty {
@@ -3124,7 +3124,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 if !isTerminating {
                     let postprocessingStartedAt = ProcessInfo.processInfo.systemUptime
                     let processed = processedDictationText(rawTranscript: transcription.text,
-                                                           corrections: settings.transcriptCorrections,
+                                                           corrections: settings.dictationTranscriptCorrections,
                                                            removeFillerWords: settings.removeFillerWords,
                                                            language: settings.dictationLanguage)
                     let postprocessingCompletedAt = ProcessInfo.processInfo.systemUptime
@@ -3291,7 +3291,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 let timing = transcription.timing(totalSeconds: completedAt - requestedAt)
                 if !isTerminating {
                     let processed = processedDictationText(rawTranscript: transcription.text,
-                                                           corrections: settings.transcriptCorrections,
+                                                           corrections: settings.dictationTranscriptCorrections,
                                                            removeFillerWords: settings.removeFillerWords,
                                                            language: settings.dictationLanguage)
                     if !processed.text.isEmpty {
