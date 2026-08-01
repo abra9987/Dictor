@@ -251,9 +251,15 @@ final class Settings: @unchecked Sendable {
     var floatingCapsulePositions: [String: NSPoint] {
         get {
             guard let raw = defaults.dictionary(forKey: "floating_capsule_positions_v1")
-                    as? [String: [CGFloat]] else { return [:] }
-            return raw.compactMapValues { pair in
-                pair.count == 2 ? NSPoint(x: pair[0], y: pair[1]) : nil
+            else { return [:] }
+            // Числа читаем через NSNumber, а не приведением к [CGFloat]:
+            // целое из plist («174», а не «174.0») такому приведению не
+            // поддаётся, и весь словарь молча превращается в пустой —
+            // капсула «забывает» место, ничем об этом не сообщая.
+            return raw.compactMapValues { value in
+                guard let pair = value as? [NSNumber], pair.count == 2 else { return nil }
+                return NSPoint(x: CGFloat(pair[0].doubleValue),
+                               y: CGFloat(pair[1].doubleValue))
             }
         }
         set {
