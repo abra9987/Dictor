@@ -189,9 +189,12 @@ func serviceStatusPresentation(_ kind: ServiceStatusKind,
     case .ready(let latency):
         // Вторая строка называет модель и — если есть, что назвать — реальную
         // медиану отклика. Пока диктовок не было, числа нет и его не выдумываем.
+        // Неразрывный пробел между числом и единицей: в подвале сайдбара
+        // строка не помещалась, и «мс» уезжало на вторую строку в
+        // одиночестве — число отдельно, единица отдельно.
         let detail = latency.map {
-            t("Parakeet · локально · отклик \($0) мс",
-              "Parakeet · on-device · \($0) ms latency")
+            t("Parakeet · локально · отклик \($0)\u{00A0}мс",
+              "Parakeet · on-device · \($0)\u{00A0}ms latency")
         } ?? t("Parakeet · локально", "Parakeet · on-device")
         return .init(title: t("Готово к диктовке", "Ready to dictate"), subtitle: detail)
 

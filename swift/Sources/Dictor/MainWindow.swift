@@ -473,7 +473,7 @@ final class SDPrimaryActionButton: NSControl {
         addSubview(background)
 
         titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
-        titleLabel.textColor = .white
+        titleLabel.textColor = SD.C.onVoice
 
         let row = NSStackView(views: [titleLabel])
         row.orientation = .horizontal
@@ -482,7 +482,7 @@ final class SDPrimaryActionButton: NSControl {
         if let shortcut, !shortcut.isEmpty {
             let shortcutLabel = NSTextField(labelWithString: shortcut)
             shortcutLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            shortcutLabel.textColor = NSColor.white.withAlphaComponent(0.72)
+            shortcutLabel.textColor = SD.C.onVoice.withAlphaComponent(0.72)
             row.addArrangedSubview(shortcutLabel)
         }
         row.translatesAutoresizingMaskIntoConstraints = false
