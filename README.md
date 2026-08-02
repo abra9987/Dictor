@@ -123,10 +123,11 @@ Requires macOS 14 and Apple Silicon.
   journal stays so the next launch can recover the dictation into History.
 - Transcripts and statistics stay on your Mac, in your user library.
 - No accounts, no analytics, no crash reporting, no identifiers of any kind.
-- Two network calls exist and both are visible in the Privacy tab: downloading
-  the speech model once, and asking the update channel for a version number.
-  The update check sends a fixed user agent and nothing else, and can be turned
-  off.
+- Network destinations are two: `huggingface.co`, where the speech model comes
+  from (once — and again only if the cached files fail their integrity check),
+  and the update channel, which answers with a version number and, during an
+  update, the archive. The update check sends a fixed user agent and can be
+  turned off.
 
 ## Build
 

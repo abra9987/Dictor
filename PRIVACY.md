@@ -18,10 +18,13 @@ Dictor is designed for local dictation.
 
 ## Network access
 
-Dictor uses the network only to download the speech model through FluidAudio
-and to ask the update channel at `https://dictor.raulgumerov.com` for the
-latest version number, at most once every six hours. Turn the update check off
-in Settings → General and the app stops using the network altogether.
+Dictor uses the network only to download the speech model — the files come
+from `huggingface.co`, where FluidAudio hosts them — and to ask the update
+channel at `https://dictor.raulgumerov.com` for the latest version number, at
+most once every six hours. Turn the update check off in Settings → General and
+the app stops going online on its own, with one exception: if the cached model
+files ever fail their integrity check, the model is re-downloaded from
+`huggingface.co` regardless of that switch.
 
 When an update is installed, the archive is downloaded from that same channel;
 its address is derived from the version number rather than taken from the
