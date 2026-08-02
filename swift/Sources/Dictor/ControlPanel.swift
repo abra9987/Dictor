@@ -1045,7 +1045,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         let entry = TranscriptCorrection(source: source, replacement: replacement)
         settings.transcriptCorrections = normalizedTranscriptCorrections(existing + [entry])
-        log("dictionary: correction added «\(source)» → «\(replacement)»")
+        // Содержимое пары в лог не пишется: хвост лога дословно попадает в
+        // отчёт диагностики, который обещает «text-correction contents are
+        // not included», — и человек прикладывает его к публичным issue.
+        log("dictionary: correction added (\(source.count) chars → \(replacement.count) chars)")
         return entry
     }
 
