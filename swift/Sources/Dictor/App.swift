@@ -6714,6 +6714,12 @@ extension DictorApp: QuickPanelDelegate {
         if let missing = missingPermissions().first {
             return .needsPermission(name: missing.rawValue)
         }
+        // Отказ на старте (модель не загрузилась, слушатель хоткея не встал)
+        // раньше сюда не доносился: сборщик проваливался в «Служба
+        // запускается · обычно 1–3 секунды» — навечно. Состояние .failed из
+        // макета 8 с кнопкой «Открыть Настройки» существовало и было
+        // недостижимо.
+        if startupFailure != nil { return .failed }
         if let verified = verifiedModelFiles, let total = totalModelFiles {
             return .verifying(done: verified, total: total)
         }

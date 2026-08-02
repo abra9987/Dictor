@@ -191,6 +191,10 @@ final class SDToggle: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        // Блёклый тумблер обязан быть и мёртвым: поповер выключает его на
+        // время установки обновления (isEnabled = false, alpha 0.45), а
+        // NSControl сам за этим в mouseDown не следит.
+        guard isEnabled else { return }
         isOn.toggle()
         onToggle?(isOn)
     }
