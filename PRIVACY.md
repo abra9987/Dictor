@@ -6,8 +6,11 @@ Dictor is designed for local dictation.
 
 - Microphone audio is processed locally and is not sent to a transcription API.
 - Successful transcripts, timing statistics, corrections, and preferences are
-  stored under `~/Library/Application Support/Dictor`.
-- Diagnostic logs are stored under `~/Library/Logs` and avoid transcript text.
+  stored in the app's preferences file,
+  `~/Library/Preferences/com.raul.dictor.plist`. Service state and the
+  crash-recovery journal live under `~/Library/Application Support/Dictor`.
+- Diagnostic logs are stored under `~/Library/Logs` and avoid transcript text;
+  they do record the name of the app each dictation was inserted into.
 - Pending audio is kept only as a crash-recovery safeguard and is removed after
   it has been handled.
 - The speech model is cached by FluidAudio under
