@@ -32,41 +32,6 @@ func shouldPressEnterAfterDictation(
     return behavior.pressesEnter
 }
 
-@MainActor
-final class CorrectionShareCleanupDelegate: NSObject, @preconcurrency NSSharingServicePickerDelegate, NSSharingServiceDelegate {
-    private let cleanup: (String) -> Void
-
-    init(cleanup: @escaping (String) -> Void) {
-        self.cleanup = cleanup
-    }
-
-    private func runCleanup(reason: String) {
-        cleanup(reason)
-    }
-
-    func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker,
-                              delegateFor sharingService: NSSharingService) -> NSSharingServiceDelegate? {
-        self
-    }
-
-    func sharingServicePicker(_ sharingServicePicker: NSSharingServicePicker,
-                              didChoose service: NSSharingService?) {
-        if service == nil {
-            runCleanup(reason: "dismissed")
-        }
-    }
-
-    func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {
-        runCleanup(reason: "shared")
-    }
-
-    func sharingService(_ sharingService: NSSharingService,
-                        didFailToShareItems items: [Any],
-                        error: Error) {
-        runCleanup(reason: "share failed")
-    }
-}
-
 final class RecordingHUDView: NSView {
     // Публичный API сохранён ради exportRecordingHUDAnimationFrames и
     // существующей интеграции; отрисовка полностью новая («линия голоса»).
@@ -1019,7 +984,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var workspacePowerObservers: [NSObjectProtocol] = []
     private var hotkeyPausedForExternalCapture = false
     private var hotkeyCaptureFailsafeTimer: Timer?
-    private var hotkeyRecorder: HotkeyRecorderController?
     private var shouldResumeRuntimeAfterWake = false
     private var didLogDeferredWakeRecovery = false
     private var setupChecklistWindow: NSWindow?
@@ -1113,9 +1077,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// Scan request that arrived while a scan was in flight; re-issued
     /// (with the strongest flags seen) when the in-flight scan lands.
     private var pendingCorrectionSyncScan: (force: Bool, presentErrors: Bool)?
-    private var correctionSharePicker: NSSharingServicePicker?
-    private var correctionShareCleanupDelegate: CorrectionShareCleanupDelegate?
-    private var pendingSharedCorrectionsURL: URL?
 
     // MARK: - Lifecycle
 
@@ -1291,8 +1252,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
-        hotkeyRecorder?.cancel()
-        hotkeyRecorder = nil
         publishAgentState(status: "stopping", detail: "Dictation service is stopping.")
         settings.hasActiveRunMarker = false
         startupTask?.cancel()
@@ -1308,7 +1267,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         removeHotkeyCaptureObservers()
         correctionSyncTimer?.invalidate()
         correctionSyncTimer = nil
-        cleanupPendingSharedCorrections(reason: "terminate")
         audio.onConfigurationChange = nil
         cancelRecordingForTermination()
         // If the mute lifecycle is mid-flight or still holding the
@@ -1441,33 +1399,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             center.removeObserver(observer)
         }
         workspacePowerObservers.removeAll()
-    }
-
-    private func cleanupPendingSharedCorrections(reason: String) {
-        correctionSharePicker = nil
-        correctionShareCleanupDelegate = nil
-
-        guard let url = pendingSharedCorrectionsURL else { return }
-        pendingSharedCorrectionsURL = nil
-
-        let folder = url.deletingLastPathComponent().standardizedFileURL
-        let tempRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
-        let normalizedTempRoot = tempRoot.hasSuffix("/") ? tempRoot : "\(tempRoot)/"
-
-        guard url.lastPathComponent == CORRECTIONS_FILE_NAME,
-              folder.lastPathComponent.hasPrefix("Dictor-"),
-              folder.path.hasPrefix(normalizedTempRoot)
-        else {
-            log("correction share cleanup skipped (\(reason)): unexpected temp file")
-            return
-        }
-
-        do {
-            try FileManager.default.removeItem(at: folder)
-            log("correction share cleanup completed (\(reason))")
-        } catch {
-            log("correction share cleanup failed (\(reason))")
-        }
     }
 
     private func startStartup(reason: String) {
@@ -2144,11 +2075,74 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         var didImport = false
         for filename in filenames {
             let url = URL(fileURLWithPath: filename)
-            if importCorrectionsFromUserSelectedFile(url) {
+            if importCorrectionsFromOpenedFile(url) {
                 didImport = true
             }
         }
         sender.reply(toOpenOrPrint: didImport ? .success : .failure)
+    }
+
+    /// Двойной клик по файлу `.dictor-corrections` в Finder. Полный
+    /// словарный UI живёт в окне, но файл LaunchServices приносит агенту —
+    /// поэтому здесь остаётся маленький локализованный диалог поверх той же
+    /// логики слияния, что и в окне.
+    private func importCorrectionsFromOpenedFile(_ url: URL) -> Bool {
+        showAppForModal()
+        do {
+            let imported = try TranscriptCorrectionsTransfer.readCounted(from: url)
+            let normalized = normalizedTranscriptCorrections(imported.corrections)
+            guard !normalized.isEmpty else {
+                showCorrectionTransferError(
+                    title: t("В файле нет автозамен", "No Text Corrections Found"),
+                    message: t("В файле «\(url.lastPathComponent)» нет ни одной автозамены.",
+                               "\(url.lastPathComponent) does not contain any corrections to import."))
+                return false
+            }
+            let summary = correctionImportSummary(existing: settings.transcriptCorrections,
+                                                  imported: normalized)
+            let countText = correctionImportCountText(sourceName: url.lastPathComponent,
+                                                      originalCount: imported.originalCount,
+                                                      keptCount: summary.total,
+                                                      language: settings.interfaceLanguage)
+            let capWarning = correctionImportMergeCapWarningText(
+                existingCount: settings.transcriptCorrections.count,
+                newCount: summary.newCount,
+                language: settings.interfaceLanguage)
+            let alert = NSAlert()
+            alert.messageText = t("Импортировать автозамены?", "Import Text Corrections?")
+            alert.informativeText = t("""
+                \(countText)
+
+                Новых: \(summary.newCount) · обновят существующие: \(summary.updatedCount) · уже совпадают: \(summary.unchangedCount).
+
+                «Объединить» сохранит записи этого Mac, которых нет в файле. «Заменить все» сделает словарь точной копией файла.\(capWarning.map { "\n\n" + $0 } ?? "")
+                """, """
+                \(countText)
+
+                \(summary.newCount) new, \(summary.updatedCount) will update existing corrections, \(summary.unchangedCount) already match.
+
+                Merge keeps local corrections that are not in the file. Replace All makes this Mac match the file exactly.\(capWarning.map { "\n\n" + $0 } ?? "")
+                """)
+            alert.addButton(withTitle: t("Объединить", "Merge"))
+            alert.addButton(withTitle: t("Заменить все", "Replace All"))
+            alert.addButton(withTitle: t("Отмена", "Cancel"))
+            let mode: CorrectionImportChoice
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: mode = .merge
+            case .alertSecondButtonReturn: mode = .replace
+            default: return false
+            }
+            let next = transcriptCorrections(afterApplying: normalized,
+                                             to: settings.transcriptCorrections,
+                                             mode: mode)
+            updateTranscriptCorrections(next)
+            log("correction import read \(normalized.count) corrections from an opened file")
+            return true
+        } catch {
+            showCorrectionTransferError(title: t("Импорт не удался", "Import Failed"),
+                                        error: error)
+            return false
+        }
     }
 
     // MARK: - Menu bar appearance
@@ -3771,21 +3765,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         lastSeenHistoryArchiveData = settings.recentTranscriptEntriesStoredData
     }
 
-    private func applyRecentTranscriptLimit() {
-        guard settings.recentTranscriptLimit == .off, !history.isEmpty else { return }
-        let removed = history.count
-        persistHistoryArchive([])
-        settings.pinnedTranscripts = []
-        log("recent transcript history disabled and cleared (\(removed) entries)")
-    }
-
-    /// 60-char preview with ellipsis. Newlines collapsed so a multi-
-    /// line transcript still renders as one menu row.
-    private func previewLine(for text: String) -> String {
-        let flat = text.replacingOccurrences(of: "\n", with: " ")
-        return flat.count > 60 ? String(flat.prefix(60)) + "…" : flat
-    }
-
     @objc private func historyClicked(_ sender: NSMenuItem) {
         guard let s = sender.representedObject as? String else { return }
         copyHistoryText(s)
@@ -3796,18 +3775,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         pb.clearContents()
         pb.setString(text, forType: .string)
         log("history copied to clipboard (\(text.count) chars)")
-    }
-
-    @objc private func clearHistoryClicked(_ sender: NSMenuItem) {
-        guard !history.isEmpty else { return }
-        let count = history.count
-        persistHistoryArchive([])
-        // «Стереть историю» стирает и закреплённые: пины хранятся полными
-        // текстами диктовок, оставить их — значит оставить в plist ровно то,
-        // что человек попросил уничтожить.
-        settings.pinnedTranscripts = []
-        log("history cleared (\(count) entries)")
-        rebuildMenu()
     }
 
     @objc private func quitClicked(_ sender: NSMenuItem) {
@@ -3976,6 +3943,14 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         return ("starting", "Starting dictation service.")
     }
 
+    /// Язык служебного меню. Само меню — только действия: все настройки
+    /// живут в окне, и меню больше не обязано быть их вторым, англоязычным
+    /// адресом. Протокольные строки (startupStatusTitle, failure.*,
+    /// diagnosticsText) не переводятся — окно парсит английские префиксы.
+    private func t(_ russian: String, _ english: String) -> String {
+        localizedText(russian, english, language: settings.interfaceLanguage)
+    }
+
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -3995,7 +3970,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         menu.addItem(.separator())
 
         if isRecording {
-            let cancel = NSMenuItem(title: "Cancel Recording",
+            let cancel = NSMenuItem(title: t("Отменить запись", "Cancel Recording"),
                                     action: #selector(cancelRecordingClicked(_:)),
                                     keyEquivalent: "")
             cancel.target = self
@@ -4028,25 +4003,32 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
         if addedPermRow { menu.addItem(.separator()) }
 
-        // History: keep one-click access to the last transcript, but
-        // hide transcript preview text inside the submenu so the menu
-        // stays stable even after long dictations.
+        // History: keep one-click access to the last transcript; the
+        // full list lives in the quick panel and the History window.
         if let newest = visibleHistory.first {
-            let inline = NSMenuItem(title: "Copy Last Transcript",
+            let inline = NSMenuItem(title: t("Копировать последнюю диктовку",
+                                             "Copy Last Transcript"),
                                     action: #selector(historyClicked(_:)),
                                     keyEquivalent: "")
             inline.target = self
             inline.representedObject = newest.text
             inline.toolTip = newest.text
             menu.addItem(inline)
-
-            menu.addItem(buildRecentTranscriptsItem())
-
             menu.addItem(.separator())
         }
 
-        // Settings submenu.
-        menu.addItem(buildSettingsItem())
+        let history = NSMenuItem(title: t("История…", "History…"),
+                                 action: #selector(openHistoryFromMenu(_:)),
+                                 keyEquivalent: "")
+        history.target = self
+        menu.addItem(history)
+
+        let settingsItem = NSMenuItem(title: t("Настройки…", "Settings…"),
+                                      action: #selector(openSettingsFromMenu(_:)),
+                                      keyEquivalent: "")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         menu.addItem(buildSupportItem())
         menu.addItem(.separator())
 
@@ -4057,7 +4039,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         // in the menu that gets such an indicator — every other row
         // sits flush against the left edge. The wrapper produces the
         // identical behaviour with no auto-glyph.
-        let quit = NSMenuItem(title: "Quit Dictor",
+        let quit = NSMenuItem(title: t("Выйти из Dictor", "Quit Dictor"),
                               action: #selector(quitClicked(_:)),
                               keyEquivalent: "q")
         quit.target = self
@@ -4065,39 +4047,21 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         return menu
     }
 
-    private func buildRecentTranscriptsItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        sub.autoenablesItems = false
+    @objc private func openHistoryFromMenu(_ sender: NSMenuItem) {
+        openControlPanelFromAgent(section: "history")
+    }
 
-        for entry in visibleHistory {
-            let item = NSMenuItem(title: previewLine(for: entry.text),
-                                  action: #selector(historyClicked(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.representedObject = entry.text
-            item.toolTip = entry.text
-            sub.addItem(item)
-        }
-
-        sub.addItem(.separator())
-
-        let clear = NSMenuItem(title: "Clear Recent Transcripts",
-                               action: #selector(clearHistoryClicked(_:)),
-                               keyEquivalent: "")
-        clear.target = self
-        sub.addItem(clear)
-
-        parent.submenu = sub
-        return parent
+    @objc private func openSettingsFromMenu(_ sender: NSMenuItem) {
+        openControlPanelFromAgent(section: "settings")
     }
 
     private func buildSupportItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Support", action: nil, keyEquivalent: "")
+        let parent = NSMenuItem(title: t("Поддержка", "Support"),
+                                action: nil, keyEquivalent: "")
         let sub = NSMenu()
         sub.autoenablesItems = false
 
-        let setup = NSMenuItem(title: "Setup Checklist…",
+        let setup = NSMenuItem(title: t("Чек-лист настройки…", "Setup Checklist…"),
                                action: #selector(showSetupChecklistClicked(_:)),
                                keyEquivalent: "")
         setup.target = self
@@ -4105,7 +4069,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
         sub.addItem(.separator())
 
-        let about = NSMenuItem(title: "About Dictor",
+        let about = NSMenuItem(title: t("О Dictor", "About Dictor"),
                                action: #selector(showAboutClicked(_:)),
                                keyEquivalent: "")
         about.target = self
@@ -4113,19 +4077,21 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
         sub.addItem(.separator())
 
-        let diagnostics = NSMenuItem(title: "Copy Diagnostics",
+        let diagnostics = NSMenuItem(title: t("Копировать диагностику", "Copy Diagnostics"),
                                      action: #selector(copyDiagnosticsClicked(_:)),
                                      keyEquivalent: "")
         diagnostics.target = self
         sub.addItem(diagnostics)
 
-        let saveDiagnostics = NSMenuItem(title: "Save Diagnostics…",
+        let saveDiagnostics = NSMenuItem(title: t("Сохранить диагностику…", "Save Diagnostics…"),
                                          action: #selector(saveDiagnosticsClicked(_:)),
                                          keyEquivalent: "")
         saveDiagnostics.target = self
         sub.addItem(saveDiagnostics)
 
-        let resetModel = NSMenuItem(title: isResettingSpeechModelCache ? "Resetting Speech Model Cache…" : "Reset Speech Model Cache…",
+        let resetModel = NSMenuItem(title: isResettingSpeechModelCache
+                                        ? t("Сбрасываю кэш модели речи…", "Resetting Speech Model Cache…")
+                                        : t("Сбросить кэш модели речи…", "Reset Speech Model Cache…"),
                                     action: #selector(resetSpeechModelCacheClicked(_:)),
                                     keyEquivalent: "")
         resetModel.target = self
@@ -4135,7 +4101,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             && startupTask == nil
             && !isResettingSpeechModelCache
             && !isSwitchingSpeechModel
-        resetModel.toolTip = "Delete the speech model cache and download a fresh verified copy."
+        resetModel.toolTip = t("Удалить кэш модели речи и скачать свежую проверенную копию.",
+                               "Delete the speech model cache and download a fresh verified copy.")
         sub.addItem(resetModel)
 
         parent.submenu = sub
@@ -4175,16 +4142,19 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     private func menuStatusTitle() -> String {
         if isRecording {
-            return "Recording..."
+            return t("Идёт запись…", "Recording…")
         }
         if isBusy {
-            return "Transcribing..."
+            return t("Распознаю…", "Transcribing…")
         }
         if isReady {
             let hk = hotkey.hotkey.name
-            let verb = settings.triggerMode == .hold ? "Hold" : "Press"
-            return "\(verb) \(hk) to dictate"
+            return settings.triggerMode == .hold
+                ? t("Удерживайте \(hk) для диктовки", "Hold \(hk) to dictate")
+                : t("Нажмите \(hk) для диктовки", "Press \(hk) to dictate")
         }
+        // failure.statusTitle и startupStatusTitle — протокольные строки,
+        // их парсит окно; в меню они показываются как есть, по-английски.
         if let failure = startupFailure {
             return failure.statusTitle
         }
@@ -4192,12 +4162,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             return startupStatusTitle
         }
         if !missingPermissions().isEmpty {
-            return "Grant permissions to finish setup"
+            return t("Выдайте разрешения, чтобы закончить настройку",
+                     "Grant permissions to finish setup")
         }
         if isCoreRuntimeReady {
-            return "Starting hotkey listener…"
+            return t("Запускаю слушатель хоткея…", "Starting hotkey listener…")
         }
-        return "Dictor is not ready"
+        return t("Dictor не готов", "Dictor is not ready")
     }
 
     private func diagnosticsText() -> String {
@@ -4665,14 +4636,16 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     private func buildPermissionItem(_ p: Permission) -> NSMenuItem {
         let clicks = permClickCount[p] ?? 0
+        let name = localizedPermissionTitle(p, language: settings.interfaceLanguage)
         let title: String
         if clicks >= 1 {
             // First click already happened; permission still denied,
             // so signal explicitly that a second click will reset
             // any stuck TCC state and re-request.
-            title = "⚠ Grant \(p.rawValue) (try again — will reset stuck state)…"
+            title = t("⚠ Разрешить «\(name)» (ещё раз — сбросит зависшее состояние)…",
+                      "⚠ Grant \(name) (try again — will reset stuck state)…")
         } else {
-            title = "⚠ Grant \(p.rawValue) permission…"
+            title = t("⚠ Разрешить «\(name)»…", "⚠ Grant \(name) permission…")
         }
         let item = NSMenuItem(title: title,
                               action: #selector(grantPermissionClicked(_:)),
@@ -4725,305 +4698,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     // MARK: - Settings submenu
-
-    private func buildSettingsItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Settings", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        sub.autoenablesItems = false
-
-        sub.addItem(buildDictationSettingsItem())
-        sub.addItem(buildTextSettingsItem())
-        sub.addItem(buildBehaviorSettingsItem())
-
-        parent.submenu = sub
-        return parent
-    }
-
-    private func buildDictationSettingsItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Dictation", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        sub.autoenablesItems = false
-
-        sub.addItem(buildHotkeySettingsItem())
-        sub.addItem(buildTriggerSettingsItem())
-        sub.addItem(buildDictationLanguageSettingsItem())
-        sub.addItem(buildInputDeviceItem())
-
-        parent.submenu = sub
-        return parent
-    }
-
-    private func buildTextSettingsItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Text", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        sub.autoenablesItems = false
-
-        sub.addItem(buildPasteSuffixSettingsItem())
-        sub.addItem(buildRecentTranscriptLimitSettingsItem())
-        sub.addItem(buildCorrectionsItem())
-
-        let filler = NSMenuItem(title: "Remove filler words (um, uh, ah, er, hmm)",
-                                action: #selector(toggleRemoveFillerWords(_:)),
-                                keyEquivalent: "")
-        filler.target = self
-        filler.state = settings.removeFillerWords ? .on : .off
-        sub.addItem(filler)
-
-        parent.submenu = sub
-        return parent
-    }
-
-    private func buildBehaviorSettingsItem() -> NSMenuItem {
-        let parent = NSMenuItem(title: "Behavior", action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        sub.autoenablesItems = false
-
-        let waveform = NSMenuItem(title: "Show recording waveform",
-                                  action: #selector(toggleRecordingWaveform(_:)),
-                                  keyEquivalent: "")
-        waveform.target = self
-        waveform.state = settings.showRecordingWaveform ? .on : .off
-        sub.addItem(waveform)
-
-        let mute = NSMenuItem(title: "Mute system audio while recording",
-                              action: #selector(toggleMute(_:)),
-                              keyEquivalent: "")
-        mute.target = self
-        mute.state = settings.muteWhileRecording ? .on : .off
-        sub.addItem(mute)
-
-        let sounds = NSMenuItem(title: "Play feedback sounds",
-                                action: #selector(toggleFeedbackSounds(_:)),
-                                keyEquivalent: "")
-        sounds.target = self
-        sounds.state = settings.playFeedbackSounds ? .on : .off
-        sub.addItem(sounds)
-
-        let launchAtLogin = NSMenuItem(title: "Launch at Login",
-                                       action: #selector(toggleLaunchAtLogin(_:)),
-                                       keyEquivalent: "")
-        launchAtLogin.target = self
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            launchAtLogin.state = .on
-        case .requiresApproval:
-            launchAtLogin.state = .mixed
-            launchAtLogin.toolTip = "Approve Dictor in System Settings → General → Login Items."
-        default:
-            launchAtLogin.state = .off
-        }
-        sub.addItem(launchAtLogin)
-
-        let dock = NSMenuItem(title: "Show Dictor in Dock",
-                              action: #selector(toggleDock(_:)),
-                              keyEquivalent: "")
-        dock.target = self
-        dock.state = settings.showInDock ? .on : .off
-        sub.addItem(dock)
-
-        parent.submenu = sub
-        return parent
-    }
-
-    private func buildHotkeySettingsItem() -> NSMenuItem {
-        let hkParent = NSMenuItem(title: "Hotkey", action: nil, keyEquivalent: "")
-        let hkSub = NSMenu()
-        hkSub.autoenablesItems = false
-        let current = hotkey.hotkey
-
-        if !HOTKEY_CHOICES.contains(current) {
-            let currentItem = NSMenuItem(title: current.name,
-                                         action: nil,
-                                         keyEquivalent: "")
-            currentItem.state = .on
-            currentItem.toolTip = "Recorded custom hotkey"
-            hkSub.addItem(currentItem)
-            hkSub.addItem(.separator())
-        }
-
-        for choice in HOTKEY_CHOICES {
-            let item = NSMenuItem(title: choice.name,
-                                  action: #selector(selectHotkey(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.state = (choice == current) ? .on : .off
-            item.representedObject = Int(choice.keycode)
-            hkSub.addItem(item)
-        }
-
-        hkSub.addItem(.separator())
-
-        let record = NSMenuItem(title: "Record Hotkey…",
-                                action: #selector(recordHotkeyClicked(_:)),
-                                keyEquivalent: "")
-        record.target = self
-        record.isEnabled = !isRecording && !isBusy && !isTerminating
-        hkSub.addItem(record)
-
-        let reset = NSMenuItem(title: "Reset Hotkey to Default",
-                               action: #selector(resetHotkeyClicked(_:)),
-                               keyEquivalent: "")
-        reset.target = self
-        reset.isEnabled = current != hotkeyChoice(forKeycode: DEFAULT_HOTKEY_KEYCODE)
-            && !isRecording
-            && !isBusy
-            && !isTerminating
-        reset.toolTip = "Use Right Command for dictation."
-        hkSub.addItem(reset)
-
-        hkParent.submenu = hkSub
-        return hkParent
-    }
-
-    private func buildTriggerSettingsItem() -> NSMenuItem {
-        let tmParent = NSMenuItem(title: "Trigger", action: nil, keyEquivalent: "")
-        let tmSub = NSMenu()
-        tmSub.autoenablesItems = false
-        for mode in [TriggerMode.hold, .toggle] {
-            let item = NSMenuItem(title: TRIGGER_DISPLAY[mode] ?? mode.rawValue,
-                                  action: #selector(selectTriggerMode(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.state = (mode == settings.triggerMode) ? .on : .off
-            item.representedObject = mode.rawValue
-            tmSub.addItem(item)
-        }
-        tmParent.submenu = tmSub
-        return tmParent
-    }
-
-    private func buildDictationLanguageSettingsItem() -> NSMenuItem {
-        // Пункт называется по тому, что делает: подсказка языка — это фильтр
-        // по алфавиту внутри декодера, а не выбор словаря.
-        let langParent = NSMenuItem(title: "Output Script", action: nil, keyEquivalent: "")
-        let langSub = NSMenu()
-        langSub.autoenablesItems = false
-        for lang in DictationLanguage.allCases {
-            let item = NSMenuItem(title: DICTATION_LANGUAGE_DISPLAY[lang] ?? lang.rawValue,
-                                  action: #selector(selectDictationLanguage(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.state = (lang == settings.dictationLanguage) ? .on : .off
-            item.representedObject = lang.rawValue
-            langSub.addItem(item)
-            // Auto-detect is the right default for almost everyone; only
-            // pin a specific language if you see wrong-script bleed-through
-            // (e.g. Cyrillic letters in Polish output).
-            if lang == .auto {
-                langSub.addItem(.separator())
-            }
-        }
-        langParent.submenu = langSub
-        return langParent
-    }
-
-    private func buildPasteSuffixSettingsItem() -> NSMenuItem {
-        let pasteParent = NSMenuItem(title: "After Pasting", action: nil, keyEquivalent: "")
-        let pasteSub = NSMenu()
-        pasteSub.autoenablesItems = false
-        for suffix in [PasteSuffix.appendSpace, .none, .appendNewline] {
-            let item = NSMenuItem(title: PASTE_SUFFIX_DISPLAY[suffix] ?? suffix.rawValue,
-                                  action: #selector(selectPasteSuffix(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.state = (suffix == settings.pasteSuffix) ? .on : .off
-            item.representedObject = suffix.rawValue
-            pasteSub.addItem(item)
-        }
-        pasteParent.submenu = pasteSub
-        return pasteParent
-    }
-
-    private func buildRecentTranscriptLimitSettingsItem() -> NSMenuItem {
-        let recentParent = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
-        let recentSub = NSMenu()
-        recentSub.autoenablesItems = false
-        for limit in RecentTranscriptLimit.allCases {
-            let item = NSMenuItem(title: RECENT_TRANSCRIPT_LIMIT_DISPLAY[limit] ?? limit.rawValue,
-                                  action: #selector(selectRecentTranscriptLimit(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.state = (limit == settings.recentTranscriptLimit) ? .on : .off
-            item.representedObject = limit.rawValue
-            recentSub.addItem(item)
-        }
-        recentParent.submenu = recentSub
-        return recentParent
-    }
-
-    private func buildInputDeviceItem() -> NSMenuItem {
-        let devices = availableAudioInputDevices()
-        let rawSavedPreference = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
-        let savedPreference = isDefaultAggregateAudioInputPreference(rawSavedPreference) ? "" : rawSavedPreference
-        let selectedDevice = audioInputDevice(matching: savedPreference, in: devices)
-        let canSwitch = !isRecording && !isBusy && !isTerminating
-        let parent = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
-        if !savedPreference.isEmpty && selectedDevice == nil {
-            parent.toolTip = savedPreference
-        }
-
-        let sub = NSMenu()
-        sub.autoenablesItems = false
-
-        let system = NSMenuItem(title: "System default",
-                                action: #selector(selectInputDevice(_:)),
-                                keyEquivalent: "")
-        system.target = self
-        system.representedObject = ""
-        system.state = (savedPreference.isEmpty || selectedDevice == nil) ? .on : .off
-        system.isEnabled = canSwitch
-        sub.addItem(system)
-
-        if !savedPreference.isEmpty && selectedDevice == nil {
-            let unavailable = NSMenuItem(title: "Unavailable: \(savedPreference)",
-                                         action: nil,
-                                         keyEquivalent: "")
-            unavailable.isEnabled = false
-            sub.addItem(unavailable)
-        }
-
-        // Устройство есть в системе, но CoreAudio его отверг — запись идёт с
-        // системного входа. Случай «устройства нет» показан строкой выше;
-        // случай «есть, но отказал» раньше не был показан никак.
-        if let fallback = audio.inputFallbackDeviceName {
-            let failed = NSMenuItem(title: "Failed: \(fallback) — using system default",
-                                    action: nil,
-                                    keyEquivalent: "")
-            failed.isEnabled = false
-            sub.addItem(failed)
-        }
-
-        if !devices.isEmpty {
-            sub.addItem(.separator())
-        }
-
-        for device in devices {
-            let item = NSMenuItem(title: device.name,
-                                  action: #selector(selectInputDevice(_:)),
-                                  keyEquivalent: "")
-            item.target = self
-            item.representedObject = device.uid
-            item.toolTip = device.uid
-            item.state = (selectedDevice?.uid == device.uid) ? .on : .off
-            item.isEnabled = canSwitch
-            sub.addItem(item)
-        }
-
-        parent.submenu = sub
-        return parent
-    }
-
-    @objc private func selectInputDevice(_ sender: NSMenuItem) {
-        guard !isRecording, !isBusy, !isTerminating,
-              let preference = sender.representedObject as? String else { return }
-
-        settings.inputDevice = preference
-        let label = preference.isEmpty
-            ? "system default"
-            : (audioInputDevice(matching: preference)?.name ?? preference)
-        log("input device selected: \(label)")
-        restartAudioForInputDeviceChange()
-    }
 
     private func restartAudioForInputDeviceChange() {
         restartAudioInput(reason: "input device change")
@@ -5155,286 +4829,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
     }
 
-    private func buildCorrectionsItem() -> NSMenuItem {
-        let corrections = settings.transcriptCorrections
-        let title = corrections.isEmpty ? "Text Corrections" : "Text Corrections (\(corrections.count))"
-        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        let sub = NSMenu()
-        sub.autoenablesItems = false
-
-        let add = NSMenuItem(title: "Add Correction…",
-                             action: #selector(addCorrectionClicked(_:)),
-                             keyEquivalent: "")
-        add.target = self
-        sub.addItem(add)
-
-        let addFromLast = NSMenuItem(title: "Add Correction from Last Transcript…",
-                                     action: #selector(addCorrectionFromLastTranscriptClicked(_:)),
-                                     keyEquivalent: "")
-        addFromLast.target = self
-        addFromLast.isEnabled = visibleHistory.first != nil
-        if let newest = visibleHistory.first {
-            addFromLast.toolTip = previewLine(for: newest.text)
-        }
-        sub.addItem(addFromLast)
-
-        sub.addItem(.separator())
-
-        let importItem = NSMenuItem(title: "Import Corrections…",
-                                    action: #selector(importCorrectionsClicked(_:)),
-                                    keyEquivalent: "")
-        importItem.target = self
-        sub.addItem(importItem)
-
-        let exportItem = NSMenuItem(title: "Export Corrections…",
-                                    action: #selector(exportCorrectionsClicked(_:)),
-                                    keyEquivalent: "")
-        exportItem.target = self
-        exportItem.isEnabled = !corrections.isEmpty
-        sub.addItem(exportItem)
-
-        let shareItem = NSMenuItem(title: "Share Corrections…",
-                                   action: #selector(shareCorrectionsClicked(_:)),
-                                   keyEquivalent: "")
-        shareItem.target = self
-        shareItem.isEnabled = !corrections.isEmpty
-        sub.addItem(shareItem)
-
-        sub.addItem(.separator())
-
-        if let syncURL = correctionSyncFileURL() {
-            let syncLabel = NSMenuItem(title: "Syncing: \(syncURL.lastPathComponent)",
-                                       action: nil,
-                                       keyEquivalent: "")
-            syncLabel.isEnabled = false
-            syncLabel.toolTip = syncURL.path
-            sub.addItem(syncLabel)
-
-            let syncNow = NSMenuItem(title: "Sync Now",
-                                     action: #selector(syncCorrectionsNowClicked(_:)),
-                                     keyEquivalent: "")
-            syncNow.target = self
-            sub.addItem(syncNow)
-
-            let stopSync = NSMenuItem(title: "Stop Syncing…",
-                                      action: #selector(stopSyncingCorrectionsClicked(_:)),
-                                      keyEquivalent: "")
-            stopSync.target = self
-            sub.addItem(stopSync)
-        } else {
-            let startSync = NSMenuItem(title: "Set Up Sync…",
-                                       action: #selector(setUpCorrectionsSyncClicked(_:)),
-                                       keyEquivalent: "")
-            startSync.target = self
-            sub.addItem(startSync)
-        }
-
-        sub.addItem(.separator())
-
-        if corrections.isEmpty {
-            let empty = NSMenuItem(title: "No corrections", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            sub.addItem(empty)
-            parent.submenu = sub
-            return parent
-        }
-
-        for (index, correction) in corrections.enumerated() {
-            let item = NSMenuItem(title: correctionMenuTitle(correction),
-                                  action: nil,
-                                  keyEquivalent: "")
-            let itemSub = NSMenu()
-            itemSub.autoenablesItems = false
-
-            let edit = NSMenuItem(title: "Edit…",
-                                  action: #selector(editCorrectionClicked(_:)),
-                                  keyEquivalent: "")
-            edit.target = self
-            edit.representedObject = index
-            itemSub.addItem(edit)
-
-            let delete = NSMenuItem(title: "Delete",
-                                    action: #selector(deleteCorrectionClicked(_:)),
-                                    keyEquivalent: "")
-            delete.target = self
-            delete.representedObject = index
-            itemSub.addItem(delete)
-
-            item.submenu = itemSub
-            sub.addItem(item)
-        }
-
-        sub.addItem(.separator())
-
-        let removeAll = NSMenuItem(title: "Remove All Corrections…",
-                                   action: #selector(removeAllCorrectionsClicked(_:)),
-                                   keyEquivalent: "")
-        removeAll.target = self
-        sub.addItem(removeAll)
-
-        parent.submenu = sub
-        return parent
-    }
-
-    private func correctionMenuTitle(_ correction: TranscriptCorrection) -> String {
-        "\(clippedCorrectionText(correction.source)) → \(clippedCorrectionText(correction.replacement))"
-    }
-
-    private func clippedCorrectionText(_ text: String) -> String {
-        let flat = text.replacingOccurrences(of: "\n", with: " ")
-        return flat.count > 32 ? String(flat.prefix(32)) + "…" : flat
-    }
-
-    @objc private func addCorrectionClicked(_ sender: NSMenuItem) {
-        guard let correction = showCorrectionEditor(existing: nil) else { return }
-        saveCorrection(correction)
-    }
-
-    @objc private func addCorrectionFromLastTranscriptClicked(_ sender: NSMenuItem) {
-        guard let newest = visibleHistory.first else { return }
-        let prefill = correctionSourcePrefill(from: newest.text)
-        guard !prefill.isEmpty else { return }
-        guard let correction = showCorrectionEditor(existing: nil, prefillSource: prefill) else { return }
-        saveCorrection(correction)
-    }
-
-    @objc private func editCorrectionClicked(_ sender: NSMenuItem) {
-        guard let index = sender.representedObject as? Int else { return }
-        let corrections = settings.transcriptCorrections
-        guard corrections.indices.contains(index) else { return }
-        guard let correction = showCorrectionEditor(existing: corrections[index]) else { return }
-        saveCorrection(correction, replacing: index)
-    }
-
-    @objc private func deleteCorrectionClicked(_ sender: NSMenuItem) {
-        guard let index = sender.representedObject as? Int else { return }
-        var corrections = settings.transcriptCorrections
-        guard corrections.indices.contains(index) else { return }
-        corrections.remove(at: index)
-        updateTranscriptCorrections(corrections)
-    }
-
-    @objc private func removeAllCorrectionsClicked(_ sender: NSMenuItem) {
-        guard !settings.transcriptCorrections.isEmpty else { return }
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Remove All Text Corrections?"
-        alert.informativeText = "This removes every saved text correction from this Mac."
-        alert.addButton(withTitle: "Remove All")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        updateTranscriptCorrections([])
-    }
-
-    @objc private func importCorrectionsClicked(_ sender: NSMenuItem) {
-        showAppForModal()
-        let panel = NSOpenPanel()
-        panel.title = "Import Text Corrections"
-        panel.message = "Choose a Dictor corrections file to import."
-        panel.prompt = "Import"
-        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = importCorrectionsFromUserSelectedFile(url)
-    }
-
-    @objc private func exportCorrectionsClicked(_ sender: NSMenuItem) {
-        showAppForModal()
-        let panel = NSSavePanel()
-        panel.title = "Export Text Corrections"
-        panel.message = "Save a file you can AirDrop, store in iCloud Drive, or import on another Mac."
-        panel.prompt = "Export"
-        panel.nameFieldStringValue = CORRECTIONS_FILE_NAME
-        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
-            log("correction export wrote \(settings.transcriptCorrections.count) corrections")
-        } catch {
-            showCorrectionTransferError(title: "Export Failed", error: error)
-        }
-    }
-
-    @objc private func shareCorrectionsClicked(_ sender: NSMenuItem) {
-        showAppForModal()
-        do {
-            cleanupPendingSharedCorrections(reason: "new share")
-
-            let folder = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Dictor-\(UUID().uuidString)", isDirectory: true)
-            let url = folder.appendingPathComponent(CORRECTIONS_FILE_NAME)
-            try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
-            pendingSharedCorrectionsURL = url
-
-            let picker = NSSharingServicePicker(items: [url])
-            let cleanupDelegate = CorrectionShareCleanupDelegate { [weak self] reason in
-                self?.cleanupPendingSharedCorrections(reason: reason)
-            }
-            picker.delegate = cleanupDelegate
-            correctionSharePicker = picker
-            correctionShareCleanupDelegate = cleanupDelegate
-            if let button = statusItem.button {
-                picker.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            } else {
-                cleanupPendingSharedCorrections(reason: "missing status button")
-            }
-            log("correction share prepared \(settings.transcriptCorrections.count) corrections")
-        } catch {
-            showCorrectionTransferError(title: "Share Failed", error: error)
-        }
-    }
-
-    @objc private func setUpCorrectionsSyncClicked(_ sender: NSMenuItem) {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.messageText = "Set Up Text Correction Sync"
-        alert.informativeText = """
-            Dictor can keep corrections in one local file. Put that file in iCloud Drive, Dropbox, Syncthing, or another synced folder to keep multiple Macs aligned without a Dictor account.
-
-            Dictor only reads and writes the file you choose.
-            """
-        alert.addButton(withTitle: "Create Sync File")
-        alert.addButton(withTitle: "Use Existing File")
-        alert.addButton(withTitle: "Cancel")
-
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            createCorrectionsSyncFile()
-        case .alertSecondButtonReturn:
-            useExistingCorrectionsSyncFile()
-        default:
-            return
-        }
-    }
-
-    @objc private func syncCorrectionsNowClicked(_ sender: NSMenuItem) {
-        guard correctionSyncFileURL() != nil else { return }
-        scheduleCorrectionSyncScan(force: true, presentErrors: true)
-    }
-
-    @objc private func stopSyncingCorrectionsClicked(_ sender: NSMenuItem) {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Stop Syncing Text Corrections?"
-        alert.informativeText = "Dictor will keep the corrections already on this Mac. The sync file will not be deleted."
-        alert.addButton(withTitle: "Stop Syncing")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        setCorrectionSyncFilePath("")
-        correctionSyncTimer?.invalidate()
-        correctionSyncTimer = nil
-        correctionSyncFileFingerprint = nil
-        correctionSyncBaselineCorrections = []
-        rebuildMenu()
-    }
-
     private func showAppForModal() {
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -5450,142 +4844,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         } else {
             NSApp.setActivationPolicy(.accessory)
             NSApp.hide(nil)
-        }
-    }
-
-    @discardableResult
-    private func importCorrectionsFromUserSelectedFile(_ url: URL) -> Bool {
-        showAppForModal()
-        do {
-            let imported = try TranscriptCorrectionsTransfer.readCounted(from: url)
-            guard let choice = chooseCorrectionImportMode(imported: imported.corrections,
-                                                          originalCount: imported.originalCount,
-                                                          sourceName: url.lastPathComponent,
-                                                          allowsEmptyReplace: false) else {
-                return false
-            }
-            let next = transcriptCorrections(afterApplying: imported.corrections,
-                                             to: settings.transcriptCorrections,
-                                             mode: choice)
-            updateTranscriptCorrections(next)
-            log("correction import read \(imported.corrections.count) corrections")
-            return true
-        } catch {
-            showCorrectionTransferError(title: "Import Failed", error: error)
-            return false
-        }
-    }
-
-    private func createCorrectionsSyncFile() {
-        showAppForModal()
-        let panel = NSSavePanel()
-        panel.title = "Create Text Correction Sync File"
-        panel.message = "Choose where Dictor should keep the sync file. A folder synced by iCloud Drive or another provider works best."
-        panel.prompt = "Create"
-        panel.nameFieldStringValue = CORRECTIONS_FILE_NAME
-        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
-            setCorrectionSyncFilePath(url.path)
-            startCorrectionSyncIfConfigured()
-            log("correction sync created file with \(settings.transcriptCorrections.count) corrections")
-        } catch {
-            showCorrectionTransferError(title: "Sync Setup Failed", error: error)
-        }
-    }
-
-    private func useExistingCorrectionsSyncFile() {
-        showAppForModal()
-        let panel = NSOpenPanel()
-        panel.title = "Choose Text Correction Sync File"
-        panel.message = "Choose an existing Dictor corrections file."
-        panel.prompt = "Use File"
-        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        do {
-            let imported = try TranscriptCorrectionsTransfer.readCounted(from: url)
-            guard let choice = chooseCorrectionImportMode(imported: imported.corrections,
-                                                          originalCount: imported.originalCount,
-                                                          sourceName: url.lastPathComponent,
-                                                          allowsEmptyReplace: true) else {
-                return
-            }
-            let next = transcriptCorrections(afterApplying: imported.corrections,
-                                             to: settings.transcriptCorrections,
-                                             mode: choice)
-            setCorrectionSyncFilePath(url.path)
-            updateTranscriptCorrections(next, writeToSync: false)
-            if choice == .merge {
-                guard writeCorrectionsToSyncFile(presentErrors: true) else {
-                    setCorrectionSyncFilePath("")
-                    rebuildMenu()
-                    return
-                }
-            } else {
-                correctionSyncFileFingerprint = correctionSyncFingerprint(for: url)
-                correctionSyncBaselineCorrections = normalizedTranscriptCorrections(next)
-            }
-            startCorrectionSyncIfConfigured()
-            log("correction sync linked file with \(imported.corrections.count) corrections")
-        } catch {
-            showCorrectionTransferError(title: "Sync Setup Failed", error: error)
-        }
-    }
-
-    private func chooseCorrectionImportMode(imported: [TranscriptCorrection],
-                                            originalCount: Int,
-                                            sourceName: String,
-                                            allowsEmptyReplace: Bool) -> CorrectionImportChoice? {
-        let imported = normalizedTranscriptCorrections(imported)
-        showAppForModal()
-        if imported.isEmpty {
-            let alert = NSAlert()
-            alert.messageText = "No Text Corrections Found"
-            alert.informativeText = allowsEmptyReplace
-                ? "\(sourceName) does not contain any corrections. You can still use it as an empty sync file."
-                : "\(sourceName) does not contain any corrections to import."
-            alert.addButton(withTitle: allowsEmptyReplace ? "Use Empty File" : "OK")
-            if allowsEmptyReplace { alert.addButton(withTitle: "Cancel") }
-            let response = alert.runModal()
-            return allowsEmptyReplace && response == .alertFirstButtonReturn ? .replace : nil
-        }
-
-        let summary = correctionImportSummary(existing: settings.transcriptCorrections,
-                                              imported: imported)
-        let countText = correctionImportCountText(sourceName: sourceName,
-                                                  originalCount: originalCount,
-                                                  keptCount: summary.total)
-        let mergeCapWarning = correctionImportMergeCapWarningText(
-            existingCount: settings.transcriptCorrections.count,
-            newCount: summary.newCount
-        )
-        let alert = NSAlert()
-        alert.messageText = "Import Text Corrections?"
-        alert.informativeText = """
-            \(countText)
-
-            \(summary.newCount) new, \(summary.updatedCount) will update existing corrections, \(summary.unchangedCount) already match.
-
-            Merge keeps local corrections that are not in the file. Replace All makes this Mac match the file exactly.\(mergeCapWarning.map { "\n\n" + $0 } ?? "")
-            """
-        alert.addButton(withTitle: "Merge")
-        alert.addButton(withTitle: "Replace All")
-        alert.addButton(withTitle: "Cancel")
-
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            return .merge
-        case .alertSecondButtonReturn:
-            return .replace
-        default:
-            return nil
         }
     }
 
@@ -5898,317 +5156,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         alert.runModal()
     }
 
-    private func showCorrectionEditor(existing: TranscriptCorrection?,
-                                      prefillSource: String = "") -> TranscriptCorrection? {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.messageText = existing == nil ? "Add Text Correction" : "Edit Text Correction"
-        alert.informativeText = "Add the incorrect text Dictor typed, then the text it should paste instead."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-
-        let viewWidth: CGFloat = 520
-        let labelHeight: CGFloat = 18
-        let fieldHeight: CGFloat = 76
-        let viewHeight: CGFloat = (labelHeight * 2) + (fieldHeight * 2) + 24
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: viewWidth, height: viewHeight))
-
-        let sourceLabel = NSTextField(labelWithString: "Typed")
-        sourceLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        sourceLabel.frame = NSRect(x: 0, y: viewHeight - labelHeight, width: viewWidth, height: labelHeight)
-
-        let sourceEditor = correctionTextEditor(
-            frame: NSRect(x: 0, y: viewHeight - labelHeight - fieldHeight, width: viewWidth, height: fieldHeight),
-            text: existing?.source ?? prefillSource.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-
-        let replacementLabel = NSTextField(labelWithString: "Paste")
-        replacementLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        replacementLabel.frame = NSRect(x: 0, y: fieldHeight + 6, width: viewWidth, height: labelHeight)
-
-        let replacementEditor = correctionTextEditor(
-            frame: NSRect(x: 0, y: 0, width: viewWidth, height: fieldHeight),
-            text: existing?.replacement ?? ""
-        )
-
-        accessory.addSubview(sourceLabel)
-        accessory.addSubview(sourceEditor.scrollView)
-        accessory.addSubview(replacementLabel)
-        accessory.addSubview(replacementEditor.scrollView)
-        alert.accessoryView = accessory
-        alert.window.initialFirstResponder = sourceEditor.textView
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-
-        let source = sourceEditor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        let replacement = replacementEditor.textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !source.isEmpty, !replacement.isEmpty else {
-            showCorrectionValidationError()
-            return nil
-        }
-
-        return TranscriptCorrection(source: source, replacement: replacement)
-    }
-
-    private func correctionTextEditor(frame: NSRect, text: String) -> (scrollView: NSScrollView, textView: NSTextView) {
-        let scroll = NSScrollView(frame: frame)
-        scroll.borderType = .bezelBorder
-        scroll.hasVerticalScroller = true
-        scroll.autohidesScrollers = true
-
-        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: frame.width, height: frame.height))
-        textView.font = .systemFont(ofSize: 13)
-        textView.string = text
-        textView.isRichText = false
-        textView.importsGraphics = false
-        textView.allowsUndo = true
-        textView.textContainerInset = NSSize(width: 6, height: 5)
-        textView.minSize = NSSize(width: 0, height: frame.height)
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
-                                  height: CGFloat.greatestFiniteMagnitude)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: frame.width,
-                                                       height: CGFloat.greatestFiniteMagnitude)
-        scroll.documentView = textView
-        return (scroll, textView)
-    }
-
-    private func showCorrectionValidationError() {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Correction Not Saved"
-        alert.informativeText = "Both fields need text."
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
-    private func saveCorrection(_ correction: TranscriptCorrection, replacing index: Int? = nil) {
-        var corrections = settings.transcriptCorrections
-        let key = normalizedTranscriptCorrectionSource(correction.source)
-
-        if let index, corrections.indices.contains(index) {
-            corrections[index] = correction
-            var keepIndex = index
-            for i in corrections.indices.reversed() {
-                guard i != keepIndex, normalizedTranscriptCorrectionSource(corrections[i].source) == key else { continue }
-                corrections.remove(at: i)
-                if i < keepIndex { keepIndex -= 1 }
-            }
-        } else if let duplicate = corrections.firstIndex(where: { normalizedTranscriptCorrectionSource($0.source) == key }) {
-            corrections[duplicate] = correction
-        } else {
-            corrections.append(correction)
-        }
-
-        updateTranscriptCorrections(corrections)
-    }
-
-    @objc private func selectHotkey(_ sender: NSMenuItem) {
-        guard let kc = sender.representedObject as? Int else { return }
-        _ = applyHotkeyChoice(hotkeyChoice(forKeycode: CGKeyCode(kc)))
-    }
-
-    @objc private func recordHotkeyClicked(_ sender: NSMenuItem) {
-        showHotkeyRecorder()
-    }
-
-    @objc private func resetHotkeyClicked(_ sender: NSMenuItem) {
-        if applyHotkeyChoice(hotkeyChoice(forKeycode: DEFAULT_HOTKEY_KEYCODE)) {
-            log("HotkeyListener: reset hotkey to default")
-        }
-    }
-
-    private func applyHotkeyChoice(_ choice: HotkeyChoice) -> Bool {
-        let previous = hotkey.hotkey
-
-        guard let recordable = recordableHotkeyChoice(forKeycode: choice.keycode,
-                                                      modifiers: choice.requiredModifiers) else {
-            if case .rejected(let message) = hotkeyPreferenceUpdateResult(
-                requested: choice,
-                previous: previous,
-                persisted: previous
-            ) {
-                showHotkeyRecordError(message)
-            }
-            return false
-        }
-
-        settings.setConfiguredHotkey(recordable)
-        hotkey.setHotkey(recordable)
-        hotkeyTestSucceeded = false
-
-        switch hotkeyPreferenceUpdateResult(
-            requested: recordable,
-            previous: previous,
-            persisted: settings.configuredHotkey
-        ) {
-        case .saved:
-            rebuildMenu()
-            updateSetupChecklist()
-            return true
-        case .rejected(let message):
-            showHotkeyRecordError(message)
-            return false
-        case .rolledBack(let previous, let message):
-            settings.setConfiguredHotkey(previous)
-            hotkey.setHotkey(previous)
-            showHotkeyRecordError(message)
-            rebuildMenu()
-            return false
-        }
-    }
-
-    private func showHotkeyRecorder() {
-        guard !isRecording, !isBusy, !isTerminating else { return }
-        if let hotkeyRecorder {
-            hotkeyRecorder.present()
-            return
-        }
-        showAppForModal()
-
-        let shouldRestoreHotkeyTap = isReady
-        if shouldRestoreHotkeyTap {
-            hotkey.stop()
-        }
-
-        let recorder = HotkeyRecorderController(language: settings.interfaceLanguage) { [weak self] selected in
-            guard let self else { return }
-            self.hotkeyRecorder = nil
-            let restartSucceeded: Bool
-            if shouldRestoreHotkeyTap && !self.isTerminating {
-                restartSucceeded = self.hotkey.start()
-            } else {
-                restartSucceeded = false
-            }
-            switch hotkeyRecorderRestartAction(
-                shouldRestoreHotkeyTap: shouldRestoreHotkeyTap,
-                isTerminating: self.isTerminating,
-                restartSucceeded: restartSucceeded
-            ) {
-            case .none, .restoredListener:
-                break
-            case .recordFailure:
-                self.recordStartupFailure(
-                    stage: .hotkeyListener,
-                    error: NSError(
-                        domain: "Dictor",
-                        code: -5,
-                        userInfo: [
-                            NSLocalizedDescriptionKey: "The hotkey listener could not restart after recording a hotkey."
-                        ]
-                    ),
-                    reason: "hotkey recorder"
-                )
-            }
-            guard let selected else { return }
-            if self.applyHotkeyChoice(selected) {
-                log("HotkeyListener: recorded hotkey → \(selected.name)")
-            }
-        }
-        hotkeyRecorder = recorder
-        recorder.present()
-    }
-
-    private func showHotkeyRecordError(_ message: String) {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Hotkey Not Changed"
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
-    @objc private func selectTriggerMode(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let m = TriggerMode(rawValue: raw) else { return }
-        settings.triggerMode = m
-        hotkey.setTriggerMode(m)
-        rebuildMenu()
-    }
-
-    @objc private func selectPasteSuffix(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let suffix = PasteSuffix(rawValue: raw) else { return }
-        settings.pasteSuffix = suffix
-        rebuildMenu()
-    }
-
-    @objc private func selectDictationLanguage(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let lang = DictationLanguage(rawValue: raw) else { return }
-        settings.dictationLanguage = lang
-        rebuildMenu()
-    }
-
-    @objc private func selectRecentTranscriptLimit(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String,
-              let limit = RecentTranscriptLimit(rawValue: raw) else { return }
-        settings.recentTranscriptLimit = limit
-        applyRecentTranscriptLimit()
-        rebuildMenu()
-    }
-
-    @objc private func toggleRecordingWaveform(_ sender: NSMenuItem) {
-        settings.showRecordingWaveform.toggle()
-        sender.state = settings.showRecordingWaveform ? .on : .off
-        if settings.showRecordingWaveform, isRecording {
-            showRecordingHUD(mode: .recording, level: recordingVisualLevel)
-        } else {
-            hideRecordingHUD()
-        }
-    }
-
-    @objc private func toggleMute(_ sender: NSMenuItem) {
-        settings.muteWhileRecording.toggle()
-        sender.state = settings.muteWhileRecording ? .on : .off
-    }
-
-    @objc private func toggleRemoveFillerWords(_ sender: NSMenuItem) {
-        settings.removeFillerWords.toggle()
-        sender.state = settings.removeFillerWords ? .on : .off
-    }
-
-    @objc private func toggleFeedbackSounds(_ sender: NSMenuItem) {
-        settings.playFeedbackSounds.toggle()
-        sender.state = settings.playFeedbackSounds ? .on : .off
-    }
-
-    @objc private func toggleDock(_ sender: NSMenuItem) {
-        settings.showInDock.toggle()
-        sender.state = settings.showInDock ? .on : .off
-        refreshActivationPolicy()
-    }
-
-    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
-        do {
-            switch SMAppService.mainApp.status {
-            case .enabled, .requiresApproval:
-                try SMAppService.mainApp.unregister()
-                log("launch at login disabled")
-            default:
-                try SMAppService.mainApp.register()
-                log("launch at login enabled")
-            }
-        } catch {
-            showLaunchAtLoginError(error)
-        }
-        rebuildMenu()
-    }
-
-    private func showLaunchAtLoginError(_ error: Error) {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Launch at Login couldn't be changed"
-        alert.informativeText = "\(error)"
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
     @objc private func resetSpeechModelCacheClicked(_ sender: NSMenuItem) {
         guard !isRecording,
               !isBusy,
@@ -6421,36 +5368,39 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         // нажатие вообще что-то сделало: окно прогресса появляется только
         // после проверки архива, а до неё десятки мегабайт.
         if let installing = installingUpdateVersion {
-            let busy = NSMenuItem(title: "Installing Dictor v\(installing)…",
+            let busy = NSMenuItem(title: t("Устанавливаю Dictor v\(installing)…",
+                                           "Installing Dictor v\(installing)…"),
                                   action: nil, keyEquivalent: "")
             busy.isEnabled = false
             return busy
         }
 
-        let parent = NSMenuItem(title: "Update to v\(release.version)",
+        let parent = NSMenuItem(title: t("Обновить до v\(release.version)",
+                                         "Update to v\(release.version)"),
                                 action: nil, keyEquivalent: "")
         let sub = NSMenu()
         sub.autoenablesItems = false
 
-        let whatsNew = NSMenuItem(title: "What's new…",
+        let whatsNew = NSMenuItem(title: t("Что нового…", "What's new…"),
                                   action: #selector(whatsNewClicked(_:)),
                                   keyEquivalent: "")
         whatsNew.target = self
         sub.addItem(whatsNew)
 
-        let updateNow = NSMenuItem(title: "Update now…",
+        let updateNow = NSMenuItem(title: t("Обновить сейчас…", "Update now…"),
                                    action: #selector(updateNowClicked(_:)),
                                    keyEquivalent: "")
         updateNow.target = self
         sub.addItem(updateNow)
 
-        let remindLater = NSMenuItem(title: "Remind me in 24 hours",
+        let remindLater = NSMenuItem(title: t("Напомнить через 24 часа", "Remind me in 24 hours"),
                                      action: #selector(remindMeLaterClicked(_:)),
                                      keyEquivalent: "")
         remindLater.target = self
         sub.addItem(remindLater)
 
-        let skip = NSMenuItem(title: "Skip v\(release.version)",
+        let skip = NSMenuItem(title: t("Пропустить v\(release.version)",
+                                       "Skip v\(release.version)"),
                               action: #selector(skipVersionClicked(_:)),
                               keyEquivalent: "")
         skip.target = self
@@ -6658,15 +5608,15 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 }
 
 
-
 // MARK: - Quick panel (поповер меню-бара)
 
 extension DictorApp: QuickPanelDelegate {
 
     @objc func statusItemClicked(_ sender: NSStatusBarButton) {
         if NSApp.currentEvent?.type == .rightMouseUp {
-            // Сервисное меню: модель, словарь, диагностика — до переезда
-            // всего в новую панель настроек.
+            // Меню действий: отмена записи, разрешения, обновление, окно,
+            // диагностика, выход. Настроек здесь больше нет — все они живут
+            // в окне, и меню не обязано быть их вторым адресом.
             statusItem.menu = buildMenu()
             sender.performClick(nil)
             statusItem.menu = nil
