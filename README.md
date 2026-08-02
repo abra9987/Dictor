@@ -118,7 +118,9 @@ Requires macOS 14 and Apple Silicon.
 
 ## Privacy
 
-- Audio is deleted as soon as the text exists. It is never written to disk.
+- Audio lives on disk only as a crash-recovery journal while a dictation is
+  being handled, and is deleted as soon as the text exists. After a failure the
+  journal stays so the next launch can recover the dictation into History.
 - Transcripts and statistics stay on your Mac, in your user library.
 - No accounts, no analytics, no crash reporting, no identifiers of any kind.
 - Two network calls exist and both are visible in the Privacy tab: downloading

@@ -1179,9 +1179,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
 
         // Макет: значение здесь обычным шрифтом 12/500, не mono.
+        // «Удаляется сразу» без оговорок было полуправдой: на время обработки
+        // на диске живёт страховочный журнал, и при сбое он сознательно
+        // остаётся — чтобы следующий запуск вернул диктовку в историю.
         let audioRow = SDRowView(
             title: t("Аудио после распознавания", "Audio after transcription"),
-            control: panelLabel(t("Удаляется сразу", "Deleted immediately"),
+            subtitle: t("На время обработки на диске живёт страховочный журнал; при сбое он остаётся, чтобы вернуть диктовку в историю",
+                        "A crash-recovery journal lives on disk while a dictation is handled; after a failure it stays so the dictation can be recovered"),
+            control: panelLabel(t("Удаляется после вставки", "Deleted once the text exists"),
                                 size: 12, weight: .medium),
             verticalPadding: 12
         )
