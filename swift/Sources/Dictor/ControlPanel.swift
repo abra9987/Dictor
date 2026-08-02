@@ -3119,14 +3119,18 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func deleteMainHistoryEntry(at index: Int) {
-        var entries = settings.recentTranscriptEntries
+        let entries = settings.recentTranscriptEntries
         guard entries.indices.contains(index) else { return }
-        let removed = entries.remove(at: index)
-        settings.recentTranscriptEntries = entries
+        let removed = entries[index]
+        // Удаление — через ту же transcriptHistoryArchive, что и самотест:
+        // раньше тест проверял функцию без единого продакшн-вызывающего, а
+        // реальное удаление было написано рядом инлайн.
+        let next = transcriptHistoryArchive(entries, removing: index)
+        settings.recentTranscriptEntries = next
         // Явное удаление сильнее закрепления: без снятия пина его текст
         // оставался в plist невидимкой — фильтр «Закреплённые» ищет пины
         // только среди записей архива.
-        if !entries.contains(where: { $0.text == removed.text }) {
+        if !next.contains(where: { $0.text == removed.text }) {
             settings.pinnedTranscripts = settings.pinnedTranscripts.filter { $0 != removed.text }
         }
         if historySelectionKey == historyEntryKey(removed) {

@@ -134,25 +134,10 @@ enum UpdateCheck {
         return parts.joined(separator: ".")
     }
 
-    /// Ссылка «что нового», которую покажем человеку. Принимаем только свой
-    /// канал по HTTPS и без пользователя, пароля, запроса и якоря — всё
-    /// остальное схлопывается на главную страницу канала. Манифест лежит на
-    /// нашем сервере, но обращаться с ним как с доверенным вводом нельзя.
-    static func sanitizedReleaseURL(_ value: String?) -> String {
-        let fallback = UPDATE_CHANNEL_PAGE.absoluteString
-        guard let value else { return fallback }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let components = URLComponents(string: trimmed),
-              components.scheme == "https",
-              components.host == UPDATE_CHANNEL_PAGE.host,
-              components.user == nil,
-              components.password == nil,
-              components.query == nil,
-              components.fragment == nil else {
-            return fallback
-        }
-        return trimmed
-    }
+    // Ссылка «что нового» в манифесте не читается вовсе: htmlURL всегда
+    // страница канала, зашитая в приложение. Раньше здесь жил санитайзер
+    // ссылок из манифеста — его не вызывал никто, а тест на нём создавал
+    // впечатление защиты, которой не было в потоке.
 }
 
 struct DictorUpdateManifest: Decodable, Equatable, Sendable {
@@ -761,25 +746,6 @@ func createPrivateUpdateProgressStateFile(directory: String = NSTemporaryDirecto
     } catch {
         _ = Darwin.close(fd)
         _ = Darwin.unlink(path)
-        throw error
-    }
-}
-
-func writePrivateUpdateProgressState(phase: String,
-                                             message: String,
-                                             to path: String) throws {
-    let safePhase = phase.replacingOccurrences(of: "\t", with: " ")
-        .replacingOccurrences(of: "\n", with: " ")
-    let safeMessage = message.replacingOccurrences(of: "\t", with: " ")
-        .replacingOccurrences(of: "\n", with: " ")
-    let fd = try openPrivateOutputFileDescriptor(atPath: path,
-                                                 exclusive: false,
-                                                 removeOnFailure: false)
-    do {
-        try writeAllData(Data("\(safePhase)\t\(safeMessage)\n".utf8), to: fd)
-        guard Darwin.close(fd) == 0 else { throw currentPOSIXError() }
-    } catch {
-        _ = Darwin.close(fd)
         throw error
     }
 }

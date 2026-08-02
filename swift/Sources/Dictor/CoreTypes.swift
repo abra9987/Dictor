@@ -741,13 +741,6 @@ func parseRecentTranscriptLimit(storedValue value: Any?) -> RecentTranscriptLimi
     return nil
 }
 
-func limitedRecentTranscripts(_ transcripts: [String], limit: RecentTranscriptLimit) -> [String] {
-    let count = limit.count
-    guard count > 0 else { return [] }
-    guard transcripts.count > count else { return transcripts }
-    return Array(transcripts.prefix(count))
-}
-
 struct ASRTimingBreakdown: Codable, Equatable, Sendable {
     let totalSeconds: Double
     let workerQueueSeconds: Double
@@ -1000,23 +993,8 @@ func importedDailyDictationUsage(from logText: String,
     return stats
 }
 
-func transcriptionDurationLabel(_ duration: Double?) -> String {
-    guard let duration, duration.isFinite, duration >= 0 else { return "\u{2014}" }
-    return String(format: "%.3f s", duration)
-}
-
 func millisecondsLabel(_ duration: Double) -> String {
     String(format: "%.1f ms", max(0, duration) * 1_000)
-}
-
-func asrTimingTooltip(_ timing: ASRTimingBreakdown?) -> String? {
-    guard let timing else { return nil }
-    return [
-        "ASR total  \(millisecondsLabel(timing.totalSeconds))",
-        "FluidAudio  \(millisecondsLabel(timing.fluidProcessingSeconds))",
-        "Decoder setup  \(millisecondsLabel(timing.decoderPreparationSeconds))",
-        "Actor + framework  \(millisecondsLabel(timing.workerQueueSeconds + timing.frameworkOverheadSeconds))",
-    ].joined(separator: "\n")
 }
 
 struct DictationLatencyMetrics: Equatable {

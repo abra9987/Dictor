@@ -1062,18 +1062,23 @@ enum DictorSelfTest {
     private static func testRecentTranscriptLimit() throws {
         let transcripts = ["newest", "second", "third", "fourth", "fifth", "sixth"]
 
+        // Проверяется именно limitedRecentTranscriptEntries — то, чем живёт
+        // меню (visibleHistory). Раньше тут стояла строковая
+        // limitedRecentTranscripts, которую продакшн не вызывал вовсе: тест
+        // утверждал поведение, которого в продукте нет.
+        let plainEntries = transcripts.map { TranscriptHistoryEntry(text: $0) }
         try expect(
-            limitedRecentTranscripts(transcripts, limit: .off),
+            limitedRecentTranscriptEntries(plainEntries, limit: .off).map(\.text),
             equals: [],
             "off should keep no recent transcripts"
         )
         try expect(
-            limitedRecentTranscripts(transcripts, limit: .last1),
+            limitedRecentTranscriptEntries(plainEntries, limit: .last1).map(\.text),
             equals: ["newest"],
             "last-one history should keep only the newest transcript"
         )
         try expect(
-            limitedRecentTranscripts(transcripts, limit: .last5),
+            limitedRecentTranscriptEntries(plainEntries, limit: .last5).map(\.text),
             equals: ["newest", "second", "third", "fourth", "fifth"],
             "last-five history should preserve the current default cap"
         )
@@ -1122,17 +1127,6 @@ enum DictorSelfTest {
             equals: archivedEntries,
             "an invalid history deletion index should leave the archive unchanged"
         )
-        try expect(
-            transcriptionDurationLabel(0.1234),
-            equals: "0.123 s",
-            "history timing should be displayed in seconds with millisecond precision"
-        )
-        try expect(
-            transcriptionDurationLabel(nil),
-            equals: "\u{2014}",
-            "legacy history entries should not invent transcription timing"
-        )
-
         let timing = ASRTimingBreakdown(
             totalSeconds: 0.295,
             workerQueueSeconds: 0.001,
@@ -1153,12 +1147,6 @@ enum DictorSelfTest {
             equals: entriesWithBreakdown,
             "history timing metadata should survive persistence"
         )
-        try expect(
-            asrTimingTooltip(timing)?.contains("FluidAudio  286.0 ms"),
-            equals: true,
-            "history timing tooltip should expose FluidAudio's own processing time"
-        )
-
         let legacyEntryData = Data(
             #"[{"text":"legacy","transcriptionDurationSeconds":0.25}]"#.utf8
         )
@@ -2852,33 +2840,24 @@ enum DictorSelfTest {
             equals: nil,
             "stored app version normalization should reject oversized numeric components"
         )
-        let channel = UPDATE_CHANNEL_PAGE.absoluteString
+        // Манифест лежит на нашем сервере, но это всё равно внешний ввод.
+        // Настоящая защита не в санитайзере ссылок (его больше нет — продакшн
+        // его и не вызывал), а в том, что ссылка «что нового» вообще не
+        // читается из манифеста: какие бы поля там ни лежали, htmlURL — это
+        // страница канала, зашитая в приложение.
+        let hostileManifest = Data(
+            #"{"version":"9.9.9","notes":"x","url":"https://evil.example/pwn","page":"https://evil.example/pwn"}"#
+                .utf8)
+        guard let hostileOK = HTTPURLResponse(url: UPDATE_MANIFEST_URL,
+                                              statusCode: 200,
+                                              httpVersion: nil,
+                                              headerFields: nil) else {
+            throw SelfTestFailure.failed("could not build a stub HTTP response")
+        }
         try expect(
-            UpdateCheck.sanitizedReleaseURL("http://dictor.raulgumerov.com/notes"),
-            equals: channel,
-            "release URL sanitizing should require HTTPS"
-        )
-        try expect(
-            UpdateCheck.sanitizedReleaseURL("https://user@dictor.raulgumerov.com/notes"),
-            equals: channel,
-            "release URL sanitizing should reject userinfo"
-        )
-        try expect(
-            UpdateCheck.sanitizedReleaseURL("https://dictor.raulgumerov.com/notes?download=1"),
-            equals: channel,
-            "release URL sanitizing should reject query strings"
-        )
-        // Манифест лежит на нашем сервере, но это всё равно внешний ввод:
-        // подменённая ссылка не должна увести человека на чужой хост.
-        try expect(
-            UpdateCheck.sanitizedReleaseURL("https://example.com/notes"),
-            equals: channel,
-            "release URL sanitizing should reject foreign hosts"
-        )
-        try expect(
-            UpdateCheck.sanitizedReleaseURL("https://dictor.raulgumerov.com/notes"),
-            equals: "https://dictor.raulgumerov.com/notes",
-            "release URL sanitizing should keep a clean URL on our own channel"
+            (try? UpdateCheck.parseLatest(data: hostileManifest, response: hostileOK).get())?.htmlURL,
+            equals: UPDATE_CHANNEL_PAGE.absoluteString,
+            "the what's-new link must come from the app, not from the manifest"
         )
     }
 
@@ -3417,14 +3396,20 @@ enum DictorSelfTest {
         try expect(initial?.message, equals: Optional("Starting update..."),
                    "update progress state should default to the startup message")
 
-        try writePrivateUpdateProgressState(phase: "failed\tbad",
-                                            message: "Line 1\nLine 2",
-                                            to: statePath)
-        let failed = UpdateProgressState.read(from: statePath)
-        try expect(failed?.phase, equals: Optional("failed bad"),
-                   "update progress state should sanitize tab characters in phases")
-        try expect(failed?.message, equals: Optional("Line 1 Line 2"),
-                   "update progress state should sanitize newlines in messages")
+        // Файл состояния в бою пишет bash-хелпер строками «фаза\tсообщение» —
+        // проверяется контракт чтения на таком же сыром содержимом. Раньше
+        // тут проверялась Swift-функция записи, которую продакшн не вызывал.
+        guard let stateHandle = FileHandle(forWritingAtPath: statePath) else {
+            throw SelfTestFailure.failed("update progress state file should be writable")
+        }
+        stateHandle.truncateFile(atOffset: 0)
+        stateHandle.write(Data("installing\tCopying files...\n".utf8))
+        stateHandle.closeFile()
+        let installing = UpdateProgressState.read(from: statePath)
+        try expect(installing?.phase, equals: Optional("installing"),
+                   "update progress read should take the phase before the first tab")
+        try expect(installing?.message, equals: Optional("Copying files..."),
+                   "update progress read should take the message after the tab")
 
         let safeCleanupPath = (NSTemporaryDirectory() as NSString)
             .appendingPathComponent("\(UPDATE_PROGRESS_APP_PREFIX)test.app")
