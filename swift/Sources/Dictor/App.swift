@@ -3144,7 +3144,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             log("release: clip too short (\(String(format: "%.2f", dur)) s), discarding")
             PendingDictationRecovery.remove(captured.recoveryURL)
             hideRecordingHUD()
-            setMenuBarState(.idle)
+            let recordedWallSeconds = recordingStartedAtUptime.map { releaseReceivedAt - $0 } ?? 0
+            if recordedWallSeconds >= CAPTURE_FAILURE_MIN_RECORDING_SECONDS {
+                // Человек держал запись секунды, а звука не набралось и на
+                // клип: захват молчал. Раньше это выглядело ровно как
+                // случайное касание хоткея — ни звука, ни вспышки, ни
+                // записи в истории, только строка в логе.
+                log("recording ran \(String(format: "%.1f", recordedWallSeconds)) s but captured \(String(format: "%.2f", dur)) s — capture failed silently")
+                signalDictationFailure()
+            } else {
+                setMenuBarState(.idle)
+            }
             rebuildMenu()
             if !runDeferredAudioRouteRefreshIfNeeded() {
                 scheduleAudioIdleStop(reason: "short clip")
@@ -3302,6 +3312,12 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                         ).logLine)
                     } else {
                         PendingDictationRecovery.remove(captured.recoveryURL)
+                        // Запись нормальной длины, а распознавание вернуло
+                        // пустоту — раньше это выглядело как «ничего не
+                        // произошло»: ни текста, ни звука, ни записи в
+                        // истории. Пустой результат — тоже отказ.
+                        log("transcription returned empty text for \(String(format: "%.2f", dur)) s of audio")
+                        dictationFailed = true
                     }
                 }
             } catch {

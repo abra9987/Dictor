@@ -125,6 +125,10 @@ let PASTE_NEVER_READ_FLASH_SECONDS: TimeInterval = 4.0
 /// нормализации в Settings. Пока это были два разных числа (2000 и 500),
 /// степпер честно крутился до 2000, а настройка молча резалась до 500.
 let ENTER_DELAY_MAX_MILLISECONDS = 2000
+/// Запись шла не меньше этого, а звука не набралось и на минимальный клип —
+/// значит, захват молчал (тап без данных, конвертер отверг буферы, микрофон
+/// умер после старта). Короче — честное «чиркнул по хоткею», и оно тихое.
+let CAPTURE_FAILURE_MIN_RECORDING_SECONDS: TimeInterval = 2.0
 let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]
 let AUDIO_IDLE_STOP_DELAY_SECONDS: TimeInterval = 5
 let AUDIO_CONFIGURATION_CHANGE_SUPPRESSION_SECONDS: TimeInterval = 1
