@@ -3573,6 +3573,37 @@ enum DictorSelfTest {
             "release decision should handle invalid sample rates defensively"
         )
 
+        // Автостоп по потолку не вставляет текст — капсула обязана сказать,
+        // куда он делся, и не обещать «Историю», когда туда ничего не легло.
+        try expect(
+            maxDurationStopMessage(outcome: .savedToHistory,
+                                   limitMinutes: 20,
+                                   language: .russian),
+            equals: "Запись остановлена: лимит 20 мин — текст в «Истории»",
+            "auto-stop with saved text must point at History"
+        )
+        try expect(
+            maxDurationStopMessage(outcome: .savedToHistory,
+                                   limitMinutes: 20,
+                                   language: .english),
+            equals: "Recording stopped at the 20-minute limit — the text is in History",
+            "auto-stop message must localise"
+        )
+        try expect(
+            maxDurationStopMessage(outcome: .emptyTranscription,
+                                   limitMinutes: 20,
+                                   language: .russian),
+            equals: "Запись остановлена: лимит 20 мин",
+            "an empty transcription must not promise text in History"
+        )
+        try expect(
+            maxDurationStopMessage(outcome: .failed,
+                                   limitMinutes: 20,
+                                   language: .russian),
+            equals: "Запись остановлена: лимит 20 мин — не получилось распознать",
+            "a failed recovery must not promise text in History either"
+        )
+
         let recoveryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("dictor-recovery-test-\(UUID().uuidString)")
             .appendingPathExtension("sdaudio")

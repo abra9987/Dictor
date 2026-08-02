@@ -59,6 +59,11 @@ Seven links, `App.swift` `handleRelease` being the spine:
 Measured on real use: about **97% of the delay is the model itself**; everything
 else together is under 10 ms.
 
+One deliberate exit from this path: the 20-minute recording ceiling. An
+auto-stopped recording is almost always a forgotten toggle-mode one, so the
+text goes to History only — never to the cursor, which by then may sit in an
+unrelated field — and the error capsule says where to find it.
+
 ## Invariants that cost something to learn
 
 - `AudioCapture` is not `@MainActor` (above).

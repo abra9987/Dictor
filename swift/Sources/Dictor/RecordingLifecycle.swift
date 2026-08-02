@@ -55,6 +55,40 @@ func processedDictationText(rawTranscript: String,
 }
 
 
+/// Чем закончилось нестандартное завершение записи (автостоп по потолку,
+/// потеря разрешения, сон): дошёл ли текст до «Истории». Вызывающий решает
+/// по исходу, что сказать человеку, — молчать нельзя, вставки-то не было.
+enum DictationRecoveryOutcome: Equatable {
+    case noAudio
+    case savedToHistory
+    case emptyTranscription
+    case failed
+}
+
+/// Текст капсулы после автостопа по потолку записи. Автостоп не вставляет
+/// текст вовсе: забытая toggle-запись не должна выливать расшифровку комнаты
+/// в поле с курсором. Значит, капсула обязана сказать, куда текст делся —
+/// и не обещать «Историю», если туда ничего не легло.
+func maxDurationStopMessage(outcome: DictationRecoveryOutcome,
+                            limitMinutes: Int,
+                            language: InterfaceLanguage) -> String {
+    let stopped = localizedText("Запись остановлена: лимит \(limitMinutes) мин",
+                                "Recording stopped at the \(limitMinutes)-minute limit",
+                                language: language)
+    switch outcome {
+    case .savedToHistory:
+        return stopped + localizedText(" — текст в «Истории»",
+                                       " — the text is in History",
+                                       language: language)
+    case .failed:
+        return stopped + localizedText(" — не получилось распознать",
+                                       " — transcription failed",
+                                       language: language)
+    case .noAudio, .emptyTranscription:
+        return stopped
+    }
+}
+
 /// Пора ли перезапускать аудиовход из-за того, что в настройках выбрали другой
 /// микрофон.
 ///

@@ -1921,7 +1921,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
 
         if isRecording || audio.isRunning {
-            recoverActiveRecordingToHistory(reason: "permission lost: \(reason)") { [weak self] in
+            recoverActiveRecordingToHistory(reason: "permission lost: \(reason)") { [weak self] _ in
                 self?.enterPermissionBlockedState(missing: missing, reason: reason)
             }
             return
@@ -3118,7 +3118,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         let missing = missingPermissions()
         let releasePermissionCheckCompletedAt = ProcessInfo.processInfo.systemUptime
         guard missing.isEmpty else {
-            recoverActiveRecordingToHistory(reason: "permission lost on release") { [weak self] in
+            recoverActiveRecordingToHistory(reason: "permission lost on release") { [weak self] _ in
                 self?.enterPermissionBlockedState(missing: missing, reason: "hotkey release")
             }
             return
@@ -3342,10 +3342,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     private func recoverActiveRecordingToHistory(reason: String,
                                                  runDeferredRefresh: Bool = true,
-                                                 completion: (() -> Void)? = nil) {
+                                                 completion: ((DictationRecoveryOutcome) -> Void)? = nil) {
         guard isRecording || audio.isRunning else {
             hotkey.resetToggleState()
-            completion?()
+            completion?(.noAudio)
             return
         }
 
@@ -3363,7 +3363,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             setMenuBarState(.idle)
             rebuildMenu()
             log("recording ended without audio (\(reason))")
-            completion?()
+            completion?(.noAudio)
             return
         }
 
@@ -3374,7 +3374,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         log("recording ended nonstandard (\(reason)); recovering \(String(format: "%.2f", duration)) s to history")
 
         Task { @MainActor in
-            var recoveryFailed = false
+            var outcome = DictationRecoveryOutcome.failed
             do {
                 let requestedAt = ProcessInfo.processInfo.systemUptime
                 let transcription = try await asr.transcribe(
@@ -3398,25 +3398,27 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                         recordDictationUsage(text: processed.text,
                                              audioSeconds: duration,
                                              asrSeconds: timing.totalSeconds)
+                        outcome = .savedToHistory
+                    } else {
+                        outcome = .emptyTranscription
                     }
                     PendingDictationRecovery.remove(captured.recoveryURL)
                     log("recovered dictation: \(String(format: "%.2f", duration)) s audio → \(String(format: "%.2f", timing.totalSeconds)) s → \(processed.text.count) chars in history")
                 }
             } catch {
-                recoveryFailed = true
                 log("dictation recovery failed; audio retained for next launch: \(error.localizedDescription)")
             }
 
             guard !isTerminating else { return }
             isBusy = false
             finishBusyHUD()
-            if recoveryFailed {
+            if outcome == .failed {
                 signalDictationFailure()
             } else {
                 setMenuBarState(.idle)
             }
             rebuildMenu()
-            completion?()
+            completion?(outcome)
             let didRestartAudio = runDeferredRefresh
                 ? runDeferredAudioRouteRefreshIfNeeded()
                 : false
@@ -3658,12 +3660,33 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private func scheduleMaxDurationAutoRelease() {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.isRecording else { return }
-            log("max recording duration reached, releasing")
-            self.hotkey.resetToggleState()
-            self.handleRelease()
+            // Не handleRelease(): автостоп срабатывает без человека — чаще
+            // всего это забытая toggle-запись, и вставка вылила бы
+            // расшифровку комнаты туда, где остался курсор. Текст уходит
+            // только в «Историю», а капсула объясняет, где его искать.
+            log("max recording duration reached, stopping without insertion")
+            self.recoverActiveRecordingToHistory(reason: "max recording duration") { [weak self] outcome in
+                self?.signalMaxDurationStop(outcome)
+            }
         }
         maxDurationWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + MAX_RECORDING_SECONDS, execute: work)
+    }
+
+    private func signalMaxDurationStop(_ outcome: DictationRecoveryOutcome) {
+        guard !isTerminating else { return }
+        let message = maxDurationStopMessage(outcome: outcome,
+                                             limitMinutes: Int(MAX_RECORDING_SECONDS) / 60,
+                                             language: settings.interfaceLanguage)
+        if outcome == .failed {
+            // Звук ошибки уже сыграл внутри recoverActiveRecordingToHistory —
+            // здесь только уточняется текст капсулы, без второго сигнала.
+            flashErrorFeedback(message: message,
+                               holdSeconds: PASTE_NEVER_READ_FLASH_SECONDS)
+        } else {
+            signalDictationFailure(message: message,
+                                   holdSeconds: PASTE_NEVER_READ_FLASH_SECONDS)
+        }
     }
 
     private func cancelMaxDurationAutoRelease() {
