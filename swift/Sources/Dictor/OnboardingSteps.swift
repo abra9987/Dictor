@@ -211,8 +211,8 @@ final class OnboardingWelcomeStepView: OnboardingStepView {
         bodyStack.addArrangedSubview(hotkeyRow)
         hotkeyRow.widthAnchor.constraint(equalTo: bodyStack.widthAnchor).isActive = true
 
-        setFoot(note: t("Ничего не уходит в интернет, кроме одной загрузки модели",
-                        "Nothing leaves your Mac except a single model download"),
+        setFoot(note: t("Речь не покидает Mac. Сеть — загрузка модели и проверка обновлений, её можно выключить",
+                        "Speech never leaves your Mac. The network is for the model download and the update check — that can be turned off"),
                 button: onboardingButton(t("Настроить за минуту", "Set up in a minute"),
                                          target: self,
                                          action: #selector(startTapped)))
@@ -433,8 +433,8 @@ final class OnboardingModelStepView: OnboardingStepView {
         super.init(language: language, actions: actions)
 
         setHead(title: t("Скачиваем модель распознавания", "Downloading the speech model"),
-                subtitle: t("Единственный раз, когда нужен интернет. Дальше Dictor работает полностью на вашем Mac — в самолёте, в поезде, без сети.",
-                            "The only time the internet is needed. After this Dictor runs entirely on your Mac — on a plane, on a train, offline."))
+                subtitle: t("Распознавание — целиком на вашем Mac: в самолёте, в поезде, без сети. Дальше Dictor выходит в интернет только спросить номер новой версии, и эту проверку можно выключить.",
+                            "Transcription runs entirely on your Mac — on a plane, on a train, offline. From here Dictor only goes online to ask for the latest version number, and that check can be turned off."))
 
         let card = OnboardingCardView()
         card.cornerRadius = 14
