@@ -3986,12 +3986,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         settings.recordingHUDTranscribingColor = draft.transcribingColor
         settings.recordingHUDBackgroundStyle = draft.backgroundStyle
         settings.recordingHUDSize = draft.hudSize
-        settings.agentEnabled = true
         _ = settings.refreshFromDisk()
         settingsDraft = ControlPanelSettingsDraft(settings: settings)
-        // Служба перечитывает хоткеи сама раз в секунду, так что
-        // перезапуск нужен только когда её вообще нет.
-        if !DictorAgentService.isAgentRunning() {
+        // Служба перечитывает хоткеи сама раз в секунду, так что перезапуск
+        // нужен только когда её вообще нет. И только если человек её не
+        // останавливал: остановленная тумблером служба не должна воскресать
+        // от записи хоткея — новое сочетание она прочтёт при запуске.
+        if settings.agentEnabled, !DictorAgentService.isAgentRunning() {
             beginServiceOperation(.starting)
         } else {
             refresh(force: true)
