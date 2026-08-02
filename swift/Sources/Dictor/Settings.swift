@@ -372,6 +372,13 @@ final class Settings: @unchecked Sendable {
         }
     }
 
+    /// Сырые байты архива истории — как лежат в defaults. Для дешёвого ответа
+    /// на «изменилось ли снаружи»: сравнить Data — это memcmp, а декодировать
+    /// до 10 000 записей каждую секунду наблюдателя настроек — нет.
+    var recentTranscriptEntriesStoredData: Data? {
+        defaults.data(forKey: Self.keyRecentTranscriptEntries)
+    }
+
     var recentTranscriptEntries: [TranscriptHistoryEntry] {
         get {
             if let data = defaults.data(forKey: Self.keyRecentTranscriptEntries),

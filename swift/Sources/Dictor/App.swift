@@ -1102,6 +1102,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// перезапуск аудиовхода случался бы раз в секунду.
     private var lastSeenInputDevice: String?
     private var lastSeenCorrections: [TranscriptCorrection]?
+    /// Байты архива истории, какими агент видел их в последний раз. Обновляется
+    /// и собственными записями (persistHistoryArchive), и наблюдателем — чтобы
+    /// «изменилось снаружи» не срабатывало на самих себя.
+    private var lastSeenHistoryArchiveData: Data?
     private var lastAppliedHotkeySignature = ""
     private var correctionSyncFileFingerprint: CorrectionSyncFileFingerprint?
     private var correctionSyncBaselineCorrections: [TranscriptCorrection] = []
@@ -1219,6 +1223,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         settings.hasActiveRunMarker = true
         restoreUpdateReminderPause()
         history = settings.recentTranscriptEntries
+        lastSeenHistoryArchiveData = settings.recentTranscriptEntriesStoredData
         importDictationUsageFromLogIfNeeded()
 
         refreshActivationPolicy()
@@ -2005,6 +2010,19 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             _ = writeCorrectionsToSyncFile(presentErrors: false)
         }
         lastSeenCorrections = corrections
+
+        // История: окно стирает её целиком или удаляет запись, а агент держал
+        // копию с момента старта — и на каждой диктовке записывал её поверх
+        // стёртого. «Действие необратимо» отменялось первой же диктовкой.
+        // Сравниваются сырые байты архива, декодирование — только при
+        // реальном внешнем изменении.
+        let historyData = settings.recentTranscriptEntriesStoredData
+        if historyData != lastSeenHistoryArchiveData {
+            lastSeenHistoryArchiveData = historyData
+            history = settings.recentTranscriptEntries
+            log("history changed outside the agent: reloaded (\(history.count) entries)")
+            rebuildMenu()
+        }
 
         // Цикл проверки обновлений стартует один раз при готовности службы, и
         // если тумблер в тот момент был выключен, включение обратно не
@@ -3635,20 +3653,33 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             asrTiming: asrTiming,
             createdAt: Date()
         )
-        let next = limitedTranscriptHistoryArchive([entry] + history)
-        guard next != history else { return }
-        history = next
-        settings.recentTranscriptEntries = history
+        // Архив перечитывается с диска прямо перед записью: пока шла запись и
+        // распознавание, секундный наблюдатель настроек стоит (guard
+        // !isRecording, !isBusy), и копия агента могла устареть — окно могло
+        // успеть стереть историю или удалить запись.
+        settings.refreshFromDisk()
+        let onDisk = settings.recentTranscriptEntries
+        let next = limitedTranscriptHistoryArchive([entry] + onDisk)
+        guard next != onDisk else { return }
+        persistHistoryArchive(next)
         if rebuildMenuAfterPersisting {
             rebuildMenu()
         }
     }
 
+    /// Единственная точка, где агент пишет архив истории. Обновляет и кэш, и
+    /// отпечаток байтов — иначе наблюдатель настроек примет собственную запись
+    /// за внешнюю и перечитает архив впустую.
+    private func persistHistoryArchive(_ entries: [TranscriptHistoryEntry]) {
+        history = entries
+        settings.recentTranscriptEntries = entries
+        lastSeenHistoryArchiveData = settings.recentTranscriptEntriesStoredData
+    }
+
     private func applyRecentTranscriptLimit() {
         guard settings.recentTranscriptLimit == .off, !history.isEmpty else { return }
         let removed = history.count
-        history.removeAll()
-        settings.recentTranscriptEntries = []
+        persistHistoryArchive([])
         log("recent transcript history disabled and cleared (\(removed) entries)")
     }
 
@@ -3674,8 +3705,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     @objc private func clearHistoryClicked(_ sender: NSMenuItem) {
         guard !history.isEmpty else { return }
         let count = history.count
-        history.removeAll()
-        settings.recentTranscriptEntries = []
+        persistHistoryArchive([])
         log("history cleared (\(count) entries)")
         rebuildMenu()
     }
