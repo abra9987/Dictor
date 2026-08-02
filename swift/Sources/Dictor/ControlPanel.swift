@@ -481,6 +481,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 // устаревшему тумблеру перещёлкивал только что сделанное.
                 String(settings.enterDelayMilliseconds),
                 settings.playFeedbackSounds ? "sounds-on" : "sounds-off",
+                settings.muteWhileRecording ? "mute-on" : "mute-off",
+                "login-item:\(SMAppService.mainApp.status.rawValue)",
                 settings.checkForUpdates ? "updates-on" : "updates-off",
                 settings.removeFillerWords ? "fillers-on" : "fillers-off",
                 settings.builtInSpellingsEnabled ? "spellings-on" : "spellings-off",
@@ -646,6 +648,25 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             root.addArrangedSubview(compactPermissionsCard())
         }
 
+        // Язык интерфейса включался только через defaults write — английский
+        // интерфейс существовал целиком и был недостижим.
+        let interfacePills = SDPills(options: [
+            .init(title: "Русский", value: InterfaceLanguage.russian.rawValue),
+            .init(title: "English", value: InterfaceLanguage.english.rawValue),
+        ], selected: settings.interfaceLanguage.rawValue)
+        interfacePills.onSelect = { [weak self] raw in
+            guard let self, let chosen = InterfaceLanguage(rawValue: raw) else { return }
+            self.settings.interfaceLanguage = chosen
+            self.refresh(force: true)
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Язык интерфейса", "Interface language"),
+            control: interfacePills
+        ))
+
+        // Два разных «входа в систему», которые носили одну подпись: тумблер
+        // службы (она стартует при входе сама, пока включена) и логин-айтем
+        // окна. Смешение обещало одно, а делало другое — аудит №16.
         let running = DictorAgentService.isAgentRunning()
         let serviceToggle = SDToggle()
         serviceToggle.isOn = running && settings.agentEnabled
@@ -659,26 +680,73 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             }
         }
         root.addArrangedSubview(SDRowView(
-            title: t("Запускать при входе в систему", "Launch at login"),
-            subtitle: t("Служба стартует тихо, без окон", "The service starts silently, no windows"),
+            title: t("Служба диктовки", "Dictation service"),
+            subtitle: t("Слушает хоткей в фоне, без окон, и запускается при входе в систему",
+                        "Listens for the hotkey in the background, no windows, and starts at login"),
             control: serviceToggle
         ))
 
-        let scriptOptions = dictationScriptOptions(interfaceLanguage: language)
-        let langPills = SDPills(options: scriptOptions.map {
-            .init(title: $0.title, value: $0.language.rawValue)
-        }, selected: settings.dictationLanguage.rawValue)
-        langPills.onSelect = { [weak self] raw in
-            guard let language = DictationLanguage(rawValue: raw) else { return }
-            self?.settings.dictationLanguage = language
+        let loginItemStatus = SMAppService.mainApp.status
+        let loginToggle = SDToggle()
+        loginToggle.isOn = loginItemStatus == .enabled || loginItemStatus == .requiresApproval
+        loginToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            do {
+                if enabled {
+                    try SMAppService.mainApp.register()
+                    log("panel login item enabled")
+                } else {
+                    try SMAppService.mainApp.unregister()
+                    log("panel login item disabled")
+                }
+            } catch {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = self.t("Не удалось изменить объект входа",
+                                           "Login item couldn't be changed")
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+            self.refresh(force: true)
         }
+        let loginSubtitle = loginItemStatus == .requiresApproval
+            ? t("Ждёт одобрения: Системные настройки → Основные → Объекты входа",
+                "Waiting for approval: System Settings → General → Login Items")
+            : t("Не нужно для самой диктовки — служба выше стартует сама",
+                "Not needed for dictation itself — the service above starts on its own")
+        root.addArrangedSubview(SDRowView(
+            title: t("Открывать это окно при входе", "Open this window at login"),
+            subtitle: loginSubtitle,
+            control: loginToggle
+        ))
+
+        // Полный список языков раньше жил только в меню по правому клику.
+        // Подписи ведут с алфавита: настройка ограничивает алфавит вывода,
+        // и «Кириллица» для английской речи означает «инглиш по-русски».
+        let languagePopup = NSPopUpButton()
+        for option in dictationLanguageMenuOrder() {
+            if option == dictationLanguageMenuOrder().dropFirst(3).first {
+                languagePopup.menu?.addItem(.separator())
+            }
+            languagePopup.addItem(withTitle: dictationLanguageMenuTitle(
+                option, interfaceLanguage: language))
+            languagePopup.lastItem?.representedObject = option.rawValue
+        }
+        if let index = languagePopup.itemArray.firstIndex(where: {
+            ($0.representedObject as? String) == settings.dictationLanguage.rawValue
+        }) {
+            languagePopup.selectItem(at: index)
+        }
+        languagePopup.target = self
+        languagePopup.action = #selector(selectDictationLanguageFromPanel(_:))
         root.addArrangedSubview(SDRowView(
             title: t("Алфавит вывода", "Output script"),
             subtitle: t("Авто — смешанная речь. Кириллица — английские слова "
                         + "запишутся по-русски",
                         "Auto handles mixed speech. Cyrillic makes English words "
                         + "come out in Russian letters"),
-            control: langPills
+            control: SDFieldButton(popup: languagePopup)
         ))
 
         let microphonePopup = NSPopUpButton()
@@ -712,6 +780,19 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: t("Микрофон", "Microphone"),
             subtitle: microphoneSubtitle,
             control: SDFieldButton(popup: microphonePopup)
+        ))
+
+        // Глушение жило только в старом меню («Mute system audio…»).
+        let muteToggle = SDToggle()
+        muteToggle.isOn = settings.muteWhileRecording
+        muteToggle.onToggle = { [weak self] enabled in
+            self?.settings.muteWhileRecording = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Глушить звук во время записи", "Mute audio while recording"),
+            subtitle: t("Музыка и уведомления приглушаются, чтобы не попасть в диктовку",
+                        "Music and alerts are ducked so they don't leak into the dictation"),
+            control: muteToggle
         ))
 
         let soundsToggle = SDToggle()
@@ -817,6 +898,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     @objc private func selectMicrophoneFromPanel(_ sender: NSPopUpButton) {
         settings.inputDevice = (sender.selectedItem?.representedObject as? String) ?? ""
+    }
+
+    @objc private func selectDictationLanguageFromPanel(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let chosen = DictationLanguage(rawValue: raw) else { return }
+        settings.dictationLanguage = chosen
     }
 
     private func addHotkeyTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {

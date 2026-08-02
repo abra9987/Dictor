@@ -496,6 +496,61 @@ func dictationScriptOptions(interfaceLanguage: InterfaceLanguage) -> [DictationS
     ]
 }
 
+/// Кириллические языки декодера — для подписи «Кириллица — украинский».
+let DICTATION_CYRILLIC_LANGUAGES: Set<DictationLanguage> =
+    [.russian, .ukrainian, .belarusian, .bulgarian, .serbian]
+
+/// Полный список языков для попапа в окне: три обычных варианта первыми,
+/// дальше кириллические, затем латинские. Выводится из `allCases`, а не
+/// перечисляется руками — новый язык в enum не сможет молча выпасть.
+func dictationLanguageMenuOrder() -> [DictationLanguage] {
+    let leading: [DictationLanguage] = [.auto, .russian, .english]
+    let cyrillic = DictationLanguage.allCases.filter {
+        !leading.contains($0) && DICTATION_CYRILLIC_LANGUAGES.contains($0)
+    }
+    let latin = DictationLanguage.allCases.filter {
+        !leading.contains($0) && !DICTATION_CYRILLIC_LANGUAGES.contains($0)
+    }
+    return leading + cyrillic + latin
+}
+
+/// Подпись языка в попапе. Ведёт с алфавита, а не с языка: настройка
+/// буквально ограничивает алфавит вывода (см. DictationScriptOption), и
+/// «Кириллица — украинский» говорит правду о том, что случится с текстом.
+func dictationLanguageMenuTitle(_ language: DictationLanguage,
+                                interfaceLanguage: InterfaceLanguage) -> String {
+    func t(_ russian: String, _ english: String) -> String {
+        localizedText(russian, english, language: interfaceLanguage)
+    }
+    let name: String
+    switch language {
+    case .auto:
+        return t("Авто — смешанная речь", "Auto — mixed speech")
+    case .english:    name = t("английский", "English")
+    case .spanish:    name = t("испанский", "Spanish")
+    case .french:     name = t("французский", "French")
+    case .german:     name = t("немецкий", "German")
+    case .italian:    name = t("итальянский", "Italian")
+    case .portuguese: name = t("португальский", "Portuguese")
+    case .romanian:   name = t("румынский", "Romanian")
+    case .polish:     name = t("польский", "Polish")
+    case .czech:      name = t("чешский", "Czech")
+    case .slovak:     name = t("словацкий", "Slovak")
+    case .slovenian:  name = t("словенский", "Slovenian")
+    case .croatian:   name = t("хорватский", "Croatian")
+    case .bosnian:    name = t("боснийский", "Bosnian")
+    case .russian:    name = t("русский", "Russian")
+    case .ukrainian:  name = t("украинский", "Ukrainian")
+    case .belarusian: name = t("белорусский", "Belarusian")
+    case .bulgarian:  name = t("болгарский", "Bulgarian")
+    case .serbian:    name = t("сербский", "Serbian")
+    }
+    let script = DICTATION_CYRILLIC_LANGUAGES.contains(language)
+        ? t("Кириллица", "Cyrillic")
+        : t("Латиница", "Latin")
+    return "\(script) — \(name)"
+}
+
 let DICTATION_LANGUAGE_DISPLAY: [DictationLanguage: String] = [
     .auto: "Auto-detect",
     .english: "English",
