@@ -4324,8 +4324,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              window === setupChecklistWindow else { return }
+        guard let window = notification.object as? NSWindow else { return }
+        // Системный крестик — тоже способ закрыть окно обновления. Без
+        // обнуления ссылки guard в presentUpdateWindow навсегда съедал
+        // следующие показы: кнопка «Обновить» в поповере молчала, и даже
+        // автоматическая проверка через 6 часов упиралась в тот же guard.
+        if window === updateAvailableWindow {
+            updateAvailableWindow = nil
+            refreshActivationPolicy()
+            return
+        }
+        guard window === setupChecklistWindow else { return }
         stopSetupChecklistRefreshTimer()
         refreshActivationPolicy()
     }
@@ -6360,6 +6369,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                                            currentVersion: currentVersion,
                                            language: settings.interfaceLanguage)
         window.updateDelegate = self
+        // Крестик обязан чистить ссылку так же, как «Позже» и «Пропустить»
+        // (windowWillClose), — окно .closable, и человек им пользуется.
+        window.delegate = self
         updateAvailableWindow = window
         window.center()
         showAppForModal()
