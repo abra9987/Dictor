@@ -164,13 +164,14 @@ let SETTINGS_CATALOG: [SettingsCatalogEntry] = [
           why: "Память последнего ненулевого лимита: выключение и включение "
                + "истории возвращает прежнюю длину списка."),
 
-    // MARK: Показано вне вкладок настроек
     .init(property: "builtInSpellingsEnabled",
-          exposure: .elsewhere(place: "раздел «Словарь» сайдбара, карточка «Написание названий»"),
-          why: "Встроенный набор стоит рядом со словами, которыми управляет."),
+          exposure: .settingsRow(tab: "dict", title: "Написание названий", toggleTest: true),
+          why: "Встроенный набор — словарная настройка; карточка в разделе "
+               + "«Словарь» сайдбара дублирует её рядом с самими словами."),
     .init(property: "latinTermRestorationsEnabled",
-          exposure: .elsewhere(place: "раздел «Словарь» сайдбара, карточка «Названия латиницей»"),
-          why: "Второй встроенный набор — рядом с первым."),
+          exposure: .settingsRow(tab: "dict", title: "Названия латиницей", toggleTest: true),
+          why: "Второй встроенный набор — рядом с первым, с дублем-карточкой "
+               + "в разделе «Словарь» сайдбара."),
 
     // MARK: Пользовательские данные
     .init(property: "transcriptCorrections",
@@ -197,7 +198,8 @@ let SETTINGS_CATALOG: [SettingsCatalogEntry] = [
           why: "Счётчики статистики: смотрятся в разделе «Статистика»."),
     .init(property: "dismissedHints",
           exposure: .userData,
-          why: "Закрытые подсказки «Сегодня»: закрыл — больше не возвращается."),
+          why: "Закрытые подсказки «Сегодня». Кнопка «Вернуть» в «Продвинутых» "
+               + "сбрасывает список — раньше «навсегда» было буквальным."),
     .init(property: "floatingCapsulePositions",
           exposure: .userData,
           why: "Память места капсулы по мониторам — ставится перетаскиванием."),

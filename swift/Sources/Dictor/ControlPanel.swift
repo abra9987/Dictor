@@ -32,7 +32,6 @@ struct ControlPanelSettingsDraft: Equatable {
     var alternateCompletionEnabled: Bool
     var enterDelayMilliseconds: Int
     var recordingColor: RecordingHUDAccentColor
-    var transcribingColor: RecordingHUDAccentColor
     var backgroundStyle: RecordingHUDBackgroundStyle
     var hudSize: RecordingHUDSize
 
@@ -43,7 +42,6 @@ struct ControlPanelSettingsDraft: Equatable {
         alternateCompletionEnabled = settings.alternateCompletionEnabled
         enterDelayMilliseconds = settings.enterDelayMilliseconds
         recordingColor = settings.recordingHUDRecordingColor
-        transcribingColor = settings.recordingHUDTranscribingColor
         backgroundStyle = settings.recordingHUDBackgroundStyle
         hudSize = settings.recordingHUDSize
     }
@@ -1135,6 +1133,35 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             subtitle: t("«Эээ», «ммм» и подобное исчезают из текста",
                         "“Uh”, “um” and similar vanish from the text"),
             control: fillerToggle
+        ))
+
+        // Встроенные наборы дублируют карточки раздела «Словарь» сайдбара —
+        // сознательно: раньше вкладка и раздел показывали разные подмножества
+        // словарных настроек, и человек, открывший одно из двух, был уверен,
+        // что видел всё (аудит, мелочь №13). Теперь вкладка полна, а обе
+        // копии синхронизирует отпечаток перерисовки.
+        let spellingsToggle = SDToggle()
+        spellingsToggle.isOn = settings.builtInSpellingsEnabled
+        spellingsToggle.onToggle = { [weak self] enabled in
+            self?.settings.builtInSpellingsEnabled = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Написание названий", "Name spelling"),
+            subtitle: t("postgres → PostgreSQL, sql → SQL, macos → macOS",
+                        "postgres → PostgreSQL, sql → SQL, macos → macOS"),
+            control: spellingsToggle
+        ))
+
+        let latinToggle = SDToggle()
+        latinToggle.isOn = settings.latinTermRestorationsEnabled
+        latinToggle.onToggle = { [weak self] enabled in
+            self?.settings.latinTermRestorationsEnabled = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Названия латиницей", "Names in Latin script"),
+            subtitle: t("гитхаб → GitHub, постгрес → PostgreSQL",
+                        "гитхаб → GitHub, постгрес → PostgreSQL"),
+            control: latinToggle
         ))
 
         // Синхронизация и перенос жили только в старом меню по правому клику —
@@ -3610,20 +3637,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             control: hudToggle
         ))
 
-        // Плавающая капсула (макет 6c). Выключена по умолчанию: это объект
-        // поверх чужих окон, и появляться он должен по приглашению.
-        let capsuleToggle = SDToggle()
-        capsuleToggle.isOn = settings.floatingCapsuleEnabled
-        capsuleToggle.onToggle = { [weak self] enabled in
-            self?.settings.floatingCapsuleEnabled = enabled
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Плавающая капсула", "Floating capsule"),
-            subtitle: t("Всегда под рукой: перетаскивается, прилипает к краям и помнит место",
-                        "Always at hand: drag it, it sticks to the edges and remembers its place"),
-            control: capsuleToggle
-        ))
-
         // Размер капсулы переехал в «Продвинутые» — там он стоит рядом с
         // положением и живым превью, как в макете 6d. Два места для одной
         // настройки неизбежно начинают расходиться.
@@ -3656,6 +3669,27 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: t("Цвет волны", "Wave color"),
             subtitle: t("Один цвет для записи и бренда", "One color for recording and brand"),
             control: swatches
+        ))
+
+        // Плавающая капсула (макет 6c) стоит ПОСЛЕ настроек вида: фон и цвет
+        // выше управляют капсулой записи, а не ею — рядом с её тумблером они
+        // читались как её настройки, которые «не работают» (аудит №6).
+        // Выключена по умолчанию: это объект поверх чужих окон, и появляться
+        // он должен по приглашению.
+        let capsuleToggle = SDToggle()
+        capsuleToggle.isOn = settings.floatingCapsuleEnabled
+        capsuleToggle.onToggle = { [weak self] enabled in
+            self?.settings.floatingCapsuleEnabled = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Плавающая капсула", "Floating capsule"),
+            subtitle: t("Всегда под рукой: перетаскивается, прилипает к краям и помнит "
+                        + "место. Вид у неё свой, по макету — настройки выше на неё "
+                        + "не действуют",
+                        "Always at hand: drag it, it sticks to the edges and remembers "
+                        + "its place. Its look is fixed by design — the settings above "
+                        + "don't apply to it"),
+            control: capsuleToggle
         ))
 
         // Настройка существовала всегда, но shouldShowDockIcon жёстко
@@ -3697,7 +3731,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     // который ничего не переключает, врёт убедительнее отсутствующего.
     private func addAdvancedTabRows(to root: NSStackView) {
         addPermissionsSection(to: root)
-        root.addArrangedSubview(advancedSectionHeader(t("Капсула", "Capsule")))
+        // «Капсула записи», не просто «Капсула»: плавающая капсула этими
+        // настройками не управляется (аудит №6), и заголовок обязан говорить,
+        // о которой из двух идёт речь.
+        root.addArrangedSubview(advancedSectionHeader(t("Капсула записи", "Recording capsule")))
 
         // Размер — с живым превью справа: переключение S/M/L видно сразу,
         // не открывая диктовку.
@@ -3773,9 +3810,30 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             subtitle: t("Выгружается только при смене модели — первая диктовка без задержки",
                         "Unloaded only when the model changes — the first dictation has no warm-up"),
             control: panelLabel(t("Всегда", "Always"), size: 12, weight: .medium),
+            verticalPadding: 12
+        ))
+
+        // Подсказки «Сегодня» закрываются навсегда — правило макета 6e.
+        // Раньше «навсегда» было буквальным: dismissedHints нигде не
+        // сбрасывался, и вернуть подсказки не мог никто (аудит, мелочь №15).
+        let dismissed = settings.dismissedHints.count
+        root.addArrangedSubview(SDRowView(
+            title: t("Подсказки на экране «Сегодня»", "Hints on the Today screen"),
+            subtitle: dismissed > 0
+                ? t("Закрытых: \(dismissed). Возврат покажет их снова",
+                    "Dismissed: \(dismissed). Restoring shows them again")
+                : t("Закрытых нет", "Nothing is dismissed"),
+            control: panelButton(t("Вернуть", "Restore"),
+                                 action: #selector(restoreDismissedHintsFromPanel(_:)),
+                                 enabled: dismissed > 0),
             hairline: false,
             verticalPadding: 12
         ))
+    }
+
+    @objc private func restoreDismissedHintsFromPanel(_ sender: NSButton) {
+        settings.dismissedHints = []
+        refresh(force: true)
     }
 
     @objc private func capsulePlacementChanged(_ sender: NSPopUpButton) {
@@ -4490,7 +4548,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         settings.alternateCompletionEnabled = draft.alternateCompletionEnabled
         settings.enterDelayMilliseconds = draft.enterDelayMilliseconds
         settings.recordingHUDRecordingColor = draft.recordingColor
-        settings.recordingHUDTranscribingColor = draft.transcribingColor
         settings.recordingHUDBackgroundStyle = draft.backgroundStyle
         settings.recordingHUDSize = draft.hudSize
         _ = settings.refreshFromDisk()
