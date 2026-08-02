@@ -379,6 +379,13 @@ final class AudioCapture: @unchecked Sendable {
     /// Whether the last open attempt pinned the audio unit to a specific
     /// device. Main-thread only, like the rest of startEngine.
     private var lastOpenPinnedInputDevice = false
+    /// Выбранный микрофон существует, но работать не стал: CoreAudio отверг
+    /// закрепление или движок не поднялся с ним, и захват идёт с системного
+    /// входа. Имя устройства — для интерфейса: галочка в меню без этой
+    /// строки утверждала бы, что запись идёт с выбранного. nil — захват на
+    /// том входе, который просили (или предпочтения нет). Main-thread only,
+    /// like the rest of startEngine.
+    private(set) var inputFallbackDeviceName: String?
     private var configurationObserver: NSObjectProtocol?
 
     var onConfigurationChange: (@Sendable () -> Void)?
@@ -426,6 +433,11 @@ final class AudioCapture: @unchecked Sendable {
             try openEngine(inputDevicePreference: "",
                            recordingImmediately: recordingImmediately,
                            recoveryJournal: recoveryJournal)
+            // Захват поднялся, но не с тем входом, который просили, — и об
+            // этом обязан узнать интерфейс, а не только лог: галочка в меню
+            // остаётся у выбранного устройства.
+            inputFallbackDeviceName = audioInputDevice(matching: inputDevicePreference)?.name
+                ?? inputDevicePreference.trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             clearStoppedCaptureState()
             throw error
@@ -810,6 +822,9 @@ final class AudioCapture: @unchecked Sendable {
     /// can give up on when CoreAudio refuses to open the unit.
     @discardableResult
     private func applyInputDevicePreference(_ preference: String, to input: AVAudioInputNode) -> Bool {
+        // Каждая новая попытка открытия начинается с чистого листа: прежний
+        // отказ не должен пережить успешное закрепление или смену настройки.
+        inputFallbackDeviceName = nil
         let trimmed = preference.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         guard !isDefaultAggregateAudioInputPreference(trimmed) else { return false }
@@ -846,6 +861,7 @@ final class AudioCapture: @unchecked Sendable {
                                           UInt32(MemoryLayout<AudioDeviceID>.size))
         guard status == noErr else {
             log("AudioCapture: input device switch failed (\(formattedOSStatus(status))), using system default")
+            inputFallbackDeviceName = device.name
             return false
         }
         log("AudioCapture: selected input \(device.name)")

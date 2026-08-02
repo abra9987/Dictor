@@ -3892,7 +3892,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                               totalDownloadModelFiles: totalDownloadModelFiles,
                               medianLatencyMilliseconds: medianLatencyMilliseconds,
                               isUpdating: installingUpdateVersion != nil,
-                              appVersion: currentBundleVersion())
+                              appVersion: currentBundleVersion(),
+                              inputFallbackDeviceName: audio.inputFallbackDeviceName)
         )
     }
 
@@ -4948,6 +4949,17 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                                          keyEquivalent: "")
             unavailable.isEnabled = false
             sub.addItem(unavailable)
+        }
+
+        // Устройство есть в системе, но CoreAudio его отверг — запись идёт с
+        // системного входа. Случай «устройства нет» показан строкой выше;
+        // случай «есть, но отказал» раньше не был показан никак.
+        if let fallback = audio.inputFallbackDeviceName {
+            let failed = NSMenuItem(title: "Failed: \(fallback) — using system default",
+                                    action: nil,
+                                    keyEquivalent: "")
+            failed.isEnabled = false
+            sub.addItem(failed)
         }
 
         if !devices.isEmpty {
@@ -6764,8 +6776,15 @@ extension DictorApp: QuickPanelDelegate {
 
         let rawPreference = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
         let devices = availableAudioInputDevices()
-        let microphoneName = audioInputDevice(matching: rawPreference, in: devices)?.name
+        var microphoneName = audioInputDevice(matching: rawPreference, in: devices)?.name
             ?? localizedText("Системный по умолчанию", "System default", language: language)
+        // Выбранное устройство отказало — строка обязана сказать, с чего
+        // запись идёт на самом деле, а не повторять галочку из настроек.
+        if let failed = audio.inputFallbackDeviceName {
+            microphoneName = localizedText("\(failed) отказал — системный",
+                                           "\(failed) failed — system default",
+                                           language: language)
+        }
 
         let calendar = Calendar.current
         let todayKey = dictationUsageDayKey(for: Date(), calendar: calendar)

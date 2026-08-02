@@ -493,6 +493,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 settings.recordingHUDPlacement.rawValue,
                 "limit:\(settings.recentTranscriptLimit.rawValue)",
                 settings.speechModelProfile.rawValue,
+                "micFallback:\(state?.inputFallbackDeviceName ?? "")",
                 permissionClickCount.description,
                 "repair:\(permissionRepairNotes.count)",
                 (AgentRuntimeStateStore.read()?.missingPermissions ?? []).sorted().joined(separator: ",")]
@@ -689,10 +690,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         microphonePopup.target = self
         microphonePopup.action = #selector(selectMicrophoneFromPanel(_:))
+        // Служба сообщает, если выбранное устройство отказало и запись идёт
+        // с системного входа: без этого выбранное имя в попапе — молчаливая
+        // ложь о том, откуда берётся звук.
+        let microphoneSubtitle: String
+        if let failed = AgentRuntimeStateStore.read()?.inputFallbackDeviceName {
+            microphoneSubtitle = t("\(failed) отказал — запись идёт с системного входа",
+                                   "\(failed) failed — recording from the system default input")
+        } else {
+            microphoneSubtitle = t("Если пропадёт — вернёмся к встроенному",
+                                   "Falls back to the built-in mic if it disappears")
+        }
         root.addArrangedSubview(SDRowView(
             title: t("Микрофон", "Microphone"),
-            subtitle: t("Если пропадёт — вернёмся к встроенному",
-                        "Falls back to the built-in mic if it disappears"),
+            subtitle: microphoneSubtitle,
             control: SDFieldButton(popup: microphonePopup)
         ))
 
