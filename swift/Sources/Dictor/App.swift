@@ -6307,7 +6307,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         await MainActor.run {
             self.recordUpdateCheck(release: try? outcome.get(), source: source)
             guard let release = try? outcome.get() else { return }
-            self.handleFetchedRelease(release)
+            self.handleFetchedRelease(release, source: source)
         }
     }
 
@@ -6327,36 +6327,50 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         log("update check \(source.rawValue): \(result.rawValue)\(versionText)")
     }
 
-    private func handleFetchedRelease(_ release: DictorRelease) {
+    private func handleFetchedRelease(_ release: DictorRelease,
+                                      source: UpdateCheckSource = .automatic) {
         let current = currentBundleVersion()
         guard isNewer(release.version, than: current) else { return }
-        if settings.skippedVersions.contains(release.version) {
-            log("update available (v\(release.version)) but user skipped — staying quiet")
-            return
-        }
-        let now = Date()
-        if shouldSuppressUpdateForReminder(version: release.version,
-                                           reminderVersion: reminderPausedUpdateVersion,
-                                           reminderUntil: reminderPausedUntil,
-                                           now: now) {
-            if let reminderPausedUntil {
-                log("update available (v\(release.version)) but reminder is paused until \(ISO8601DateFormatter().string(from: reminderPausedUntil))")
+        // Пропуск версии и пауза «Позже» глушат только автоматические
+        // проверки. Ручную человек запускает сам — и «Установлена последняя
+        // версия» при живом обновлении была ложью, а снять пропуск было
+        // просто негде.
+        if source != .manual {
+            if settings.skippedVersions.contains(release.version) {
+                log("update available (v\(release.version)) but user skipped — staying quiet")
+                return
             }
-            return
-        }
-        // Same version → the pause expired and the update is re-shown.
-        // Newer version → it supersedes the paused one, so the stale
-        // pause must not linger in diagnostics alongside the new
-        // pending update. (An ACTIVE pause for this exact version
-        // already returned above.)
-        if shouldClearUpdateReminderPause(fetchedVersion: release.version,
-                                          pausedVersion: reminderPausedUpdateVersion) {
-            clearUpdateReminderPause()
+            let now = Date()
+            if shouldSuppressUpdateForReminder(version: release.version,
+                                               reminderVersion: reminderPausedUpdateVersion,
+                                               reminderUntil: reminderPausedUntil,
+                                               now: now) {
+                if let reminderPausedUntil {
+                    log("update available (v\(release.version)) but reminder is paused until \(ISO8601DateFormatter().string(from: reminderPausedUntil))")
+                }
+                return
+            }
+            // Same version → the pause expired and the update is re-shown.
+            // Newer version → it supersedes the paused one, so the stale
+            // pause must not linger in diagnostics alongside the new
+            // pending update. (An ACTIVE pause for this exact version
+            // already returned above.)
+            if shouldClearUpdateReminderPause(fetchedVersion: release.version,
+                                              pausedVersion: reminderPausedUpdateVersion) {
+                clearUpdateReminderPause()
+            }
         }
         log("update available: \(current) → v\(release.version)")
         pendingUpdate = release
         rebuildMenu()
-        presentUpdateWindow(for: release, currentVersion: current)
+        if source == .manual, let existing = updateAvailableWindow {
+            // Окно уже показано (и, возможно, закопано под чужими) — ручная
+            // проверка обязана его поднять, а не промолчать об уже известном.
+            showAppForModal()
+            existing.makeKeyAndOrderFront(nil)
+        } else {
+            presentUpdateWindow(for: release, currentVersion: current)
+        }
     }
 
     /// Окно с предложением обновиться. Пункт в меню-баре для этого не годился:
@@ -6882,7 +6896,7 @@ extension DictorApp: QuickPanelDelegate {
             self.recordUpdateCheck(release: try? outcome.get(), source: .manual)
             switch outcome {
             case .success(let release):
-                self.handleFetchedRelease(release)
+                self.handleFetchedRelease(release, source: .manual)
                 self.refreshQuickPanel()
                 if self.pendingUpdate == nil {
                     self.quickPanel?.flashUpToDate()
