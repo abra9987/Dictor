@@ -2005,6 +2005,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             _ = writeCorrectionsToSyncFile(presentErrors: false)
         }
         lastSeenCorrections = corrections
+
+        // Цикл проверки обновлений стартует один раз при готовности службы, и
+        // если тумблер в тот момент был выключен, включение обратно не
+        // поднимало его до перезапуска: тумблер «включено», «Приватность»
+        // обещает «1 раз в 6 ч», а служба в сеть не ходит. Вызов идемпотентен
+        // и дёшев — внутри два guard'а: по настройке и по уже живому циклу.
+        startUpdateCheckLoop()
     }
 
     // MARK: - Плавающая капсула (макет 6c)
@@ -6200,8 +6207,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     /// Silent update check: failures are recorded in diagnostics but
-    /// never alerted. `source` distinguishes the periodic timer tick
-    /// from the user re-enabling the settings toggle.
+    /// never alerted. Manual checks take a different path
+    /// (`quickPanelCheckForUpdates`) and record `.manual` themselves.
     private func tickUpdateCheck(source: UpdateCheckSource = .automatic) async {
         guard settings.checkForUpdates else { return }
         let outcome = await UpdateCheck.fetchLatest()
