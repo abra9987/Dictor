@@ -20,6 +20,11 @@ enum ServiceStatusKind: Equatable {
     /// 1 · Готово. Единственное состояние без движения — потому что ничего и
     /// не происходит, и это хорошая новость.
     case ready(latencyMilliseconds: Int?)
+    /// Пауза: служба жива, но хоткей нарочно не слушается — тумблер в панели
+    /// меню-бара. Не из макета 8 (десятое состояние): раньше пауза
+    /// существовала только в памяти службы, и шапка панели показывала
+    /// «Готово» с зелёной точкой, пока хоткей молчал (аудит №11).
+    case paused
     /// 2 · Служба запускается.
     case starting
     /// 3 · Проверка файлов модели.
@@ -48,7 +53,7 @@ enum ServiceStatusKind: Equatable {
     var isBusy: Bool {
         switch self {
         case .starting, .verifying, .downloading, .warmingUp, .updating: return true
-        case .ready, .needsPermission, .failed, .off, .versionMismatch: return false
+        case .ready, .paused, .needsPermission, .failed, .off, .versionMismatch: return false
         }
     }
 
@@ -62,6 +67,7 @@ enum ServiceStatusKind: Equatable {
     var identity: String {
         switch self {
         case .ready: return "ready"
+        case .paused: return "paused"
         case .starting: return "starting"
         case .verifying: return "verifying"
         case .downloading: return "downloading"
@@ -90,7 +96,7 @@ enum ServiceStatusKind: Equatable {
             return "needsPermission:\(name)"
         case .versionMismatch(let running, let installed):
             return "versionMismatch:\(running)→\(installed)"
-        case .starting, .warmingUp, .updating, .failed, .off:
+        case .starting, .warmingUp, .updating, .failed, .off, .paused:
             return identity
         }
     }
@@ -239,6 +245,11 @@ func serviceStatusPresentation(_ kind: ServiceStatusKind,
                      primaryAction: t("Запустить", "Start"),
                      secondaryAction: t("Подробнее", "Details"),
                      wantsAttention: true)
+
+    case .paused:
+        return .init(title: t("Диктовка на паузе", "Dictation is paused"),
+                     subtitle: t("включите тумблер, чтобы вернуть хоткей",
+                                 "turn the switch on to restore the hotkey"))
 
     case .off:
         return .init(title: t("Диктовка выключена", "Dictation is off"),
@@ -434,8 +445,8 @@ final class ServiceStatusFooterView: NSView {
     }
 }
 
-/// Рендер всех девяти состояний подвала — иначе проверить их нечем: семь из
-/// девяти в обычной жизни либо не наступают, либо длятся полсекунды.
+/// Рендер всех десяти состояний подвала — иначе проверить их нечем:
+/// большинство в обычной жизни либо не наступают, либо длятся полсекунды.
 @MainActor
 func exportServiceStatusPreviews(to directory: URL) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -449,6 +460,7 @@ func exportServiceStatusPreviews(to directory: URL) throws {
         ("7-permission", .needsPermission(name: "Микрофон")),
         ("8-failed", .failed),
         ("9-off", .off),
+        ("10-paused", .paused),
     ]
 
     var exported = 0

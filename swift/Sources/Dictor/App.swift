@@ -3928,6 +3928,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         if isBusy {
             return ("transcribing", "Transcribing your last recording.")
         }
+        // Пауза раньше жила только в памяти службы: окно и панель показывали
+        // «Готово» с зелёной точкой, пока хоткей нарочно молчал (аудит №11).
+        if isDictationPaused {
+            return ("paused", "Dictation is paused from the quick panel.")
+        }
         if isReady {
             let verb = settings.triggerMode == .hold ? "Hold" : "Press"
             return ("ready", "\(verb) \(hotkey.hotkey.name) to dictate.")
@@ -4151,6 +4156,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
         if isBusy {
             return t("Распознаю…", "Transcribing…")
+        }
+        if isDictationPaused {
+            return t("Диктовка на паузе", "Dictation is paused")
         }
         if isReady {
             let hk = hotkey.hotkey.name
@@ -5717,36 +5725,14 @@ extension DictorApp: QuickPanelDelegate {
             return .starting
         }
         if !isReady { return .warmingUp }
+        // Пауза перекрывает только «Готово»: пока служба запускается или
+        // сломана, это важнее нарочно выключенного хоткея.
+        if isDictationPaused { return .paused }
         return .ready(latencyMilliseconds: medianLatencyMilliseconds)
     }
 
     func quickPanelState() -> QuickPanelState {
         let language = settings.interfaceLanguage
-        let title: String
-        let subtitle: String
-        if isDictationPaused {
-            title = localizedText("Диктовка на паузе", "Dictation paused", language: language)
-            subtitle = localizedText("Включите тумблер, чтобы вернуть хоткей",
-                                     "Turn the switch on to restore the hotkey",
-                                     language: language)
-        } else if isRecording {
-            title = localizedText("Записываю", "Recording", language: language)
-            subtitle = localizedText("Говорите — всё остаётся на этом Mac",
-                                     "Speak — everything stays on this Mac",
-                                     language: language)
-        } else if isReady {
-            let hotkeyName = localizedHotkeyName(hotkey.hotkey, language: language)
-            title = localizedText("Слушаю \(hotkeyName)", "Listening for \(hotkeyName)",
-                                  language: language)
-            subtitle = localizedText("Всё распознаётся на этом Mac",
-                                     "Everything is transcribed on this Mac",
-                                     language: language)
-        } else {
-            title = startupStatusTitle
-            subtitle = localizedText("Служба ещё запускается", "The service is still starting",
-                                     language: language)
-        }
-
         let rawPreference = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
         let devices = availableAudioInputDevices()
         var microphoneName = audioInputDevice(matching: rawPreference, in: devices)?.name
@@ -5770,10 +5756,7 @@ extension DictorApp: QuickPanelDelegate {
         weekBars.append(CGFloat(today?.characterCount ?? 0) / CGFloat(maxCharacters))
 
         return QuickPanelState(
-            statusTitle: title,
-            statusSubtitle: subtitle,
             enabled: !isDictationPaused,
-            isRecording: isRecording,
             language: settings.dictationLanguage,
             microphoneName: microphoneName,
             devices: devices,

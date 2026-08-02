@@ -21,10 +21,7 @@ protocol QuickPanelDelegate: AnyObject {
 }
 
 struct QuickPanelState {
-    var statusTitle: String
-    var statusSubtitle: String
     var enabled: Bool
-    var isRecording: Bool
     var language: DictationLanguage
     var microphoneName: String
     var devices: [AudioInputDevice]
@@ -256,7 +253,8 @@ final class DictorQuickPanel: NSPanel {
         marker.markerSize = 8
         switch kind {
         case .ready: marker.shape = .dot(SD.C.positive)
-        case .off: marker.shape = .hollowRing
+        // Пауза, как и «выключено», — намеренный покой: кольцо, без движения.
+        case .off, .paused: marker.shape = .hollowRing
         case .needsPermission, .versionMismatch: marker.shape = .hollowSquare
         case .failed: marker.shape = .filledSquare(SD.C.danger)
         default: marker.shape = .wave(slow: kind.waveIsSlow)
@@ -914,12 +912,7 @@ func exportQuickPanelPreviews(to directory: URL,
         let suffix = base + variant
         let now = Date()
         let state = QuickPanelState(
-            statusTitle: language == .russian ? "Слушаю хоткей" : "Listening for hotkey",
-            statusSubtitle: language == .russian
-                ? "Всё распознаётся на этом Mac"
-                : "Everything is transcribed on this Mac",
             enabled: true,
-            isRecording: false,
             language: .russian,
             microphoneName: language == .english
                 ? "MacBook Pro (built-in)"

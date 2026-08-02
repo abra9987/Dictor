@@ -1843,6 +1843,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         switch state?.status {
         case "ready":
             return .ready(latencyMilliseconds: state?.medianLatencyMilliseconds)
+        // Пауза из панели меню-бара: раньше окно её не видело и подвал
+        // показывал «Готово», пока хоткей нарочно молчал (аудит №11).
+        case "paused":
+            return .paused
         case "error":
             return .failed
         default:
@@ -1872,7 +1876,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         switch kind {
         case .ready: marker.shape = .dot(SD.C.positive)
         case .versionMismatch: marker.shape = .hollowSquare
-        case .off: marker.shape = .hollowRing
+        // Пауза, как и «выключено», — намеренный покой: кольцо, без движения.
+        case .off, .paused: marker.shape = .hollowRing
         case .needsPermission: marker.shape = .hollowSquare
         case .failed: marker.shape = .filledSquare(SD.C.danger)
         default: marker.shape = .wave(slow: kind.waveIsSlow)
