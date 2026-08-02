@@ -1022,7 +1022,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var hotkeyRecorder: HotkeyRecorderController?
     private var shouldResumeRuntimeAfterWake = false
     private var didLogDeferredWakeRecovery = false
-    private var didOfferSetupChecklistThisLaunch = false
     private var setupChecklistWindow: NSWindow?
     private var setupChecklistRefreshTimer: Timer?
     private var hotkeyTestSucceeded = false
@@ -2143,36 +2142,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         button.toolTip = "Dictor"
     }
 
-    private func concealMenuBarIcon() {
-        statusItem.length = 0
-        statusItem.button?.isHidden = true
-        statusItem.button?.toolTip = nil
-    }
-
     private func revealMenuBarIcon() {
         statusItem.length = NSStatusItem.squareLength
         statusItem.button?.isHidden = false
         statusItem.button?.toolTip = "Dictor"
-    }
-
-    private func tintedCopy(of source: NSImage, with color: NSColor) -> NSImage {
-        let size = source.size
-        let rect = NSRect(origin: .zero, size: size)
-        let tinted = NSImage(size: size)
-        tinted.lockFocus()
-        drawTintedIcon(source, in: rect, color: color)
-        tinted.unlockFocus()
-        tinted.isTemplate = false
-        return tinted
-    }
-
-    private func drawTintedIcon(_ source: NSImage, in rect: NSRect, color: NSColor) {
-        source.draw(in: rect,
-                    from: NSRect(origin: .zero, size: source.size),
-                    operation: .sourceOver,
-                    fraction: 1.0)
-        color.set()
-        rect.fill(using: .sourceAtop)
     }
 
     private func setMenuBarState(_ state: MenuBarState) {
@@ -2930,10 +2903,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             self?.recordingHUDRetargetWorkItem = work
             DispatchQueue.main.async(execute: work)
         }
-    }
-
-    private func screenForRecordingHUD() -> NSScreen {
-        screenFor(point: NSEvent.mouseLocation)
     }
 
     private func screenFor(point: NSPoint) -> NSScreen {
@@ -3755,34 +3724,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         log("diagnostics copied to clipboard")
     }
 
-    private func openDiagnosticLog() {
-        NSWorkspace.shared.open(Logger.shared.fileURL)
-        log("diagnostics log opened")
-    }
-
-    private func showPreviousExitNoticeIfAppropriate() {
-        guard !isTerminating else { return }
-        showAppForModal()
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "Dictor Reopened After an Unexpected Exit"
-        alert.informativeText = """
-            Dictor appears to have exited last time without a normal shutdown. Nothing was sent anywhere.
-
-            You can copy a privacy-safe diagnostics report or open the local log if you want to file an issue.
-            """
-        alert.addButton(withTitle: "Copy Diagnostics")
-        alert.addButton(withTitle: "Open Log")
-        alert.addButton(withTitle: "Not Now")
-
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            copyDiagnosticsToClipboard()
-        } else if response == .alertSecondButtonReturn {
-            openDiagnosticLog()
-        }
-    }
-
     @objc private func saveDiagnosticsClicked(_ sender: NSMenuItem) {
         showAppForModal()
         let panel = NSSavePanel()
@@ -4262,15 +4203,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     // MARK: - Setup checklist
-
-    private func maybeShowSetupChecklist(reason: String) {
-        guard !didOfferSetupChecklistThisLaunch else { return }
-        guard startupFailure != nil
-            || !missingPermissions().isEmpty else { return }
-        didOfferSetupChecklistThisLaunch = true
-        log("setup checklist shown (\(reason))")
-        showSetupChecklist()
-    }
 
     @objc private func showSetupChecklistClicked(_ sender: NSMenuItem) {
         showSetupChecklist()
@@ -6151,22 +6083,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         rebuildMenu()
     }
 
-    private func ensureLaunchAtLoginEnabled() {
-        switch SMAppService.mainApp.status {
-        case .enabled:
-            return
-        case .requiresApproval:
-            log("launch at login requires user approval")
-        default:
-            do {
-                try SMAppService.mainApp.register()
-                log("launch at login auto-enabled")
-            } catch {
-                log("launch at login auto-enable failed: \(error.localizedDescription)")
-            }
-        }
-    }
-
     private func showLaunchAtLoginError(_ error: Error) {
         showAppForModal()
         let alert = NSAlert()
@@ -6175,21 +6091,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         alert.informativeText = "\(error)"
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-
-    @objc private func toggleCheckForUpdates(_ sender: NSMenuItem) {
-        settings.checkForUpdates.toggle()
-        sender.state = settings.checkForUpdates ? .on : .off
-        log("update notifications \(settings.checkForUpdates ? "enabled" : "disabled")")
-        if settings.checkForUpdates {
-            Task { [weak self] in
-                await self?.tickUpdateCheck(source: .settingsToggle)
-            }
-        } else {
-            pendingUpdate = nil
-            clearUpdateReminderPause()
-            rebuildMenu()
-        }
     }
 
     @objc private func resetSpeechModelCacheClicked(_ sender: NSMenuItem) {
@@ -6471,74 +6372,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         rebuildMenu()
     }
 
-    @objc private func checkForUpdatesClicked(_ sender: NSMenuItem) {
-        guard !isCheckingForUpdates else { return }
-        isCheckingForUpdates = true
-        rebuildMenu()
-        manualUpdateCheckTask = Task { [weak self] in
-            let outcome = await UpdateCheck.fetchLatest()
-            guard !Task.isCancelled,
-                  let self,
-                  !self.isTerminating else { return }
-            self.manualUpdateCheckTask = nil
-            self.recordUpdateCheck(release: try? outcome.get(), source: .manual)
-            self.finishManualUpdateCheck(outcome)
-        }
-    }
-
-    private func finishManualUpdateCheck(_ outcome: Result<DictorRelease, UpdateCheckFailure>) {
-        manualUpdateCheckTask = nil
-        isCheckingForUpdates = false
-        let release: DictorRelease
-        switch outcome {
-        case .failure(let failure):
-            rebuildMenu()
-            showUpdateCheckFailedAlert(failure)
-            return
-        case .success(let fetched):
-            release = fetched
-        }
-
-        let current = currentBundleVersion()
-        guard isNewer(release.version, than: current) else {
-            if pendingUpdate?.version == release.version {
-                pendingUpdate = nil
-            }
-            rebuildMenu()
-            showUpToDateAlert(currentVersion: current)
-            return
-        }
-
-        if settings.skippedVersions.contains(release.version) {
-            settings.skippedVersions = settings.skippedVersions.filter { $0 != release.version }
-        }
-        clearUpdateReminderPause()
-        pendingUpdate = release
-        rebuildMenu()
-        showUpdateAvailableAlert(for: release, currentVersion: current)
-    }
-
-    private func showUpdateAvailableAlert(for release: DictorRelease, currentVersion: String) {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.messageText = "Dictor v\(release.version) is available"
-        alert.informativeText = "You're running v\(currentVersion). Nothing is installed unless you choose Update Now."
-        alert.addButton(withTitle: "Update Now")
-        alert.addButton(withTitle: "What's New")
-        // Dismissing pauses reminders for 24 h (and hides the update
-        // menu item), so the button must say so — "Later" implied a
-        // consequence-free dismissal.
-        alert.addButton(withTitle: "Remind Me in 24 Hours")
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            startUpdate(for: release)
-        } else if response == .alertSecondButtonReturn {
-            showReleaseNotes(for: release)
-        } else {
-            pauseUpdateReminder(for: release)
-        }
-    }
-
     private func pauseUpdateReminder(for release: DictorRelease) {
         setUpdateReminderPause(version: release.version,
                                until: Date().addingTimeInterval(UPDATE_REMIND_LATER_SECONDS))
@@ -6583,15 +6416,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
         reminderPausedUpdateVersion = version
         reminderPausedUntil = until
-    }
-
-    private func showUpToDateAlert(currentVersion: String) {
-        showAppForModal()
-        let alert = NSAlert()
-        alert.messageText = "Dictor is up to date"
-        alert.informativeText = "You're running v\(currentVersion)."
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
     }
 
     private func showUpdateCheckFailedAlert(_ failure: UpdateCheckFailure) {
@@ -6954,12 +6778,21 @@ extension DictorApp: QuickPanelDelegate {
             self.manualUpdateCheckTask = nil
             self.isCheckingForUpdates = false
             self.recordUpdateCheck(release: try? outcome.get(), source: .manual)
-            if let release = try? outcome.get() {
+            switch outcome {
+            case .success(let release):
                 self.handleFetchedRelease(release)
-            }
-            self.refreshQuickPanel()
-            if self.pendingUpdate == nil {
-                self.quickPanel?.flashUpToDate()
+                self.refreshQuickPanel()
+                if self.pendingUpdate == nil {
+                    self.quickPanel?.flashUpToDate()
+                }
+            case .failure(let error):
+                // Проверка не удалась — и сказать об этом обязательно. Раньше
+                // здесь просто не оказывалось обновления, и панель отвечала
+                // «у вас последняя версия»: человек, у которого не было сети,
+                // получал бодрое подтверждение вместо правды.
+                log("manual update check failed: \(error)")
+                self.refreshQuickPanel()
+                self.showUpdateCheckFailedAlert(error)
             }
         }
     }

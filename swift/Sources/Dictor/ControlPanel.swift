@@ -1165,15 +1165,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return label
     }
 
-    private func localizedTranscriptLimitName(_ limit: RecentTranscriptLimit) -> String {
-        switch limit {
-        case .off: return t("Выкл", "Off")
-        case .last1: return "1"
-        case .last5: return "5"
-        case .last10: return "10"
-        }
-    }
-
     @objc private func revealModelFilesFromPanel(_ sender: NSButton) {
         NSWorkspace.shared.activateFileViewerSelecting([speechModelCacheBaseDirectory()])
     }
@@ -1192,10 +1183,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     // MARK: - Главное окно: история (макет 2b/4a)
-
-    func makeMainHistoryViewForPreview() -> NSView {
-        makeMainHistoryView()
-    }
 
     // MARK: - Каркас главного окна (макет 6a)
 
@@ -3539,55 +3526,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return row
     }
 
-
-    private func operationTitle(_ operation: ControlPanelServiceOperation) -> String {
-        switch operation {
-        case .starting: return t("Запускаю службу диктовки", "Starting dictation service")
-        case .restarting: return t("Перезапускаю фоновую службу", "Restarting background service")
-        case .stopping: return t("Останавливаю фоновую службу", "Stopping background service")
-        case .applyingSettings: return t("Применяю настройки и перезапускаю службу",
-                                         "Applying settings and restarting service")
-        }
-    }
-
-    private func operationDetail(_ operation: ControlPanelServiceOperation) -> String {
-        switch operation {
-        case .starting:
-            return t("Подключаю глобальный хоткей и локальную модель.\nОбычно 1–3 секунды; при первой загрузке дольше.",
-                     "Enabling the global shortcut and local model.\nUsually 1–3 seconds; the first download takes longer.")
-        case .restarting, .applyingSettings:
-            return t("Диктовка временно недоступна. Панель не зависла — новый воркер уже запускается.",
-                     "Dictation is temporarily unavailable. The panel is responsive while the new worker starts.")
-        case .stopping:
-            return t("Хоткей перестанет работать, но настройки и история сохранятся.",
-                     "The shortcut will stop; settings and history remain saved.")
-        }
-    }
-
-    private func servicePresentation(running: Bool,
-                                     state: AgentRuntimeState?) -> (status: String, detail: String, color: NSColor) {
-        if let operation = serviceOperation {
-            return (operationTitle(operation), operationDetail(operation), .systemBlue)
-        }
-        if running, let state {
-            if ["ready", "recording", "transcribing"].contains(state.status) {
-                return (t("Работает", "Running"),
-                        t("Фоновая служба включена.", "The background service is running."),
-                        .systemGreen)
-            }
-            return (displayStatus(state.status), localizedServiceDetail(state), colorForStatus(state.status))
-        }
-        if running {
-            return (t("Запускается", "Starting"),
-                    t("Фоновый процесс запущен и готовит модель.", "The background process is preparing the model."),
-                    .systemOrange)
-        }
-        return (settings.agentEnabled ? t("Остановлена", "Stopped") : t("Выключена", "Off"),
-                t("Хоткей не работает, пока служба не запущена.",
-                  "The shortcut is unavailable until the service starts."),
-                settings.agentEnabled ? .systemRed : .secondaryLabelColor)
-    }
-
     private func checkForUpdates() {
         updateTask?.cancel()
         updateState = .checking
@@ -3680,47 +3618,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    private func statusRow(title: String,
-                           detail: String,
-                           status: String,
-                           statusColor: NSColor,
-                           buttonTitle: String? = nil,
-                           action: Selector? = nil,
-                           tag: Int = 0,
-                           buttonEnabled: Bool = true,
-                           toolTip: String? = nil) -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 14
-
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 3
-        text.addArrangedSubview(panelLabel(title, size: 13, weight: .semibold))
-        let detailLabel = panelLabel(detail, size: 12, color: .secondaryLabelColor)
-        detailLabel.preferredMaxLayoutWidth = 440
-        text.addArrangedSubview(detailLabel)
-
-        let statusLabel = panelLabel(status, size: 12, weight: .medium, color: statusColor)
-        statusLabel.alignment = .right
-        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(statusLabel)
-        if let buttonTitle, let action {
-            let button = panelButton(buttonTitle,
-                                     action: action,
-                                     enabled: buttonEnabled,
-                                     toolTip: toolTip)
-            button.tag = tag
-            row.addArrangedSubview(button)
-        }
-        return row
-    }
-
     private func hotkeyRow(title: String,
                            shortcut: HotkeyChoice,
                            kind: ControlPanelShortcutKind,
@@ -3741,93 +3638,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.widthAnchor.constraint(equalToConstant: 200).isActive = true
         row.addArrangedSubview(button)
-        return row
-    }
-
-    private static let enterDelayOptions: [(title: String, value: String)] = [
-        ("0 ms", "0"),
-        ("50 ms", "50"),
-        ("80 ms", "80"),
-        ("120 ms", "120"),
-        ("200 ms", "200"),
-        ("300 ms", "300"),
-    ]
-
-    private func popupRow(title: String,
-                          detail: String,
-                          selectedValue: String,
-                          options: [(title: String, value: String)],
-                          action: Selector,
-                          toolTip: String? = nil) -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 14
-
-        let text = NSStackView()
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 3
-        text.addArrangedSubview(panelLabel(title, size: 13, weight: .semibold))
-        text.addArrangedSubview(panelLabel(detail, size: 12, color: .secondaryLabelColor))
-
-        let popup = NSPopUpButton()
-        popup.target = self
-        popup.action = action
-        popup.toolTip = toolTip
-        for option in options {
-            popup.addItem(withTitle: option.title)
-            popup.lastItem?.representedObject = option.value
-        }
-        if let item = popup.itemArray.first(where: { $0.representedObject as? String == selectedValue }) {
-            popup.select(item)
-        }
-        popup.setContentHuggingPriority(.required, for: .horizontal)
-        row.addArrangedSubview(text)
-        row.addArrangedSubview(NSView())
-        row.addArrangedSubview(popup)
-        return row
-    }
-
-    private func settingsValidationMessage(_ draft: ControlPanelSettingsDraft) -> String? {
-        let shortcuts = draft.alternateCompletionEnabled
-            ? [draft.dictationHotkey, draft.alternateCompletionHotkey]
-            : [draft.dictationHotkey]
-        for firstIndex in shortcuts.indices {
-            for secondIndex in shortcuts.indices where secondIndex > firstIndex {
-                let first = shortcuts[firstIndex]
-                let second = shortcuts[secondIndex]
-                if hotkeysConflict(first, second) {
-                    return t("Сочетания для диктовки и завершения должны отличаться.",
-                             "Dictation and finish shortcuts must be different.")
-                }
-                if hotkeyIsModifierPrefix(first, of: second)
-                    || hotkeyIsModifierPrefix(second, of: first) {
-                    return t("Одна активная комбинация не должна быть частью другой.",
-                             "One active shortcut cannot be a prefix of another.")
-                }
-            }
-        }
-        return nil
-    }
-
-    private func privacyInfoView() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        let icon = NSImageView(image: NSImage(systemSymbolName: "lock.shield.fill",
-                                              accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = .secondaryLabelColor
-        row.addArrangedSubview(icon)
-        let label = panelLabel(
-            t("Аудио и распознавание остаются на Mac. Интернет нужен только для первой загрузки модели и обновлений.",
-              "Audio and transcription stay on this Mac. Internet is only used for the first model download and updates."),
-            size: 11.5,
-            color: .secondaryLabelColor
-        )
-        label.preferredMaxLayoutWidth = 600
-        row.addArrangedSubview(label)
         return row
     }
 
@@ -3853,28 +3663,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         button.isEnabled = enabled
         button.toolTip = toolTip
         button.setContentHuggingPriority(.required, for: .horizontal)
-        return button
-    }
-
-    private func compactIconButton(symbol: String,
-                                   accessibilityTitle: String,
-                                   toolTip: String,
-                                   action: Selector,
-                                   enabled: Bool = true) -> NSButton {
-        let button = NSButton(image: NSImage(systemSymbolName: symbol,
-                                             accessibilityDescription: accessibilityTitle) ?? NSImage(),
-                              target: self,
-                              action: action)
-        button.bezelStyle = .texturedRounded
-        button.controlSize = .small
-        button.isEnabled = enabled
-        button.toolTip = toolTip
-        button.setAccessibilityLabel(accessibilityTitle)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 30),
-            button.heightAnchor.constraint(equalToConstant: 26),
-        ])
         return button
     }
 
@@ -3921,73 +3709,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return box
     }
 
-    private func triggerModeText() -> String {
-        switch settings.triggerMode {
-        case .hold: return t("Удерживать", "Press and hold")
-        case .toggle: return t("Нажать для старта и ещё раз для остановки", "Press to start, press again to stop")
-        }
-    }
-
-    private func localizedCompletionBehavior(_ behavior: DictationCompletionBehavior) -> String {
-        switch behavior {
-        case .insert:
-            return t("Вставить", "Insert")
-        case .insertAndEnter:
-            return t("Вставить + Enter", "Insert + Enter")
-        }
-    }
-
-    private func displayStatus(_ raw: String) -> String {
-        switch raw {
-        case "ready": return t("Работает", "Running")
-        case "recording", "transcribing": return t("Работает", "Running")
-        case "starting": return t("Запускается", "Starting")
-        case "needs_permissions": return t("Нужен доступ", "Needs Access")
-        case "error": return t("Ошибка", "Error")
-        case "stopping": return t("Останавливается", "Stopping")
-        case "stopped": return t("Остановлена", "Stopped")
-        default: return raw.capitalized
-        }
-    }
-
-    private func localizedServiceDetail(_ state: AgentRuntimeState) -> String {
-        switch state.status {
-        case "ready", "recording", "transcribing":
-            return t("Фоновая служба готова к диктовке.",
-                     "The background service is ready for dictation.")
-        case "starting":
-            if state.detail.hasPrefix("Downloading speech model") {
-                if let percentRange = state.detail.range(of: "\\d+%", options: .regularExpression) {
-                    let percent = state.detail[percentRange]
-                    return t("Скачиваю языковую модель… \(percent)", "Downloading speech model… \(percent)")
-                }
-                return t("Скачиваю языковую модель…", "Downloading speech model…")
-            } else if state.detail.hasPrefix("Checking speech model") {
-                return t("Проверяю список файлов модели…", "Checking speech model files…")
-            } else if state.detail.hasPrefix("Preparing speech model") {
-                return t("Подготавливаю модель…", "Preparing speech model…")
-            } else if state.detail.hasPrefix("Loading cached speech model") {
-                return t("Загружаю модель из кэша…", "Loading cached speech model…")
-            } else if state.detail.hasPrefix("Loading speech model") {
-                return t("Загружаю языковую модель…", "Loading speech model…")
-            }
-            return t("Запускаю службу диктовки…", "Starting dictation service…")
-        case "needs_permissions": return t("Выдайте недостающие разрешения ниже.", "Grant the missing permissions below.")
-        case "stopped": return t("Фоновая служба остановлена.", "The background service is stopped.")
-        case "error": return t("Служба сообщила об ошибке: \(state.detail)", "Service error: \(state.detail)")
-        default: return state.detail
-        }
-    }
-
-    private func colorForStatus(_ raw: String) -> NSColor {
-        switch raw {
-        case "ready", "recording", "transcribing": return .systemGreen
-        case "starting", "needs_permissions", "stopping": return .systemOrange
-        case "error", "stopped": return .systemRed
-        default: return .secondaryLabelColor
-        }
-    }
-
     private func permissionTitle(_ permission: Permission) -> String {
         switch permission {
         case .microphone: return t("Микрофон", "Microphone")
@@ -4010,37 +3731,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    private func localizedColorName(_ color: RecordingHUDAccentColor) -> String {
-        guard language == .russian else { return color.displayName }
-        switch color {
-        case .coral: return "Коралловый"
-        case .graphite: return "Графитовый"
-        case .red: return "Красный"
-        case .orange: return "Оранжевый"
-        case .pink: return "Розовый"
-        case .purple: return "Фиолетовый"
-        case .blue: return "Синий"
-        case .cyan: return "Голубой"
-        case .green: return "Зелёный"
-        case .white: return "Белый"
-        }
-    }
-
     private func localizedBackgroundName(_ style: RecordingHUDBackgroundStyle) -> String {
         guard language == .russian else { return style.displayName }
         switch style {
         case .system: return "Как в системе"
         case .dark: return "Тёмный"
         case .light: return "Светлый"
-        }
-    }
-
-    private func localizedHUDSizeName(_ size: RecordingHUDSize) -> String {
-        guard language == .russian else { return size.displayName }
-        switch size {
-        case .compact: return "Компактная"
-        case .standard: return "Обычная"
-        case .large: return "Крупная"
         }
     }
 
@@ -4202,49 +3898,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    @objc private func selectInterfaceLanguage(_ sender: NSSegmentedControl) {
-        settings.interfaceLanguage = sender.selectedSegment == 1 ? .english : .russian
-        _ = settings.refreshFromDisk()
-        lastRenderFingerprint = ""
-        refresh(force: true)
-    }
-
-    @objc private func selectRecordingHUDRecordingColor(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let color = RecordingHUDAccentColor(rawValue: raw) else { return }
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.recordingColor = color
-        settingsDraft = draft
-        refreshSettingsWindow()
-    }
-
-    @objc private func selectRecordingHUDTranscribingColor(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let color = RecordingHUDAccentColor(rawValue: raw) else { return }
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.transcribingColor = color
-        settingsDraft = draft
-        refreshSettingsWindow()
-    }
-
-    @objc private func selectRecordingHUDBackgroundStyle(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let style = RecordingHUDBackgroundStyle(rawValue: raw) else { return }
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.backgroundStyle = style
-        settingsDraft = draft
-        refreshSettingsWindow()
-    }
-
-    @objc private func selectRecordingHUDSize(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let size = RecordingHUDSize(rawValue: raw) else { return }
-        var draft = settingsDraft ?? ControlPanelSettingsDraft(settings: settings)
-        draft.hudSize = size
-        settingsDraft = draft
-        refreshSettingsWindow()
-    }
-
     /// Настройки применяются сами — кнопки «Сохранить» в макете нет.
     /// Хоткей агент читает только при старте, поэтому применение тянет за
     /// собой перезапуск службы; задержка нужна, чтобы щелчки по степперу
@@ -4256,6 +3909,28 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         pendingSettingsApply = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func settingsValidationMessage(_ draft: ControlPanelSettingsDraft) -> String? {
+        let shortcuts = draft.alternateCompletionEnabled
+            ? [draft.dictationHotkey, draft.alternateCompletionHotkey]
+            : [draft.dictationHotkey]
+        for firstIndex in shortcuts.indices {
+            for secondIndex in shortcuts.indices where secondIndex > firstIndex {
+                let first = shortcuts[firstIndex]
+                let second = shortcuts[secondIndex]
+                if hotkeysConflict(first, second) {
+                    return t("Сочетания для диктовки и завершения должны отличаться.",
+                             "Dictation and finish shortcuts must be different.")
+                }
+                if hotkeyIsModifierPrefix(first, of: second)
+                    || hotkeyIsModifierPrefix(second, of: first) {
+                    return t("Одна активная комбинация не должна быть частью другой.",
+                             "One active shortcut cannot be a prefix of another.")
+                }
+            }
+        }
+        return nil
     }
 
     private func applySettingsDraft() {
