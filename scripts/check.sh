@@ -180,6 +180,34 @@ if missing:
     sys.exit(1)
 SUITES
 
+# Реестр настроек. Класс дефекта «настройка есть, работает и недостижима»
+# дважды доходил до релиза; SETTINGS_CATALOG объявляет судьбу каждой var из
+# Settings.swift, а самотест settings-reachable проверяет показанные строки
+# на живой вкладке. Здесь — сверка реестра со списком var в обе стороны:
+# новая настройка без записи в реестре роняет сборку.
+python3 - <<'CATALOG'
+import re, sys
+settings = open("swift/Sources/Dictor/Settings.swift", encoding="utf-8").read()
+catalog = open("swift/Sources/Dictor/SettingsCatalog.swift", encoding="utf-8").read()
+
+declared = re.findall(r"^    (?:private\s+)?var (\w+)", settings, re.M)
+listed = re.findall(r'property: "(\w+)"', catalog)
+
+problems = []
+for name in declared:
+    if name not in listed:
+        problems.append(f"Settings.{name} не описана в SettingsCatalog.swift")
+for name in listed:
+    if name not in declared:
+        problems.append(f"SettingsCatalog описывает {name}, которой нет в Settings.swift")
+for name in {n for n in listed if listed.count(n) > 1}:
+    problems.append(f"SettingsCatalog описывает {name} дважды")
+
+if problems:
+    print("\n".join(problems), file=sys.stderr)
+    sys.exit(1)
+CATALOG
+
 # Документация, разъехавшаяся с кодом. Так испортился CONTRIBUTING.md: он звал
 # таргет и файл, которых в проекте давно нет, и заметить это можно было, только
 # выполнив его команды.

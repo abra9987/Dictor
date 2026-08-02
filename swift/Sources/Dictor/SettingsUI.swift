@@ -7,8 +7,22 @@ import AppKit
 
 // MARK: - Строка настройки (title + subtitle слева, контрол справа)
 
-final class SDRowView: NSView {
+/// Контракт строки настройки для самотеста settings-reachable: заголовок,
+/// по которому строку ищут, и контрол, в центр которого бьёт hitTest.
+/// Реализуют обе разновидности строк — обычная и «Продвинутых».
+@MainActor
+protocol SettingsRowProviding {
+    var rowTitle: String { get }
+    var control: NSView { get }
+}
+
+final class SDRowView: NSView, SettingsRowProviding {
     private let hairline: Bool
+    /// Заголовок и контрол — открыты для самотеста settings-reachable:
+    /// он находит строку по заголовку и бьёт hitTest в центр контрола.
+    let rowTitle: String
+    let control: NSView
+    private var subtitleLabel: NSTextField?
 
     // Макет: padding 13px 0, разделитель rgba .06/.07 снизу,
     // заголовок 13px ink, подпись 11px subtle с отступом 1px.
@@ -18,6 +32,8 @@ final class SDRowView: NSView {
          hairline: Bool = true,
          verticalPadding: CGFloat = 13) {
         self.hairline = hairline
+        self.rowTitle = title
+        self.control = control
         super.init(frame: .zero)
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13)
@@ -32,7 +48,15 @@ final class SDRowView: NSView {
             let subtitleLabel = NSTextField(labelWithString: subtitle)
             subtitleLabel.font = .systemFont(ofSize: 11)
             subtitleLabel.textColor = SD.C.subtle
+            // Длинная подпись переносится, а не толкает контрол за правый
+            // край панели: однострочная intrinsic-ширина у трёх вкладок
+            // выжимала строки на 26 pt за пределы видимой области.
+            subtitleLabel.lineBreakMode = .byWordWrapping
+            subtitleLabel.maximumNumberOfLines = 0
+            subtitleLabel.setContentCompressionResistancePriority(.defaultLow,
+                                                                  for: .horizontal)
             textStack.addArrangedSubview(subtitleLabel)
+            self.subtitleLabel = subtitleLabel
         }
 
         for view in [textStack, control] {
@@ -64,6 +88,21 @@ final class SDRowView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
+    override func layout() {
+        super.layout()
+        // Ширину переноса нельзя задать в init — до первой раскладки ширина
+        // строки нулевая (урок SDEnamelView). Контрол прижат к правому краю,
+        // поэтому доступное подписи место от подписи не зависит — обратной
+        // связи и вечной перераскладки тут нет.
+        guard let subtitleLabel else { return }
+        let available = control.frame.minX - 12
+        if available > 80, abs(subtitleLabel.preferredMaxLayoutWidth - available) > 0.5 {
+            subtitleLabel.preferredMaxLayoutWidth = available
+            subtitleLabel.invalidateIntrinsicContentSize()
+            needsLayout = true
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard hairline else { return }
         SD.C.rowHairline.setFill()
@@ -71,6 +110,22 @@ final class SDRowView: NSView {
     }
 
     override var isFlipped: Bool { true }
+}
+
+/// Строка «Продвинутых»: узкая подпись 96 pt, контрол и живое превью
+/// справа. Класс существует ради самотеста достижимости — раскладку
+/// целиком строит вызывающий (advancedCapsuleRow).
+final class SDAdvancedRowView: NSView, SettingsRowProviding {
+    let rowTitle: String
+    let control: NSView
+
+    init(rowTitle: String, control: NSView) {
+        self.rowTitle = rowTitle
+        self.control = control
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { nil }
 }
 
 /// Кнопка-таб окна настроек. Активная — пилюля rgba(0,0,0,.08) /

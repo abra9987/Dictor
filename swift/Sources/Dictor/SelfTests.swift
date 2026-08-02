@@ -91,6 +91,8 @@ enum DictorSelfTest {
             return runSuite("insertion-target-live", testLiveInsertionTargetProbe)
         case "dock-policy":
             return runSuite("dock-policy", testDockActivationPolicy)
+        case "settings-reachable":
+            return runSuite("settings-reachable", testSettingsReachability)
         case "all":
             return runSuite("all", testAll)
         default:
@@ -143,6 +145,114 @@ enum DictorSelfTest {
         try testDiagnostics()
         try testInsertionTargetTracking()
         try testDockActivationPolicy()
+        try testSettingsReachability()
+    }
+
+    /// Достижимость настроек — по реестру SETTINGS_CATALOG. Класс дефекта
+    /// «настройка есть, работает и недостижима» дважды доходил до релиза;
+    /// сверку реестра со списком var в Settings.swift держит check.sh, а
+    /// здесь каждая строка `settingsRow` проверяется на живой вкладке:
+    /// строка нашлась, hitTest в центре контрола попадает в контрол, строка
+    /// не отрезана раскладкой, безопасные тумблеры кликом меняют Settings.
+    private static func testSettingsReachability() throws {
+        try MainActor.assumeIsolated {
+            let settings = Settings.shared
+            let savedLanguage = settings.interfaceLanguage
+            settings.interfaceLanguage = .russian
+            defer { settings.interfaceLanguage = savedLanguage }
+
+            let panel = DictorControlPanelApp()
+            // Та же ширина, что даёт вкладкам настоящее окно: раздел
+            // «Настройки» = окно минус сайдбар минус линия-разделитель.
+            let width = MAIN_WINDOW_SIZE.width - MAIN_WINDOW_SIDEBAR_WIDTH - 1
+
+            @MainActor
+            func rows(in view: NSView) -> [NSView & SettingsRowProviding] {
+                var found: [NSView & SettingsRowProviding] = []
+                if let row = view as? NSView & SettingsRowProviding { found.append(row) }
+                for subview in view.subviews { found.append(contentsOf: rows(in: subview)) }
+                return found
+            }
+
+            var byTab: [String: [(title: String, toggleTest: Bool, property: String)]] = [:]
+            for entry in SETTINGS_CATALOG {
+                if case .settingsRow(let tab, let title, let toggleTest) = entry.exposure {
+                    byTab[tab, default: []].append((title, toggleTest, entry.property))
+                }
+            }
+
+            for (tab, expectations) in byTab.sorted(by: { $0.key < $1.key }) {
+                panel.settingsTab = tab
+                let view = panel.makeSettingsContentView()
+                let height = DictorControlPanelApp.settingsContentHeight(for: view,
+                                                                         width: width)
+                view.frame = NSRect(x: 0, y: 0, width: width, height: height)
+                view.layoutSubtreeIfNeeded()
+
+                // Вкладки живут в скролле, поэтому «не выше панели» здесь —
+                // потолок на взрыв раскладки, а не пиксельная граница: две
+                // высоты окна с запасом покрывают самую длинную вкладку.
+                try expect(height <= MAIN_WINDOW_SIZE.height * 2, equals: true,
+                           "the \(tab) tab exploded to \(height) pt — nobody scrolls that")
+
+                let tabRows = rows(in: view)
+                for expectation in expectations {
+                    guard let row = tabRows.first(where: { $0.rowTitle == expectation.title })
+                    else {
+                        throw SelfTestFailure.failed(
+                            "\(expectation.property): row «\(expectation.title)» "
+                            + "not found in the \(tab) tab")
+                    }
+                    // Строка не отрезана раскладкой.
+                    let frameInView = row.convert(row.bounds, to: view)
+                    try expect(view.bounds.contains(frameInView), equals: true,
+                               "\(expectation.property): row «\(expectation.title)» "
+                               + "sticks out of the \(tab) tab layout")
+
+                    // Клик в центр контрола попадает в контрол, а не в
+                    // соседний вью: так умерла кнопка очистки поиска.
+                    let control = row.control
+                    let centre = control.convert(NSPoint(x: control.bounds.midX,
+                                                         y: control.bounds.midY),
+                                                 to: view)
+                    let hit = view.hitTest(centre)
+                    let reachable = hit === control
+                        || (hit?.isDescendant(of: control) ?? false)
+                    try expect(reachable, equals: true,
+                               "\(expectation.property): a click in the middle of "
+                               + "«\(expectation.title)» lands on "
+                               + (hit.map { "\(type(of: $0))" } ?? "nothing"))
+
+                    // Безопасные тумблеры: клик обязан дойти до Settings.
+                    if expectation.toggleTest {
+                        guard let toggle = control as? SDToggle else {
+                            throw SelfTestFailure.failed(
+                                "\(expectation.property): toggleTest expects an SDToggle")
+                        }
+                        let before = toggle.isOn
+                        let click = NSEvent.mouseEvent(
+                            with: .leftMouseDown, location: centre, modifierFlags: [],
+                            timestamp: 0, windowNumber: 0, context: nil,
+                            eventNumber: 0, clickCount: 1, pressure: 1)!
+                        toggle.mouseDown(with: click)
+                        try expect(toggle.isOn, equals: !before,
+                                   "\(expectation.property): the toggle did not flip")
+                        toggle.mouseDown(with: click)
+                        try expect(toggle.isOn, equals: before,
+                                   "\(expectation.property): the toggle did not flip back")
+                    }
+                }
+            }
+
+            // Порядок и подписи полного списка языков: каждый язык модели
+            // достижим из попапа ровно один раз — новый case в enum не может
+            // молча выпасть из окна.
+            let order = dictationLanguageMenuOrder()
+            try expect(Set(order).count == order.count
+                        && Set(order) == Set(DictationLanguage.allCases),
+                       equals: true,
+                       "the language popup order must cover every DictationLanguage once")
+        }
     }
 
     /// Значок в Dock: четыре комбинации «тумблер × окно». Служба обязана

@@ -591,6 +591,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let widthPin = root.widthAnchor.constraint(equalToConstant: width)
         widthPin.isActive = true
         root.layoutSubtreeIfNeeded()
+        // Второй проход: переносимые подписи узнают свою ширину в layout()
+        // первого прохода, и только после него intrinsic-высота честная.
+        root.layoutSubtreeIfNeeded()
         let fitting = root.fittingSize.height
         widthPin.isActive = false
         return max(404, ceil(fitting))
@@ -3781,7 +3784,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private func advancedCapsuleRow(title: String,
                                     control: NSView,
                                     trailing: NSView) -> NSView {
-        let row = NSView()
+        let row = SDAdvancedRowView(rowTitle: title, control: control)
         let label = panelLabel(title, size: 12.5)
         label.textColor = SD.C.ink
         for view in [label, control, trailing] {
