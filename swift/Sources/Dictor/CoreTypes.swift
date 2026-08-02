@@ -114,6 +114,13 @@ let CONTROL_PANEL_SECTION_ARGUMENT = "--section"
 let CONTROL_PANEL_QUIT_NOTIFICATION = Notification.Name("com.raul.dictor.quit-panel")
 let HOTKEY_CAPTURE_FAILSAFE_SECONDS: TimeInterval = 45
 let DICTATION_ERROR_FLASH_SECONDS: TimeInterval = 1.5  // how long the menu-bar icon flags a dropped dictation before returning to idle
+/// Сколько Enter после вставки готов ждать сверх настроенной задержки, пока
+/// получатель заберёт текст из буфера. Не забрал — ⌘V не дошёл, и Enter
+/// отправил бы поле, в которое ничего не вставилось.
+let ENTER_AFTER_PASTE_READ_GRACE_SECONDS: TimeInterval = 1.0
+/// Вспышка «текст не вставился» держится дольше обычной: в ней целая фраза о
+/// том, где искать текст, а не один восклицательный знак.
+let PASTE_NEVER_READ_FLASH_SECONDS: TimeInterval = 4.0
 let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]
 let AUDIO_IDLE_STOP_DELAY_SECONDS: TimeInterval = 5
 let AUDIO_CONFIGURATION_CHANGE_SUPPRESSION_SECONDS: TimeInterval = 1

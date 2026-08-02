@@ -4851,20 +4851,30 @@ enum DictorSelfTest {
                        "the previous clipboard must come back once the text was read")
             try expect(first.isFinished, equals: true, "a restored transaction is over")
 
-            // 2. Никто не пришёл за текстом — буфер всё равно возвращается,
-            //    иначе чужое приложение оставило бы человека без его буфера.
+            // 2. Никто не пришёл за текстом — вставки не было. Буфер не
+            //    возвращается к прежнему: человеку сейчас нужнее сама
+            //    диктовка — ручной ⌘V должен вставить её, а не то, что он
+            //    копировал полчаса назад. И наружу уходит сигнал: раньше этот
+            //    путь молчал, и «Вставлено» оставалось неисправимой ложью.
+            var neverReadSignals: [Bool] = []
+            ClipboardPasteInserter.onPasteNeverRead = { neverReadSignals.append($0) }
+            defer { ClipboardPasteInserter.onPasteNeverRead = nil }
             pasteboard.clearContents()
             pasteboard.setString("другое прежнее", forType: .string)
             let ignored = makeTransaction("никем не прочитанное", timeout: 0.05)
             try expect(ignored.install(), equals: true, "the transaction must claim the pasteboard")
             wait(0.25)
-            try expect(pasteboard.string(forType: .string), equals: "другое прежнее",
-                       "an unread transaction must still give the clipboard back")
             try expect(ignored.didProvideText, equals: false,
                        "nobody read it, so the provider must not have fired")
+            try expect(pasteboard.string(forType: .string), equals: "никем не прочитанное",
+                       "an unread dictation must stay in the clipboard for a manual ⌘V")
+            try expect(neverReadSignals, equals: [true],
+                       "the never-read failsafe must signal, with the text kept in the clipboard")
 
-            // 3. Человек скопировал своё, пока мы ждали, — не трогаем. Вернуть
-            //    сюда старое значило бы стереть его работу.
+            // 3. Человек скопировал своё, пока мы ждали, — не трогаем: ни
+            //    возврат старого, ни диктовка не смеют стереть его работу.
+            //    Сигнал всё равно уходит — вставки не было, но текст теперь
+            //    только в истории.
             pasteboard.clearContents()
             pasteboard.setString("было моё", forType: .string)
             let overtaken = makeTransaction("продиктованное", timeout: 0.05)
@@ -4874,6 +4884,8 @@ enum DictorSelfTest {
             wait(0.25)
             try expect(pasteboard.string(forType: .string), equals: "человек скопировал сам",
                        "a clipboard the person changed themselves must stay theirs")
+            try expect(neverReadSignals, equals: [true, false],
+                       "the signal must say the text did not stay in the clipboard")
 
             // 4. Две диктовки подряд: вторая возвращает буфер за первую, иначе
             //    прежнее содержимое потерялось бы совсем.
@@ -4890,6 +4902,8 @@ enum DictorSelfTest {
             wait(0.3)
             try expect(pasteboard.string(forType: .string), equals: "исходное",
                        "after both dictations the original clipboard must be back")
+            try expect(neverReadSignals, equals: [true, false],
+                       "a superseded dictation must not fire the never-read signal")
         }
     }
 

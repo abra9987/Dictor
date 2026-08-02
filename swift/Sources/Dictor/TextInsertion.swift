@@ -822,13 +822,20 @@ enum TextInserter {
         textInsertionStrategyDescription(primary: defaultStrategy)
     }
 
+    /// Какой стратегией удалась последняя вставка. Enter после диктовки
+    /// сверяется с ней: подтверждения чтения буфера ждут только от
+    /// clipboardPaste — directUnicode печатает текст сам, ждать там нечего.
+    static private(set) var lastSuccessfulStrategy: TextInsertionStrategy?
+
     @discardableResult
     static func insert(_ text: String, strategy: TextInsertionStrategy = defaultStrategy) -> Bool {
+        lastSuccessfulStrategy = nil
         for candidate in textInsertionStrategyChain(primary: strategy) {
             if insert(text, using: candidate) {
                 if candidate != strategy {
                     log("text insertion fallback succeeded: \(candidate.displayName)")
                 }
+                lastSuccessfulStrategy = candidate
                 return true
             }
             log("text insertion attempt failed: \(candidate.displayName)")
@@ -858,7 +865,32 @@ enum ClipboardPasteInserter {
     static let restoreTimeout: TimeInterval = 10
     /// Незавершённая вставка. Диктовок может быть две подряд, и вторая обязана
     /// вернуть буфер за первую, иначе прежнее содержимое потеряется совсем.
-    private static var pending: ClipboardPasteTransaction?
+    fileprivate static var pending: ClipboardPasteTransaction?
+    /// Получатель пришёл за текстом текущей вставки. Надёжен только в
+    /// отрицательную сторону: чтение может оказаться менеджером буфера, а вот
+    /// отсутствие чтения означает, что ⌘V точно ни во что не вставился.
+    static fileprivate(set) var lastPasteWasRead = false
+    /// Страховка на restoreTimeout истекла, а за текстом так никто и не
+    /// пришёл: вставки не было, «Вставлено» оказалось неправдой. Агент вешает
+    /// сюда сигнал человеку; keptInClipboard — остался ли текст в буфере
+    /// (false, если человек успел скопировать своё и буфер уже не наш).
+    static var onPasteNeverRead: ((_ keptInClipboard: Bool) -> Void)?
+
+    /// Ждёт, пока получатель заберёт текст текущей вставки, но не дольше
+    /// timeout. true — забрал; false — так и не пришёл.
+    static func waitUntilPasteRead(timeout: TimeInterval) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while !lastPasteWasRead {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { return false }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return true
+    }
+
+    fileprivate static func noteTextProvided(by transaction: ClipboardPasteTransaction) {
+        guard pending === transaction else { return }
+        lastPasteWasRead = true
+    }
 
     static func write(_ text: String, to pb: NSPasteboard) -> Bool {
         pb.clearContents()
@@ -886,6 +918,7 @@ enum ClipboardPasteInserter {
                        into pasteboard: NSPasteboard,
                        postingKeystroke: Bool) -> Bool {
         pending?.restoreNow(reason: "superseded by another dictation")
+        lastPasteWasRead = false
         let transaction = ClipboardPasteTransaction(
             text: text,
             pasteboard: pasteboard,
@@ -966,7 +999,7 @@ final class ClipboardPasteTransaction: NSObject, NSPasteboardItemDataProvider {
             return false
         }
         ownedChangeCount = pasteboard.changeCount
-        scheduleRestore(after: restoreTimeout, reason: "nobody asked for the text")
+        scheduleNeverReadFailsafe(after: restoreTimeout)
         return true
     }
 
@@ -978,6 +1011,7 @@ final class ClipboardPasteTransaction: NSObject, NSPasteboardItemDataProvider {
         item.setString(text, forType: .string)
         MainActor.assumeIsolated {
             didProvideText = true
+            ClipboardPasteInserter.noteTextProvided(by: self)
             scheduleRestore(after: restoreDelayAfterRead, reason: "text was read")
         }
     }
@@ -991,10 +1025,50 @@ final class ClipboardPasteTransaction: NSObject, NSPasteboardItemDataProvider {
         // не наш, и возвращать в него старое — значит стереть его работу.
         if let owned = ownedChangeCount, pasteboard.changeCount == owned {
             previous.restore(to: pasteboard)
+            log("pasteboard restored (\(reason))")
         } else {
             log("pasteboard restore skipped (\(reason)): clipboard changed meanwhile")
         }
         finish()
+    }
+
+    /// Страховка истекла, а за текстом так никто и не пришёл — вставки не
+    /// было. Прежнее содержимое не возвращается: человеку сейчас нужнее сама
+    /// диктовка — ручной ⌘V должен вставить её, а не то, что он копировал
+    /// полчаса назад. Раньше этот путь молча откатывал буфер, и «Вставлено»
+    /// оставалось неисправимой ложью.
+    private func handleNeverReadTimeout() {
+        guard !isFinished else { return }
+        guard !didProvideText else {
+            // Не должно случаться: чтение само планирует возврат и снимает
+            // страховку. Но если гонка всё же свела их — вернуть как обычно.
+            restoreNow(reason: "text was read")
+            return
+        }
+        let stillOurs = ownedChangeCount.map { pasteboard.changeCount == $0 } ?? false
+        finish()
+        var keptInClipboard = false
+        if stillOurs {
+            if ClipboardPasteInserter.write(text, to: pasteboard) {
+                keptInClipboard = true
+                log("paste was never read: dictation left in the clipboard for manual ⌘V")
+            } else {
+                log("paste was never read, and re-writing the clipboard failed")
+            }
+        } else {
+            log("paste was never read: clipboard changed meanwhile, left untouched")
+        }
+        ClipboardPasteInserter.onPasteNeverRead?(keptInClipboard)
+    }
+
+    private func scheduleNeverReadFailsafe(after delay: TimeInterval) {
+        guard !isFinished else { return }
+        restoreWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.handleNeverReadTimeout() }
+        }
+        restoreWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func scheduleRestore(after delay: TimeInterval, reason: String) {

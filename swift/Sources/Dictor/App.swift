@@ -1226,6 +1226,15 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         lastSeenHistoryArchiveData = settings.recentTranscriptEntriesStoredData
         importDictationUsageFromLogIfNeeded()
 
+        // «Вставлено» показывается оптимистично: в момент ⌘V правды ещё нет,
+        // а задерживать успех нельзя — сигнал чтения буфера надёжен только в
+        // отрицательную сторону (менеджер буфера обмена читает всё подряд).
+        // Правда приходит со страховкой транзакции: за текстом никто не
+        // пришёл — значит, вставки точно не было, и молчать нельзя.
+        ClipboardPasteInserter.onPasteNeverRead = { [weak self] keptInClipboard in
+            self?.signalPasteNeverRead(keptInClipboard: keptInClipboard)
+        }
+
         refreshActivationPolicy()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -2977,18 +2986,44 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     // (added below) already solves the original "invisible error"
     // problem for users who run silent. Gating the sound avoids
     // unexpected noise during meetings or screen recordings.
-    private func signalDictationFailure() {
+    private func signalDictationFailure(message: String? = nil,
+                                        holdSeconds: TimeInterval = DICTATION_ERROR_FLASH_SECONDS) {
         if settings.playFeedbackSounds {
             Sounds.playError()
         }
-        flashErrorFeedback()
+        flashErrorFeedback(message: message, holdSeconds: holdSeconds)
+    }
+
+    /// Через restoreTimeout после «Вставлено» выяснилось, что за текстом никто
+    /// не пришёл: ⌘V не дошёл (Secure Input, зависшее окно, перехваченное
+    /// сочетание). Текст цел — в «Истории» и, как правило, в буфере — и об
+    /// этом надо сказать вслух.
+    private func signalPasteNeverRead(keptInClipboard: Bool) {
+        guard !isTerminating else { return }
+        guard !isRecording, !isBusy else {
+            // Человек уже диктует снова — вспышка и звук сейчас помешают
+            // записи. След остаётся в логе транзакции.
+            log("paste-never-read signal suppressed: a new dictation is in progress")
+            return
+        }
+        let language = settings.interfaceLanguage
+        let message = keptInClipboard
+            ? localizedText("Текст не вставился — он в буфере и в «Истории»",
+                            "The text never pasted — it's in the clipboard and History",
+                            language: language)
+            : localizedText("Текст не вставился — он в «Истории»",
+                            "The text never pasted — it's in History",
+                            language: language)
+        signalDictationFailure(message: message,
+                               holdSeconds: PASTE_NEVER_READ_FLASH_SECONDS)
     }
 
     /// Flashes both the menu-bar icon (error tint) and the recording
     /// HUD (static yellow capsule with exclamation mark) for
     /// DICTATION_ERROR_FLASH_SECONDS. A single work item owns both
     /// channels so they always expire together.
-    private func flashErrorFeedback() {
+    private func flashErrorFeedback(message: String? = nil,
+                                    holdSeconds: TimeInterval = DICTATION_ERROR_FLASH_SECONDS) {
         errorFlashWorkItem?.cancel()
         // Invalidate any pending delayed hide from finishBusyHUD() —
         // without this the transcribing cleanup closure fires shortly
@@ -2997,6 +3032,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         setMenuBarState(.error)
         if settings.showRecordingWaveform {
             showRecordingHUD(mode: .error, level: 0)
+            // После показа: до него view может ещё не существовать. nil
+            // возвращает капсуле общий текст «Не получилось распознать» —
+            // сообщение прошлой вспышки не должно пережить её саму.
+            recordingHUDView?.errorMessage = message
         }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -3010,7 +3049,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             self.rebuildMenu()
         }
         errorFlashWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + DICTATION_ERROR_FLASH_SECONDS, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + holdSeconds, execute: work)
     }
 
     // MARK: - Recording loop
@@ -3209,7 +3248,21 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                                 if enterDelayNanoseconds > 0 {
                                     try? await Task.sleep(nanoseconds: enterDelayNanoseconds)
                                 }
-                                if KeyboardShortcutPoster.postReturn() {
+                                // Enter не жмётся вслепую: при вставке через
+                                // буфер получатель обязан прийти за текстом.
+                                // Не пришёл и за льготную секунду — ⌘V не
+                                // дошёл, и Enter отправил бы поле, в которое
+                                // ничего не вставилось.
+                                let pasteConfirmed: Bool
+                                if TextInserter.lastSuccessfulStrategy == .clipboardPaste {
+                                    pasteConfirmed = await ClipboardPasteInserter.waitUntilPasteRead(
+                                        timeout: ENTER_AFTER_PASTE_READ_GRACE_SECONDS)
+                                } else {
+                                    pasteConfirmed = true
+                                }
+                                if !pasteConfirmed {
+                                    log("return skipped: paste was never read within the grace period")
+                                } else if KeyboardShortcutPoster.postReturn() {
                                     log("return posted after dictation")
                                 } else {
                                     log("return event creation failed")

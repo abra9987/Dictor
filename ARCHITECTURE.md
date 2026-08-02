@@ -46,7 +46,11 @@ Seven links, `App.swift` `handleRelease` being the spine:
    The order is an invariant: an explicit user correction must win.
 5. **`TextInsertion`** — the text is placed in the clipboard **lazily** and
    ⌘V is synthesised. The receiving app pulls the text when it asks for it, and
-   only then does the previous clipboard come back.
+   only then does the previous clipboard come back. If nobody pulls the text
+   within 10 seconds, the paste never happened: the dictation stays in the
+   clipboard for a manual ⌘V, Enter-after-insert is withheld, and the person
+   is told — a silent rollback would leave the optimistic “Inserted” HUD as
+   an unfixable lie.
 6. **`Statistics` and history** — both written before insertion, so what the
    person sees in History is exactly what was pasted.
 7. **`DictationLatencyMetrics`** — 21 measurements of that path, one line per
