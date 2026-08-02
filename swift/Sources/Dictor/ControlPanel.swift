@@ -1044,44 +1044,31 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addModelTabRows(to root: NSStackView) {
-        let active = settings.speechModelProfile
-        for profile in SpeechModelProfile.allCases {
-            let isActive = profile == active
-            let detail: String
-            switch profile {
-            case .multilingualV3:
-                detail = t("~460 МБ · русский, английский и ещё 16 языков · Neural Engine",
-                           "~460 MB · Russian, English and 16 more · Neural Engine")
-            default:
-                detail = t("Устаревший профиль, только английский",
-                           "Deprecated profile, English only")
-            }
-            let card = SDModelCard(
-                title: profile.shortName + (isActive ? " · " + t("используется", "in use") : ""),
-                detail: detail,
-                active: isActive,
-                actionTitle: isActive ? "✓ " + t("Активна", "Active") : t("Выбрать", "Select"),
-                target: self,
-                action: isActive ? nil : #selector(selectSpeechModelFromPanel(_:)),
-                identifier: profile.rawValue
-            )
-            root.addArrangedSubview(card)
-        }
+        // Карточка одна. Вторая («Parakeet Unified») обещала выбор, которого
+        // нет: профиль выведен из производства, сеттер молча нормализует его
+        // обратно, и «Выбрать» стоила человеку перезапуска службы с нулевым
+        // эффектом (аудит №15). Неактивная карточка — обещание, которое
+        // программа не собирается выполнять.
+        let profile = SpeechModelProfile.productionDefault
+        let card = SDModelCard(
+            title: profile.shortName + " · " + t("используется", "in use"),
+            detail: t("~460 МБ · русский, английский и ещё 16 языков · Neural Engine",
+                      "~460 MB · Russian, English and 16 more · Neural Engine"),
+            active: true,
+            actionTitle: nil,
+            target: nil,
+            action: nil,
+            identifier: profile.rawValue
+        )
+        root.addArrangedSubview(card)
         if let lastCard = root.arrangedSubviews.last {
             root.setCustomSpacing(12, after: lastCard)
         }
-        let note = panelLabel(t("Смена модели перезапустит службу; новая модель докачается сама.",
-                                "Switching restarts the service; the model downloads itself."),
-                              size: 11, color: SD.C.graphite)
+        let note = panelLabel(
+            t("Модель работает целиком на этом Mac. Скачивается с huggingface.co при установке — и заново, если кэш повреждён.",
+              "The model runs entirely on this Mac. It downloads from huggingface.co at setup — and again if the cache is damaged."),
+            size: 11, color: SD.C.graphite)
         root.addArrangedSubview(note)
-    }
-
-    @objc private func selectSpeechModelFromPanel(_ sender: NSButton) {
-        guard let raw = sender.identifier?.rawValue,
-              let profile = SpeechModelProfile(rawValue: raw) else { return }
-        settings.speechModelProfile = profile
-        restartAgentClicked(NSButton())
-        refresh(force: true)
     }
 
     private func addDictTabRows(to root: NSStackView) {
@@ -1605,10 +1592,16 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             self.settings.recentTranscriptLimit = isOn ? self.settings.preferredRecentTranscriptLimit : .off
             self.refresh(force: true)
         }
+        // Подпись обещала «стереть» — а выключение только останавливает
+        // запись новых текстов; стирает кнопка ниже. И «больше не
+        // записывать» неточно в другую сторону: обезличенные счётчики
+        // статистики считаются в любом случае. Тумблер без подтверждения,
+        // молча уничтожающий 10 000 записей, был бы хуже неточной подписи —
+        // поэтому чинится подпись, а не поведение.
         root.addArrangedSubview(SDRowView(
             title: t("Хранить историю", "Keep history"),
-            subtitle: t("Локально, до \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .russian)) диктовок. Выключить — стереть и больше не записывать",
-                        "Locally, up to \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .english)) dictations. Switching off erases them and stops recording"),
+            subtitle: t("Локально, до \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .russian)) диктовок. Выключение останавливает запись текстов (счётчики статистики считаются в любом случае); стереть записанное — кнопкой ниже",
+                        "Locally, up to \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .english)) dictations. Switching off stops recording texts (anonymous statistics counters still run); erase what's stored with the button below"),
             control: historyToggle,
             verticalPadding: 12
         ))
@@ -1623,9 +1616,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 self?.settings.recentTranscriptLimit = limit
             }
             root.addArrangedSubview(SDRowView(
-                title: t("Показывать в меню-баре", "Show in the menu bar"),
-                subtitle: t("Сколько последних диктовок в меню. Окно «История» показывает все",
-                            "How many recent dictations the menu lists. The History window shows all of them"),
+                title: t("Недавнее в панели меню-бара", "Recent list in the menu-bar panel"),
+                subtitle: t("Сколько последних диктовок показывает панель по клику на иконку. Окно «История» показывает все",
+                            "How many recent dictations the menu-bar panel shows. The History window shows all of them"),
                 control: limitPills,
                 verticalPadding: 12
             ))
@@ -4330,12 +4323,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         settings.agentEnabled = true
         _ = settings.refreshFromDisk()
         beginServiceOperation(.starting)
-    }
-
-    @objc private func restartAgentClicked(_ sender: NSButton) {
-        settings.agentEnabled = true
-        _ = settings.refreshFromDisk()
-        beginServiceOperation(.restarting)
     }
 
     @objc private func stopAgentClicked(_ sender: NSButton) {

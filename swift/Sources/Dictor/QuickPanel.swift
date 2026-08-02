@@ -1,9 +1,8 @@
 import AppKit
 
 // Поповер меню-бара по дизайну 1d/1e: статус + тумблер, язык пилюлями,
-// микрофон, «Недавнее» (3 записи, hover-действия), статистика, футер.
-// Открывается левым кликом по глифу; правый клик показывает старое
-// NSMenu как сервисный fallback до завершения новой панели настроек.
+// микрофон, «Недавнее» (1/5/10 записей — по настройке, hover-действия),
+// статистика, футер. Открывается левым кликом по глифу.
 
 @MainActor
 protocol QuickPanelDelegate: AnyObject {
@@ -30,6 +29,9 @@ struct QuickPanelState {
     var microphoneName: String
     var devices: [AudioInputDevice]
     var recent: [TranscriptHistoryEntry]
+    /// История может быть выключена в настройках — тогда пустое «Недавнее»
+    /// обязано назвать причину, а не обещать «первая диктовка появится здесь».
+    var historyKeepingEnabled: Bool
     var todayCharacters: Int
     var todayAudioSeconds: Double
     var weekBars: [CGFloat]
@@ -165,7 +167,11 @@ final class DictorQuickPanel: NSPanel {
         recentBlock.alignment = .leading
         recentBlock.spacing = 0
         recentBlock.edgeInsets = NSEdgeInsets(top: 4, left: 6, bottom: 6, right: 6)
-        for entry in state.recent.prefix(3) {
+        // Сколько записей показывать, решает настройка «Недавнее в панели
+        // меню-бара» (1/5/10): список приходит уже обрезанным по ней. Жёсткий
+        // prefix(3) делал пилюли 1/5/10 враньём — они управляли только
+        // подменю старого меню.
+        for entry in state.recent {
             let row = recentRow(entry)
             recentBlock.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: recentBlock.widthAnchor,
@@ -640,8 +646,11 @@ final class DictorQuickPanel: NSPanel {
 
     private func emptyRecentRow() -> NSView {
         let row = NSView()
-        let text = label(t("Пока тихо — первая диктовка появится здесь.",
-                           "Quiet so far — your first dictation will show up here."),
+        let text = label(state.historyKeepingEnabled
+                            ? t("Пока тихо — первая диктовка появится здесь.",
+                                "Quiet so far — your first dictation will show up here.")
+                            : t("История выключена: Настройки → Приватность.",
+                                "History is off: Settings → Privacy."),
                          size: 11.5, color: .secondaryLabelColor)
         text.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(text)
@@ -929,6 +938,7 @@ func exportQuickPanelPreviews(to directory: URL,
                         transcriptionDurationSeconds: [1.2, 0.9, 0.8][index],
                         createdAt: now.addingTimeInterval([-120, -9000, -17000][index]))
                 },
+            historyKeepingEnabled: true,
             todayCharacters: 7192,
             todayAudioSeconds: 810,
             weekBars: [0.3, 0.55, 0.4, 0.8, 0.65, 1.0, 0.5],

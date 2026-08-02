@@ -6794,7 +6794,11 @@ extension DictorApp: QuickPanelDelegate {
             language: settings.dictationLanguage,
             microphoneName: microphoneName,
             devices: devices,
-            recent: Array(settings.recentTranscriptEntries.prefix(3)),
+            // Ровно столько, сколько выбрано в «Недавнее в панели меню-бара»
+            // (1/5/10): панель — единственный оставшийся список меню-бара,
+            // и настройка управляет именно ею.
+            recent: visibleHistory,
+            historyKeepingEnabled: settings.recentTranscriptLimit != .off,
             todayCharacters: today?.characterCount ?? 0,
             todayAudioSeconds: today?.audioSeconds ?? 0,
             weekBars: weekBars,
