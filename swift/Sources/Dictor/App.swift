@@ -2235,13 +2235,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
         if hideHUD {
             recordingHUDPhase = 0
-        }
-        if hideHUD {
             hideRecordingHUD()
-            // Капсула возвращается к покою (или к действиям, если курсор всё
-            // ещё на ней) — тем же переходом в 180 мс.
-            floatingCapsule.setRecording(false)
         }
+        // Капсула возвращается к покою (или к действиям, если курсор всё ещё
+        // на ней) при любом конце записи — в том числе когда HUD остаётся ради
+        // «распознаю…»: своего состояния распознавания у капсулы нет, и под
+        // if hideHUD она навсегда застревала в «идёт запись».
+        floatingCapsule.setRecording(false)
         if resetImage, isRecording {
             setMenuBarState(.recording)
         }
