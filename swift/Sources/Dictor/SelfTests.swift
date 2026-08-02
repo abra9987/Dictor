@@ -1415,15 +1415,18 @@ enum DictorSelfTest {
         guard voicePhaseSpeed > idlePhaseSpeed else {
             throw SelfTestFailure.failed("voice should visibly accelerate the recording waveform")
         }
+        // Уровни 0.37 и 0.9 вместо 1 и 0: единица и ноль — мультипликативные
+        // единица и аннулятор, с ними «независимость от уровня» прошла бы и
+        // у реализации вида «константа × уровень».
         try expect(
-            recordingHUDPhaseSpeed(mode: .transcribing, level: 1),
+            recordingHUDPhaseSpeed(mode: .transcribing, level: 0.37),
             equals: RECORDING_HUD_TRANSCRIBING_PHASE_SPEED,
             "transcribing animation speed should not depend on stale microphone level"
         )
         try expect(
-            recordingHUDPhaseSpeed(mode: .error, level: 0),
+            recordingHUDPhaseSpeed(mode: .error, level: 0.9),
             equals: 0,
-            "error HUD should be static (zero phase speed)"
+            "error HUD should be static (zero phase speed) at any level"
         )
     }
 
@@ -4736,8 +4739,11 @@ enum DictorSelfTest {
             let recording = view.capsuleWidth(for: .recording)
             try expect(idle < hover, equals: true,
                        "hover shows actions and must be wider than rest: \(idle) vs \(hover)")
-            try expect(hover < recording || recording > idle, equals: true,
-                       "recording must not collapse: \(recording)")
+            // Строго по макету 6c: запись — самое широкое состояние. Раньше
+            // здесь стояла дизъюнкция (hover < recording || recording > idle),
+            // которая при уже доказанном idle < hover почти не могла упасть.
+            try expect(hover < recording, equals: true,
+                       "recording is the widest state: \(hover) vs \(recording)")
             try expect(FloatingCapsuleMetrics.height(for: .idle)
                         < FloatingCapsuleMetrics.height(for: .recording), equals: true,
                        "the capsule grows from rest to recording, never shrinks")
