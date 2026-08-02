@@ -490,6 +490,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 "script:\(settings.dictationLanguage.rawValue)",
                 "input:\(settings.inputDevice)",
                 settings.floatingCapsuleEnabled ? "capsule-on" : "capsule-off",
+                settings.showRecordingWaveform ? "hud-on" : "hud-off",
                 settings.recordingHUDPlacement.rawValue,
                 "limit:\(settings.recentTranscriptLimit.rawValue)",
                 // Словарь и его файл синхронизации меняются и службой (скан
@@ -3592,6 +3593,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
+        // Капсула записи — временная, показывается только на время диктовки.
+        // Тумблер жил в старом меню («Show recording waveform»), а место ему
+        // первое: строки ниже настраивают именно эту капсулу.
+        let hudToggle = SDToggle()
+        hudToggle.isOn = settings.showRecordingWaveform
+        hudToggle.onToggle = { [weak self] enabled in
+            self?.settings.showRecordingWaveform = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Капсула записи", "Recording capsule"),
+            subtitle: t("Волна и таймер на экране, пока идёт диктовка",
+                        "Wave and timer on screen while dictation runs"),
+            control: hudToggle
+        ))
+
         // Плавающая капсула (макет 6c). Выключена по умолчанию: это объект
         // поверх чужих окон, и появляться он должен по приглашению.
         let capsuleToggle = SDToggle()
@@ -3615,6 +3631,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         backgroundPills.onSelect = { [weak self] raw in
             guard let style = RecordingHUDBackgroundStyle(rawValue: raw) else { return }
             self?.settings.recordingHUDBackgroundStyle = style
+            self?.settingsDraft?.backgroundStyle = style
         }
         root.addArrangedSubview(SDRowView(
             title: t("Фон капсулы", "Capsule background"),
@@ -3631,6 +3648,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         swatches.onSelect = { [weak self] raw in
             guard let color = RecordingHUDAccentColor(rawValue: raw) else { return }
             self?.settings.recordingHUDRecordingColor = color
+            self?.settingsDraft?.recordingColor = color
         }
         root.addArrangedSubview(SDRowView(
             title: t("Цвет волны", "Wave color"),
@@ -3674,6 +3692,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         sizeSegmented.onSelect = { [weak self, weak preview] raw in
             guard let size = RecordingHUDSize(rawValue: raw) else { return }
             self?.settings.recordingHUDSize = size
+            self?.settingsDraft?.hudSize = size
             preview?.setSize(size)
         }
         root.addArrangedSubview(advancedCapsuleRow(title: t("Размер", "Size"),
