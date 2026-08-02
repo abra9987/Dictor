@@ -478,6 +478,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 settings.recordingHUDTranscribingColor.rawValue,
                 settings.recordingHUDBackgroundStyle.rawValue,
                 settings.recordingHUDSize.rawValue,
+                // Настройки, которые меняются и извне окна — из меню-бара и
+                // агентом. Без них окно не перерисовывалось, и клик по
+                // устаревшему тумблеру перещёлкивал только что сделанное.
+                String(settings.enterDelayMilliseconds),
+                settings.playFeedbackSounds ? "sounds-on" : "sounds-off",
+                settings.checkForUpdates ? "updates-on" : "updates-off",
+                settings.removeFillerWords ? "fillers-on" : "fillers-off",
+                settings.builtInSpellingsEnabled ? "spellings-on" : "spellings-off",
+                settings.latinTermRestorationsEnabled ? "latin-on" : "latin-off",
+                "script:\(settings.dictationLanguage.rawValue)",
+                "input:\(settings.inputDevice)",
+                settings.floatingCapsuleEnabled ? "capsule-on" : "capsule-off",
+                settings.recordingHUDPlacement.rawValue,
+                "limit:\(settings.recentTranscriptLimit.rawValue)",
+                settings.speechModelProfile.rawValue,
                 permissionClickCount.description,
                 "repair:\(permissionRepairNotes.count)",
                 (AgentRuntimeStateStore.read()?.missingPermissions ?? []).sorted().joined(separator: ",")]
