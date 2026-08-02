@@ -58,9 +58,6 @@ func hotkeyIsModifierPrefix(_ prefix: HotkeyChoice,
     guard prefix.isModifier,
           prefix.requiredModifiers.isEmpty,
           let prefixMask = prefix.modifierFlag else { return false }
-    if shortcut.isModifier {
-        return shortcut.requiredModifiers.contains(prefixMask)
-    }
     return shortcut.requiredModifiers.contains(prefixMask)
 }
 

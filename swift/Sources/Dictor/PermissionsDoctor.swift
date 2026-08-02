@@ -38,10 +38,6 @@ struct PermissionsReport {
     var needsAgentRestart: Bool {
         rows.contains { $0.diagnosis == .staleInAgent }
     }
-
-    var allGranted: Bool {
-        rows.allSatisfy { $0.diagnosis == .granted }
-    }
 }
 
 @MainActor

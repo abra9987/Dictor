@@ -104,8 +104,23 @@ DECLARATIONS = [
     re.compile(r"^(?:final\s+)?(?:class|struct|enum|actor)\s+(\w+)"),
     # приватные свойства — самое незаметное
     re.compile(r"^\s*(?:private|fileprivate)\s+(?:static\s+)?(?:var|let)\s+(\w+)"),
+    # вложенные типы (с отступом); `class func`/`class var` — не типы
+    re.compile(r"^\s+(?:(?:final|private|fileprivate|indirect)\s+)*"
+               r"(?:class(?!\s+(?:func|var)\b)|struct|enum|actor)\s+(\w+)"),
+    # файловые константы и переменные
+    re.compile(r"^(?:let|var)\s+(\w+)"),
 ]
 INTERNAL_METHOD = re.compile(r"^\s+(?:static\s+)?func\s+(\w+)")
+# Вычисляемое не-private свойство уровня типа: строка кончается «{» и не
+# содержит «=» — синтез Codable такие не трогает, подсчёт вхождений честен.
+COMPUTED_PROPERTY = re.compile(
+    r"^\s+(?:(?:static|nonisolated|final)\s+)*var\s+(\w+)[^=\n]*\{\s*$")
+# func с атрибутами/модификаторами; override сознательно не в списке — его
+# зовёт фреймворк, и правило обязано молчать.
+MODIFIED_METHOD = re.compile(
+    r"^\s+(?:@\w+(?:\([^)]*\))?\s+)*"
+    r"(?:(?:final|public|internal|package|private|fileprivate|nonisolated"
+    r"|mutating|nonmutating|static|class|dynamic)\s+)*func\s+(\w+)")
 
 candidates = set()
 for text in texts.values():
@@ -113,10 +128,13 @@ for text in texts.values():
         for pattern in DECLARATIONS:
             match = pattern.match(line)
             if match:
+                # CodingKeys использует синтез Codable — вхождений в коде нет.
+                if match.group(1) != "CodingKeys":
+                    candidates.add(match.group(1))
+        for pattern in (INTERNAL_METHOD, COMPUTED_PROPERTY, MODIFIED_METHOD):
+            match = pattern.match(line)
+            if match and not FRAMEWORK_PREFIXES.match(match.group(1)):
                 candidates.add(match.group(1))
-        match = INTERNAL_METHOD.match(line)
-        if match and not FRAMEWORK_PREFIXES.match(match.group(1)):
-            candidates.add(match.group(1))
 
 counts = Counter()
 for text in texts.values():

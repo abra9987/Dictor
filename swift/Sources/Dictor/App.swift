@@ -1300,10 +1300,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
     }
 
-    func applicationDidBecomeActive(_ notification: Notification) {
-        guard !isTerminating else { return }
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
         hotkeyRecorder?.cancel()

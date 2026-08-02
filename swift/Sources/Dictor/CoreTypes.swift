@@ -24,11 +24,9 @@ let DEFAULT_HOTKEY_KEYCODE: CGKeyCode = 54  // Right Command
 let RIGHT_COMMAND_KEYCODE: CGKeyCode = 54
 let LEFT_COMMAND_KEYCODE: CGKeyCode = 55
 let RIGHT_OPTION_KEYCODE: CGKeyCode = 61
-let RIGHT_SHIFT_KEYCODE: CGKeyCode = 60
 let FN_KEYCODE: CGKeyCode = 63
 let ESCAPE_KEYCODE: CGKeyCode = 53
 let RETURN_KEYCODE: CGKeyCode = 36
-let ENTER_AFTER_INSERT_DELAY_NANOSECONDS: UInt64 = 120_000_000
 let MIN_CLIP_SECONDS: Double = 0.25
 let UPDATE_CHECK_FIRST_DELAY_SECONDS: TimeInterval = 30
 let UPDATE_CHECK_INTERVAL_SECONDS: TimeInterval = 6 * 3600  // 6h
@@ -87,10 +85,8 @@ let DIAGNOSTICS_LOG_MAX_LINE_CHARACTERS = 4096
 // Пользовательский лимит «Хранить историю» влияет только на видимый
 // список в поповере/меню, не на архив.
 let TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES = 10_000
-let RECORDING_HUD_BASE_SIZE = NSSize(width: 64, height: 38)
 let RECORDING_HUD_ANIMATE_IN_SECONDS: TimeInterval = 0.32
 let RECORDING_HUD_ANIMATE_OUT_SECONDS: TimeInterval = 0.23
-let RECORDING_HUD_TRANSCRIBING_RESOLVE_SECONDS: TimeInterval = 0.20
 let RECORDING_HUD_TRANSCRIBING_MIN_VISIBLE_SECONDS: TimeInterval = 0.24
 let RECORDING_HUD_TARGET_REFRESH_INTERVAL: TimeInterval = 0.16
 let RECORDING_HUD_TARGET_FOLLOW_RESPONSE: CGFloat = 22
@@ -883,15 +879,6 @@ struct DictationUsageWeekSnapshot: Equatable {
     var totalCharacters: Int { days.reduce(0) { $0 + $1.usage.characterCount } }
     var totalAudioSeconds: Double { days.reduce(0) { $0 + $1.usage.audioSeconds } }
     var totalASRSeconds: Double { days.reduce(0) { $0 + $1.usage.asrSeconds } }
-    var averageASRSeconds: Double {
-        totalDictations > 0 ? totalASRSeconds / Double(totalDictations) : 0
-    }
-    var averageCharactersPerDictation: Double {
-        totalDictations > 0 ? Double(totalCharacters) / Double(totalDictations) : 0
-    }
-    var realtimeSpeedRatio: Double {
-        totalASRSeconds > 0 ? totalAudioSeconds / totalASRSeconds : 0
-    }
 }
 
 func dictationUsageDayKey(for date: Date, calendar: Calendar) -> String {

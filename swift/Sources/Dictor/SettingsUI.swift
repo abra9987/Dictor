@@ -790,12 +790,6 @@ final class SDSegmented: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    func select(_ value: String) {
-        guard values.contains(value) else { return }
-        selectedValue = value
-        restyle()
-    }
-
     @objc private func segmentClicked(_ sender: NSButton) {
         guard let value = sender.identifier?.rawValue else { return }
         selectedValue = value
