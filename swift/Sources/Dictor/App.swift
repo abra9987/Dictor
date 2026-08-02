@@ -1972,6 +1972,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         // обещает «1 раз в 6 ч», а служба в сеть не ходит. Вызов идемпотентен
         // и дёшев — внутри два guard'а: по настройке и по уже живому циклу.
         startUpdateCheckLoop()
+
+        // Значок в Dock: тумблер меняет окно, запуск и закрытие окна меняют
+        // pid-файл — и то и другое служба замечает здесь. Внутри guard по
+        // уже стоящей политике, так что тик обходится в чтение pid-файла.
+        refreshActivationPolicy()
     }
 
     // MARK: - Плавающая капсула (макет 6c)
@@ -4834,17 +4839,45 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private var shouldShowDockIcon: Bool {
-        false
-    }
-
+    /// Значок в Dock принадлежит службе — и только пока окно не запущено:
+    /// окно всегда `.regular`, и два значка одного бандла выглядят как два
+    /// приложения. Клик по значку открывает окно через
+    /// `applicationShouldHandleReopen`, окно пишет свой pid, и следующий тик
+    /// наблюдателя прячет значок службы.
     private func refreshActivationPolicy() {
-        if shouldShowDockIcon {
+        let desired = dockActivationPolicy(
+            showInDock: settings.showInDock,
+            panelRunning: DictorControlPanelRegistry.isPanelRunning())
+        guard NSApp.activationPolicy() != desired else { return }
+        if desired == .regular {
+            // Приложению в `.regular` нужна строка меню — иначе рядом с
+            // логотипом Apple остаётся пустое место.
+            NSApp.mainMenu = agentMainMenu()
             NSApp.setActivationPolicy(.regular)
         } else {
             NSApp.setActivationPolicy(.accessory)
             NSApp.hide(nil)
         }
+    }
+
+    private func agentMainMenu() -> NSMenu {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        let about = NSMenuItem(title: t("О Dictor", "About Dictor"),
+                               action: #selector(showAboutClicked(_:)),
+                               keyEquivalent: "")
+        about.target = self
+        appMenu.addItem(about)
+        appMenu.addItem(.separator())
+        let quit = NSMenuItem(title: t("Выйти из Dictor", "Quit Dictor"),
+                              action: #selector(quitClicked(_:)),
+                              keyEquivalent: "q")
+        quit.target = self
+        appMenu.addItem(quit)
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+        return main
     }
 
     private func updateTranscriptCorrections(_ corrections: [TranscriptCorrection],

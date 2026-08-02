@@ -89,6 +89,8 @@ enum DictorSelfTest {
             return runSuite("insertion-target", testInsertionTargetTracking)
         case "insertion-target-live":
             return runSuite("insertion-target-live", testLiveInsertionTargetProbe)
+        case "dock-policy":
+            return runSuite("dock-policy", testDockActivationPolicy)
         case "all":
             return runSuite("all", testAll)
         default:
@@ -140,6 +142,25 @@ enum DictorSelfTest {
         try testPrivateLogAppend()
         try testDiagnostics()
         try testInsertionTargetTracking()
+        try testDockActivationPolicy()
+    }
+
+    /// Значок в Dock: четыре комбинации «тумблер × окно». Служба обязана
+    /// прятать свой значок, пока окно живо, — иначе в Dock два значка
+    /// одного бандла.
+    private static func testDockActivationPolicy() throws {
+        try expect(dockActivationPolicy(showInDock: true, panelRunning: false),
+                   equals: .regular,
+                   "dock icon should appear when enabled and the panel is closed")
+        try expect(dockActivationPolicy(showInDock: true, panelRunning: true),
+                   equals: .accessory,
+                   "the running panel already shows a Dock icon — the agent must hide its own")
+        try expect(dockActivationPolicy(showInDock: false, panelRunning: false),
+                   equals: .accessory,
+                   "dock icon off means accessory")
+        try expect(dockActivationPolicy(showInDock: false, panelRunning: true),
+                   equals: .accessory,
+                   "dock icon off stays accessory regardless of the panel")
     }
 
     private static func testInsertionTargetTracking() throws {

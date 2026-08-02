@@ -491,6 +491,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 "input:\(settings.inputDevice)",
                 settings.floatingCapsuleEnabled ? "capsule-on" : "capsule-off",
                 settings.showRecordingWaveform ? "hud-on" : "hud-off",
+                settings.showInDock ? "dock-on" : "dock-off",
                 settings.recordingHUDPlacement.rawValue,
                 "limit:\(settings.recentTranscriptLimit.rawValue)",
                 // Словарь и его файл синхронизации меняются и службой (скан
@@ -3646,7 +3647,22 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.addArrangedSubview(SDRowView(
             title: t("Цвет волны", "Wave color"),
             subtitle: t("Один цвет для записи и бренда", "One color for recording and brand"),
-            control: swatches,
+            control: swatches
+        ))
+
+        // Настройка существовала всегда, но shouldShowDockIcon жёстко
+        // возвращал false — пункт старого меню переключал её впустую.
+        // Значок принадлежит службе и показывается, пока это окно закрыто.
+        let dockToggle = SDToggle()
+        dockToggle.isOn = settings.showInDock
+        dockToggle.onToggle = { [weak self] enabled in
+            self?.settings.showInDock = enabled
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Значок в Dock", "Dock icon"),
+            subtitle: t("Клик по значку открывает это окно",
+                        "Clicking the icon opens this window"),
+            control: dockToggle,
             hairline: false
         ))
     }

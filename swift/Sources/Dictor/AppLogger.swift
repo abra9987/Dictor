@@ -122,6 +122,15 @@ enum AgentRuntimeStateStore {
     }
 }
 
+/// Куда службе ставить activation policy. Чистая: решение «показывать ли
+/// значок в Dock» проверяется самотестом без UI. Значок показывается,
+/// только когда тумблер включён И окно не запущено — окно `.regular` само,
+/// и второй значок того же бандла читался бы как два приложения.
+func dockActivationPolicy(showInDock: Bool,
+                          panelRunning: Bool) -> NSApplication.ActivationPolicy {
+    showInDock && !panelRunning ? .regular : .accessory
+}
+
 enum DictorControlPanelRegistry {
     static var url: URL {
         (try? dictorApplicationSupportDirectory()
@@ -139,6 +148,12 @@ enum DictorControlPanelRegistry {
             return true
         }
         return false
+    }
+
+    /// Живо ли окно — по pid-файлу, без активации. Нужно службе, чтобы
+    /// решить, показывать ли свой значок в Dock.
+    static func isPanelRunning() -> Bool {
+        currentPanelPID() != nil
     }
 
     static func claimCurrentPanel() {
