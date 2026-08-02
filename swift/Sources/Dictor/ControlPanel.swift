@@ -489,6 +489,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 settings.floatingCapsuleEnabled ? "capsule-on" : "capsule-off",
                 settings.recordingHUDPlacement.rawValue,
                 "limit:\(settings.recentTranscriptLimit.rawValue)",
+                // Словарь и его файл синхронизации меняются и службой (скан
+                // файла, конфликт останавливает синк): без них вкладка
+                // показывает вчерашний список и «включённый» синк, которого
+                // уже нет.
+                "sync:\(settings.transcriptCorrectionsSyncFile)",
+                "corr:\(settings.transcriptCorrections.count):" +
+                    String(settings.transcriptCorrections
+                        .map { "\($0.source)→\($0.replacement)" }
+                        .joined(separator: "|").hashValue),
                 settings.speechModelProfile.rawValue,
                 "micFallback:\(state?.inputFallbackDeviceName ?? "")",
                 permissionClickCount.description,
@@ -982,7 +991,44 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: t("Убирать слова-паразиты", "Remove filler words"),
             subtitle: t("«Эээ», «ммм» и подобное исчезают из текста",
                         "“Uh”, “um” and similar vanish from the text"),
-            control: fillerToggle,
+            control: fillerToggle
+        ))
+
+        // Синхронизация и перенос жили только в старом меню по правому клику —
+        // то есть их не существовало ни для кого, кто в это меню не заглядывал.
+        let syncPath = settings.transcriptCorrectionsSyncFile
+        if syncPath.isEmpty {
+            root.addArrangedSubview(SDRowView(
+                title: t("Синхронизация файлом", "Sync through a file"),
+                subtitle: t("Файл в iCloud Drive или Dropbox держит словарь общим "
+                            + "для нескольких Mac",
+                            "A file in iCloud Drive or Dropbox keeps the dictionary "
+                            + "shared between Macs"),
+                control: panelButton(t("Настроить…", "Set up…"),
+                                     action: #selector(setUpDictionarySyncFromPanel(_:)))
+            ))
+        } else {
+            root.addArrangedSubview(SDRowView(
+                title: t("Синхронизация файлом", "Sync through a file"),
+                subtitle: (syncPath as NSString).abbreviatingWithTildeInPath,
+                control: panelButton(t("Отключить…", "Disconnect…"),
+                                     action: #selector(stopDictionarySyncFromPanel(_:)))
+            ))
+        }
+
+        let transferButtons = NSStackView(views: [
+            panelButton(t("Импорт…", "Import…"),
+                        action: #selector(importDictionaryFromPanel(_:))),
+            panelButton(t("Экспорт…", "Export…"),
+                        action: #selector(exportDictionaryFromPanel(_:))),
+        ])
+        transferButtons.orientation = .horizontal
+        transferButtons.spacing = 8
+        root.addArrangedSubview(SDRowView(
+            title: t("Перенос словаря", "Move the dictionary"),
+            subtitle: t("Файл автозамен можно переслать и импортировать на другом Mac",
+                        "The corrections file can be sent to and imported on another Mac"),
+            control: transferButtons,
             hairline: false
         ))
     }
@@ -1094,6 +1140,261 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         corrections.remove(at: sender.tag)
         settings.transcriptCorrections = corrections
         refresh(force: true)
+    }
+
+    // MARK: - Перенос и синхронизация словаря
+    //
+    // Окно только читает и пишет файлы и настройки; сам цикл синхронизации
+    // (таймер, слияние, конфликты) живёт в службе, которая подхватывает
+    // смену пути через наблюдатель настроек. Порядок в настройке важен:
+    // сначала файл, потом словарь, потом путь — служба не должна увидеть
+    // путь раньше, чем файл готов.
+
+    @objc private func importDictionaryFromPanel(_ sender: NSButton) {
+        let panel = NSOpenPanel()
+        panel.title = t("Импорт словаря", "Import Dictionary")
+        panel.message = t("Выберите файл автозамен Dictor.",
+                          "Choose a Dictor corrections file.")
+        panel.prompt = t("Импортировать", "Import")
+        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let imported = try TranscriptCorrectionsTransfer.readCounted(from: url)
+            guard let choice = chooseDictionaryImportMode(imported: imported.corrections,
+                                                          originalCount: imported.originalCount,
+                                                          sourceName: url.lastPathComponent,
+                                                          allowsEmptyReplace: false) else {
+                return
+            }
+            let next = transcriptCorrections(afterApplying: imported.corrections,
+                                             to: settings.transcriptCorrections,
+                                             mode: choice)
+            guard storeDictionaryFromPanel(next) else { return }
+            log("dictionary: panel import read \(imported.corrections.count) corrections")
+            refresh(force: true)
+        } catch {
+            showDictionaryTransferError(title: t("Импорт не удался", "Import Failed"),
+                                        error: error)
+        }
+    }
+
+    @objc private func exportDictionaryFromPanel(_ sender: NSButton) {
+        let panel = NSSavePanel()
+        panel.title = t("Экспорт словаря", "Export Dictionary")
+        panel.message = t("Файл можно переслать, положить в iCloud Drive или "
+                          + "импортировать на другом Mac.",
+                          "Save a file you can AirDrop, store in iCloud Drive, "
+                          + "or import on another Mac.")
+        panel.prompt = t("Экспортировать", "Export")
+        panel.nameFieldStringValue = CORRECTIONS_FILE_NAME
+        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
+            log("dictionary: panel export wrote \(settings.transcriptCorrections.count) corrections")
+        } catch {
+            showDictionaryTransferError(title: t("Экспорт не удался", "Export Failed"),
+                                        error: error)
+        }
+    }
+
+    @objc private func setUpDictionarySyncFromPanel(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = t("Синхронизация словаря", "Set Up Dictionary Sync")
+        alert.informativeText = t(
+            "Dictor держит автозамены в одном локальном файле. Положите его в папку, "
+            + "которую синхронизирует iCloud Drive, Dropbox или Syncthing, — и словарь "
+            + "станет общим для нескольких Mac без всякого аккаунта.\n\n"
+            + "Dictor читает и пишет только выбранный файл.",
+            "Dictor can keep corrections in one local file. Put that file in iCloud "
+            + "Drive, Dropbox, Syncthing, or another synced folder to keep multiple "
+            + "Macs aligned without a Dictor account.\n\n"
+            + "Dictor only reads and writes the file you choose.")
+        alert.addButton(withTitle: t("Создать файл", "Create Sync File"))
+        alert.addButton(withTitle: t("Выбрать существующий", "Use Existing File"))
+        alert.addButton(withTitle: t("Отмена", "Cancel"))
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            createDictionarySyncFileFromPanel()
+        case .alertSecondButtonReturn:
+            useExistingDictionarySyncFileFromPanel()
+        default:
+            return
+        }
+    }
+
+    private func createDictionarySyncFileFromPanel() {
+        let panel = NSSavePanel()
+        panel.title = t("Создать файл синхронизации", "Create Sync File")
+        panel.message = t("Выберите, где хранить файл. Лучше всего — папка, которую "
+                          + "синхронизирует iCloud Drive или другой сервис.",
+                          "Choose where Dictor should keep the sync file. A folder "
+                          + "synced by iCloud Drive or another provider works best.")
+        panel.prompt = t("Создать", "Create")
+        panel.nameFieldStringValue = CORRECTIONS_FILE_NAME
+        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
+            settings.transcriptCorrectionsSyncFile = url.path
+            log("dictionary: panel created sync file with "
+                + "\(settings.transcriptCorrections.count) corrections")
+            refresh(force: true)
+        } catch {
+            showDictionaryTransferError(title: t("Синхронизация не настроилась",
+                                                 "Sync Setup Failed"),
+                                        error: error)
+        }
+    }
+
+    private func useExistingDictionarySyncFileFromPanel() {
+        let panel = NSOpenPanel()
+        panel.title = t("Файл синхронизации", "Choose Sync File")
+        panel.message = t("Выберите существующий файл автозамен Dictor.",
+                          "Choose an existing Dictor corrections file.")
+        panel.prompt = t("Использовать", "Use File")
+        panel.allowedContentTypes = [TranscriptCorrectionsTransfer.contentType]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let imported = try TranscriptCorrectionsTransfer.readCounted(from: url)
+            guard let choice = chooseDictionaryImportMode(imported: imported.corrections,
+                                                          originalCount: imported.originalCount,
+                                                          sourceName: url.lastPathComponent,
+                                                          allowsEmptyReplace: true) else {
+                return
+            }
+            let next = transcriptCorrections(afterApplying: imported.corrections,
+                                             to: settings.transcriptCorrections,
+                                             mode: choice)
+            // При объединении файл переписывается до подключения: служба,
+            // увидев новый путь, читает файл как истину, и результат слияния
+            // обязан уже лежать в нём.
+            if choice == .merge {
+                try TranscriptCorrectionsTransfer.write(next, to: url)
+            }
+            guard storeDictionaryFromPanel(next) else { return }
+            settings.transcriptCorrectionsSyncFile = url.path
+            log("dictionary: panel linked sync file with "
+                + "\(imported.corrections.count) corrections")
+            refresh(force: true)
+        } catch {
+            showDictionaryTransferError(title: t("Синхронизация не настроилась",
+                                                 "Sync Setup Failed"),
+                                        error: error)
+        }
+    }
+
+    @objc private func stopDictionarySyncFromPanel(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = t("Отключить синхронизацию словаря?",
+                              "Stop Syncing the Dictionary?")
+        alert.informativeText = t("Автозамены на этом Mac сохранятся. Сам файл "
+                                  + "синхронизации не удаляется.",
+                                  "Dictor will keep the corrections already on this "
+                                  + "Mac. The sync file will not be deleted.")
+        alert.addButton(withTitle: t("Отключить", "Stop Syncing"))
+        alert.addButton(withTitle: t("Отмена", "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        settings.transcriptCorrectionsSyncFile = ""
+        refresh(force: true)
+    }
+
+    private func chooseDictionaryImportMode(imported: [TranscriptCorrection],
+                                            originalCount: Int,
+                                            sourceName: String,
+                                            allowsEmptyReplace: Bool) -> CorrectionImportChoice? {
+        let imported = normalizedTranscriptCorrections(imported)
+        if imported.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = t("В файле нет автозамен", "No Text Corrections Found")
+            alert.informativeText = allowsEmptyReplace
+                ? t("В файле «\(sourceName)» нет ни одной автозамены. Его всё равно "
+                    + "можно использовать как пустой файл синхронизации.",
+                    "\(sourceName) does not contain any corrections. You can still "
+                    + "use it as an empty sync file.")
+                : t("В файле «\(sourceName)» нет ни одной автозамены.",
+                    "\(sourceName) does not contain any corrections to import.")
+            alert.addButton(withTitle: allowsEmptyReplace
+                            ? t("Использовать пустой файл", "Use Empty File")
+                            : "OK")
+            if allowsEmptyReplace { alert.addButton(withTitle: t("Отмена", "Cancel")) }
+            let response = alert.runModal()
+            return allowsEmptyReplace && response == .alertFirstButtonReturn ? .replace : nil
+        }
+
+        let summary = correctionImportSummary(existing: settings.transcriptCorrections,
+                                              imported: imported)
+        let countText = correctionImportCountText(sourceName: sourceName,
+                                                  originalCount: originalCount,
+                                                  keptCount: summary.total,
+                                                  language: language)
+        let mergeCapWarning = correctionImportMergeCapWarningText(
+            existingCount: settings.transcriptCorrections.count,
+            newCount: summary.newCount,
+            language: language
+        )
+        let alert = NSAlert()
+        alert.messageText = t("Импортировать автозамены?", "Import Text Corrections?")
+        alert.informativeText = t("""
+            \(countText)
+
+            Новых: \(summary.newCount) · обновят существующие: \(summary.updatedCount) · уже совпадают: \(summary.unchangedCount).
+
+            «Объединить» сохранит записи этого Mac, которых нет в файле. «Заменить все» сделает словарь точной копией файла.\(mergeCapWarning.map { "\n\n" + $0 } ?? "")
+            """, """
+            \(countText)
+
+            \(summary.newCount) new, \(summary.updatedCount) will update existing corrections, \(summary.unchangedCount) already match.
+
+            Merge keeps local corrections that are not in the file. Replace All makes this Mac match the file exactly.\(mergeCapWarning.map { "\n\n" + $0 } ?? "")
+            """)
+        alert.addButton(withTitle: t("Объединить", "Merge"))
+        alert.addButton(withTitle: t("Заменить все", "Replace All"))
+        alert.addButton(withTitle: t("Отмена", "Cancel"))
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .merge
+        case .alertSecondButtonReturn:
+            return .replace
+        default:
+            return nil
+        }
+    }
+
+    /// Пишет словарь и говорит вслух, если запись не удалась: молча
+    /// пропавший импорт выглядит как потеря данных.
+    private func storeDictionaryFromPanel(_ corrections: [TranscriptCorrection]) -> Bool {
+        guard let error = settings.storeTranscriptCorrections(
+            normalizedTranscriptCorrections(corrections)) else { return true }
+        showDictionaryTransferError(title: t("Словарь не сохранился",
+                                             "Saving Corrections Failed"),
+                                    error: error)
+        return false
+    }
+
+    private func showDictionaryTransferError(title: String, error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func addPrivacyTabRows(to root: NSStackView) {

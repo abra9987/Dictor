@@ -1081,18 +1081,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var reminderPausedUpdateVersion: String?
     private var reminderPausedUntil: Date?
 
-    private struct CorrectionImportSummary {
-        let total: Int
-        let newCount: Int
-        let updatedCount: Int
-        let unchangedCount: Int
-    }
-
-    private enum CorrectionImportChoice {
-        case merge
-        case replace
-    }
-
     private var correctionSyncTimer: Timer?
     /// Хоткеи агент раньше читал только при старте, поэтому их смена
     /// требовала перезапуска службы. Таймер подхватывает их на лету.
@@ -1102,6 +1090,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// перезапуск аудиовхода случался бы раз в секунду.
     private var lastSeenInputDevice: String?
     private var lastSeenCorrections: [TranscriptCorrection]?
+    private var lastSeenCorrectionSyncFilePath: String?
     /// Байты архива истории, какими агент видел их в последний раз. Обновляется
     /// и собственными записями (persistHistoryArchive), и наблюдателем — чтобы
     /// «изменилось снаружи» не срабатывало на самих себя.
@@ -2010,6 +1999,23 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         // Сравнение самого списка: `TranscriptCorrection` равнимая, а разница в
         // числе записей отсекается первой — раз в секунду это ничего не стоит.
         let corrections = settings.transcriptCorrections
+
+        // Файл синхронизации подключает и отключает окно, а цикл
+        // синхронизации живёт здесь. Смена пути пересоздаёт цикл с чистым
+        // состоянием: отпечаток и базу старого файла нельзя скармливать
+        // слиянию с новым. Правка словаря, приехавшая вместе со сменой
+        // файла, в старый файл не пишется — источником истины окно уже
+        // сделало новый файл, форсированный скан его и прочитает.
+        let syncPath = settings.transcriptCorrectionsSyncFile
+        if let previousPath = lastSeenCorrectionSyncFilePath, previousPath != syncPath {
+            log("correction sync file changed outside the agent: reconnecting")
+            lastSeenCorrections = corrections
+            correctionSyncFileFingerprint = nil
+            correctionSyncBaselineCorrections = []
+            startCorrectionSyncIfConfigured()
+        }
+        lastSeenCorrectionSyncFilePath = syncPath
+
         if let previous = lastSeenCorrections, previous != corrections {
             log("corrections changed outside the agent: writing the sync file")
             _ = writeCorrectionsToSyncFile(presentErrors: false)
@@ -5421,7 +5427,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        settings.transcriptCorrectionsSyncFile = ""
+        setCorrectionSyncFilePath("")
         correctionSyncTimer?.invalidate()
         correctionSyncTimer = nil
         correctionSyncFileFingerprint = nil
@@ -5458,7 +5464,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                                                           allowsEmptyReplace: false) else {
                 return false
             }
-            let next = corrections(afterApplying: imported.corrections, mode: choice)
+            let next = transcriptCorrections(afterApplying: imported.corrections,
+                                             to: settings.transcriptCorrections,
+                                             mode: choice)
             updateTranscriptCorrections(next)
             log("correction import read \(imported.corrections.count) corrections")
             return true
@@ -5481,7 +5489,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
         do {
             try TranscriptCorrectionsTransfer.write(settings.transcriptCorrections, to: url)
-            settings.transcriptCorrectionsSyncFile = url.path
+            setCorrectionSyncFilePath(url.path)
             startCorrectionSyncIfConfigured()
             log("correction sync created file with \(settings.transcriptCorrections.count) corrections")
         } catch {
@@ -5509,12 +5517,14 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                                                           allowsEmptyReplace: true) else {
                 return
             }
-            let next = corrections(afterApplying: imported.corrections, mode: choice)
-            settings.transcriptCorrectionsSyncFile = url.path
+            let next = transcriptCorrections(afterApplying: imported.corrections,
+                                             to: settings.transcriptCorrections,
+                                             mode: choice)
+            setCorrectionSyncFilePath(url.path)
             updateTranscriptCorrections(next, writeToSync: false)
             if choice == .merge {
                 guard writeCorrectionsToSyncFile(presentErrors: true) else {
-                    settings.transcriptCorrectionsSyncFile = ""
+                    setCorrectionSyncFilePath("")
                     rebuildMenu()
                     return
                 }
@@ -5547,7 +5557,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             return allowsEmptyReplace && response == .alertFirstButtonReturn ? .replace : nil
         }
 
-        let summary = correctionImportSummary(for: imported)
+        let summary = correctionImportSummary(existing: settings.transcriptCorrections,
+                                              imported: imported)
         let countText = correctionImportCountText(sourceName: sourceName,
                                                   originalCount: originalCount,
                                                   keptCount: summary.total)
@@ -5578,61 +5589,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
     }
 
-    private func correctionImportSummary(for imported: [TranscriptCorrection]) -> CorrectionImportSummary {
-        let existingBySource = Dictionary(uniqueKeysWithValues: settings.transcriptCorrections.map {
-            (normalizedTranscriptCorrectionSource($0.source), $0)
-        })
-
-        var newCount = 0
-        var updatedCount = 0
-        var unchangedCount = 0
-
-        for correction in imported {
-            let key = normalizedTranscriptCorrectionSource(correction.source)
-            guard let existing = existingBySource[key] else {
-                newCount += 1
-                continue
-            }
-            if existing == correction {
-                unchangedCount += 1
-            } else {
-                updatedCount += 1
-            }
-        }
-
-        return CorrectionImportSummary(
-            total: imported.count,
-            newCount: newCount,
-            updatedCount: updatedCount,
-            unchangedCount: unchangedCount
-        )
-    }
-
-    private func corrections(afterApplying imported: [TranscriptCorrection],
-                             mode: CorrectionImportChoice) -> [TranscriptCorrection] {
-        let imported = normalizedTranscriptCorrections(imported)
-        switch mode {
-        case .replace:
-            return imported
-        case .merge:
-            var merged = settings.transcriptCorrections
-            var indexBySource = Dictionary(uniqueKeysWithValues: merged.enumerated().map {
-                (normalizedTranscriptCorrectionSource($0.element.source), $0.offset)
-            })
-
-            for correction in imported {
-                let key = normalizedTranscriptCorrectionSource(correction.source)
-                if let index = indexBySource[key] {
-                    merged[index] = correction
-                } else {
-                    indexBySource[key] = merged.count
-                    merged.append(correction)
-                }
-            }
-            return merged
-        }
-    }
-
     private func updateTranscriptCorrections(_ corrections: [TranscriptCorrection],
                                              writeToSync: Bool = true) {
         if let error = settings.storeTranscriptCorrections(normalizedTranscriptCorrections(corrections)) {
@@ -5653,6 +5609,14 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         let path = settings.transcriptCorrectionsSyncFile
         guard !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path)
+    }
+
+    /// Все записи пути синхронизации из самой службы идут здесь: наблюдатель
+    /// настроек сверяет путь с прошлым тиком, и собственную запись он должен
+    /// увидеть уже «своей», иначе примет её за внешнюю и перезапустит цикл.
+    private func setCorrectionSyncFilePath(_ path: String) {
+        settings.transcriptCorrectionsSyncFile = path
+        lastSeenCorrectionSyncFilePath = settings.transcriptCorrectionsSyncFile
     }
 
     private func startCorrectionSyncIfConfigured() {
@@ -5876,7 +5840,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     private func stopCorrectionSyncAfterConflict(conflictingSources: [String]) {
-        settings.transcriptCorrectionsSyncFile = ""
+        setCorrectionSyncFilePath("")
         correctionSyncTimer?.invalidate()
         correctionSyncTimer = nil
         correctionSyncFileFingerprint = nil
@@ -5900,7 +5864,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     private func stopCorrectionSyncAfterRejectedPath(error: Error, presentErrors: Bool) {
-        settings.transcriptCorrectionsSyncFile = ""
+        setCorrectionSyncFilePath("")
         correctionSyncTimer?.invalidate()
         correctionSyncTimer = nil
         correctionSyncFileFingerprint = nil

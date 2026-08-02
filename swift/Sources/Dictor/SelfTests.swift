@@ -2145,6 +2145,41 @@ enum DictorSelfTest {
             equals: true,
             "merge cap warning should state how many corrections a merge would drop"
         )
+
+        // Слияние импорта — общая логика окна и службы. Раньше она была
+        // приватной внутри службы и не проверялась ничем.
+        let existing = [TranscriptCorrection(source: "kept", replacement: "Kept"),
+                        TranscriptCorrection(source: "stale", replacement: "Old")]
+        let incoming = [TranscriptCorrection(source: "stale", replacement: "New"),
+                        TranscriptCorrection(source: "added", replacement: "Added"),
+                        TranscriptCorrection(source: "kept", replacement: "Kept")]
+
+        let summary = correctionImportSummary(existing: existing, imported: incoming)
+        try expect(summary.total, equals: 3, "import summary should count every entry")
+        try expect(summary.newCount, equals: 1, "import summary should count new sources")
+        try expect(summary.updatedCount, equals: 1,
+                   "import summary should count sources whose replacement changes")
+        try expect(summary.unchangedCount, equals: 1,
+                   "import summary should count entries that already match")
+
+        let merged = transcriptCorrections(afterApplying: incoming, to: existing, mode: .merge)
+        try expect(
+            merged,
+            equals: [TranscriptCorrection(source: "kept", replacement: "Kept"),
+                     TranscriptCorrection(source: "stale", replacement: "New"),
+                     TranscriptCorrection(source: "added", replacement: "Added")],
+            "merge should update matching sources in place and append new ones"
+        )
+        try expect(
+            transcriptCorrections(afterApplying: incoming, to: existing, mode: .replace),
+            equals: normalizedTranscriptCorrections(incoming),
+            "replace should make the dictionary an exact copy of the file"
+        )
+        try expect(
+            transcriptCorrections(afterApplying: [], to: existing, mode: .replace),
+            equals: [],
+            "replace with an empty file should empty the dictionary"
+        )
     }
 
     private static func testFillerWordRemoval() throws {

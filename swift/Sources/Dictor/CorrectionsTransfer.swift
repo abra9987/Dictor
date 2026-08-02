@@ -237,3 +237,79 @@ func shouldStopCorrectionSync(afterPathValidationError error: Error) -> Bool {
     error is TranscriptCorrectionsSyncPathError
 }
 
+// MARK: - Импорт словаря
+//
+// Логика слияния общая для окна и службы: импортом пользуется окно
+// (раздел «Словарь»), а служба тем же кодом подключает существующий файл
+// синхронизации. Здесь только чистые функции — диалоги у каждого процесса
+// свои, потому что окно локализовано, а служба разговаривает по-английски.
+
+struct CorrectionImportSummary {
+    let total: Int
+    let newCount: Int
+    let updatedCount: Int
+    let unchangedCount: Int
+}
+
+enum CorrectionImportChoice {
+    case merge
+    case replace
+}
+
+func correctionImportSummary(existing: [TranscriptCorrection],
+                             imported: [TranscriptCorrection]) -> CorrectionImportSummary {
+    let existingBySource = Dictionary(uniqueKeysWithValues: existing.map {
+        (normalizedTranscriptCorrectionSource($0.source), $0)
+    })
+
+    var newCount = 0
+    var updatedCount = 0
+    var unchangedCount = 0
+
+    for correction in imported {
+        let key = normalizedTranscriptCorrectionSource(correction.source)
+        guard let current = existingBySource[key] else {
+            newCount += 1
+            continue
+        }
+        if current == correction {
+            unchangedCount += 1
+        } else {
+            updatedCount += 1
+        }
+    }
+
+    return CorrectionImportSummary(
+        total: imported.count,
+        newCount: newCount,
+        updatedCount: updatedCount,
+        unchangedCount: unchangedCount
+    )
+}
+
+func transcriptCorrections(afterApplying imported: [TranscriptCorrection],
+                           to existing: [TranscriptCorrection],
+                           mode: CorrectionImportChoice) -> [TranscriptCorrection] {
+    let imported = normalizedTranscriptCorrections(imported)
+    switch mode {
+    case .replace:
+        return imported
+    case .merge:
+        var merged = existing
+        var indexBySource = Dictionary(uniqueKeysWithValues: merged.enumerated().map {
+            (normalizedTranscriptCorrectionSource($0.element.source), $0.offset)
+        })
+
+        for correction in imported {
+            let key = normalizedTranscriptCorrectionSource(correction.source)
+            if let index = indexBySource[key] {
+                merged[index] = correction
+            } else {
+                indexBySource[key] = merged.count
+                merged.append(correction)
+            }
+        }
+        return merged
+    }
+}
+

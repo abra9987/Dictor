@@ -514,11 +514,19 @@ func normalizedTranscriptCorrections(
 /// dialog must state the file's real count and how many will actually
 /// be kept — normalization runs before the dialog, so without this the
 /// user is told an oversized file "contains 512 corrections".
-func correctionImportCountText(sourceName: String, originalCount: Int, keptCount: Int) -> String {
+func correctionImportCountText(sourceName: String, originalCount: Int, keptCount: Int,
+                               language: InterfaceLanguage = .english) -> String {
     guard originalCount > keptCount else {
-        return "\(sourceName) contains \(keptCount) corrections."
+        return localizedText("Автозамен в файле «\(sourceName)»: \(keptCount).",
+                             "\(sourceName) contains \(keptCount) corrections.",
+                             language: language)
     }
-    return "\(sourceName) contains \(originalCount) entries; only the first \(keptCount) valid corrections (Dictor keeps at most \(MAX_TRANSCRIPT_CORRECTIONS)) will be imported."
+    return localizedText(
+        "Записей в файле «\(sourceName)»: \(originalCount); импортированы будут только "
+        + "первые \(keptCount) корректных — Dictor хранит не больше "
+        + "\(MAX_TRANSCRIPT_CORRECTIONS).",
+        "\(sourceName) contains \(originalCount) entries; only the first \(keptCount) valid corrections (Dictor keeps at most \(MAX_TRANSCRIPT_CORRECTIONS)) will be imported.",
+        language: language)
 }
 
 /// Appended to the import dialog when choosing Merge would push the
@@ -526,10 +534,15 @@ func correctionImportCountText(sourceName: String, originalCount: Int, keptCount
 /// entries silently, so the dialog has to warn before the user picks.
 func correctionImportMergeCapWarningText(existingCount: Int,
                                          newCount: Int,
-                                         cap: Int = MAX_TRANSCRIPT_CORRECTIONS) -> String? {
+                                         cap: Int = MAX_TRANSCRIPT_CORRECTIONS,
+                                         language: InterfaceLanguage = .english) -> String? {
     let mergedCount = existingCount + newCount
     guard mergedCount > cap else { return nil }
-    return "Merging would produce \(mergedCount) corrections; Dictor keeps at most \(cap), so \(mergedCount - cap) would be dropped."
+    return localizedText(
+        "После объединения вышло бы \(mergedCount) автозамен; Dictor хранит не больше "
+        + "\(cap), лишние \(mergedCount - cap) будут отброшены.",
+        "Merging would produce \(mergedCount) corrections; Dictor keeps at most \(cap), so \(mergedCount - cap) would be dropped.",
+        language: language)
 }
 
 func utf8ClippedPrefix(_ text: String, maxBytes: Int) -> String {
