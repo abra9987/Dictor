@@ -36,7 +36,7 @@ version exists. Turn that off and the app makes no network calls at all.
 | Cost | none | monthly | none |
 | Searchable history | 10 000 dictations | varies | none |
 | Custom vocabulary | yes | usually | no |
-| Russian + English + ~17 more | yes | yes | yes |
+| Russian + English + 16 more | yes | yes | yes |
 
 ## What it looks like
 
@@ -88,7 +88,7 @@ click after checking the archive against its checksum and signature.
   editor — the text lands at the cursor. Press-and-hold or toggle, your choice.
 - **On-device recognition.** NVIDIA Parakeet TDT v3 through CoreML on the Apple
   Neural Engine: about half a second of processing for half a minute of speech.
-- **Russian and English out of the box**, plus ~17 more, with automatic language
+- **Russian and English out of the box**, plus 16 more, with automatic language
   detection.
 - **A history that answers "what did I say?"** — up to 10 000 dictations,
   searchable, with the matches highlighted.

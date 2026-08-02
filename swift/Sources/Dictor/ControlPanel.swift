@@ -892,8 +892,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             let detail: String
             switch profile {
             case .multilingualV3:
-                detail = t("~460 МБ · русский, английский и ещё 17 языков · Neural Engine",
-                           "~460 MB · Russian, English and 17 more · Neural Engine")
+                detail = t("~460 МБ · русский, английский и ещё 16 языков · Neural Engine",
+                           "~460 MB · Russian, English and 16 more · Neural Engine")
             default:
                 detail = t("Устаревший профиль, только английский",
                            "Deprecated profile, English only")
@@ -971,8 +971,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         if corrections.count > 8 {
             root.addArrangedSubview(panelLabel(
-                t("…и ещё \(corrections.count - 8). Полный список — в сервисном меню.",
-                  "…and \(corrections.count - 8) more. Full list in the service menu."),
+                t("…и ещё \(corrections.count - 8). Полный список — в разделе «Словарь».",
+                  "…and \(corrections.count - 8) more. Full list in the Dictionary section."),
                 size: 11, color: SD.C.subtle))
         }
 
@@ -3773,11 +3773,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     private func permissionTitle(_ permission: Permission) -> String {
-        switch permission {
-        case .microphone: return t("Микрофон", "Microphone")
-        case .accessibility: return t("Универсальный доступ", "Accessibility")
-        case .inputMonitoring: return t("Мониторинг ввода", "Input Monitoring")
-        }
+        localizedPermissionTitle(permission, language: language)
     }
 
     private func permissionDetail(_ permission: Permission) -> String {

@@ -6730,7 +6730,8 @@ extension DictorApp: QuickPanelDelegate {
         if installingUpdateVersion != nil { return .updating }
         if !settings.agentEnabled { return .off }
         if let missing = missingPermissions().first {
-            return .needsPermission(name: missing.rawValue)
+            return .needsPermission(name: localizedPermissionTitle(missing,
+                                                                   language: settings.interfaceLanguage))
         }
         // Отказ на старте (модель не загрузилась, слушатель хоткея не встал)
         // раньше сюда не доносился: сборщик проваливался в «Служба
