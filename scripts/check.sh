@@ -73,6 +73,124 @@ fi
 grep -q 'func launchPreparedDictorUpdate' swift/Sources/Dictor/UpdateCheck.swift
 grep -q 'launchPreparedDictorUpdate(prepared' swift/Sources/Dictor/App.swift
 
+# Мёртвый код. Дважды этот класс доходил до релиза: апдейтер был написан целиком
+# и недостижим, кнопка очистки поиска рисовалась и не принимала кликов.
+# Компилятор молчит и про приватный метод без вызывающего, и про класс, который
+# никто не создаёт, — сторожить приходится здесь.
+python3 - <<'DEADCODE'
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+sources = sorted(Path("swift/Sources/Dictor").glob("*.swift"))
+texts = {p: p.read_text(encoding="utf-8") for p in sources}
+
+# Имена колбэков AppKit: их зовёт фреймворк, вызывающего в коде нет и быть не
+# должно. Правило обязано молчать там, где не уверено.
+FRAMEWORK_PREFIXES = re.compile(
+    r"^(application|window|menu|control|text|tableView|outlineView|splitView|tabView"
+    r"|toolbar|collectionView|scrollView|comboBox|panel|sheet|service|net|gesture"
+    r"|touchBar|dragging|validate|accessibility|numberOfRows|encode|copy|hash"
+    r"|isEqual|observeValue|pasteboard)"
+)
+
+DECLARATIONS = [
+    # приватные методы: видны только внутри своего файла
+    re.compile(r"^\s*(?:@objc\s+)?(?:private|fileprivate)\s+(?:static\s+)?func\s+(\w+)"),
+    # функции файлового уровня: свидетелем протокола быть не могут
+    re.compile(r"^func\s+(\w+)"),
+    # типы файлового уровня: xib и NSClassFromString в проекте не используются
+    re.compile(r"^(?:final\s+)?(?:class|struct|enum|actor)\s+(\w+)"),
+    # приватные свойства — самое незаметное
+    re.compile(r"^\s*(?:private|fileprivate)\s+(?:static\s+)?(?:var|let)\s+(\w+)"),
+]
+INTERNAL_METHOD = re.compile(r"^\s+(?:static\s+)?func\s+(\w+)")
+
+candidates = set()
+for text in texts.values():
+    for line in text.split("\n"):
+        for pattern in DECLARATIONS:
+            match = pattern.match(line)
+            if match:
+                candidates.add(match.group(1))
+        match = INTERNAL_METHOD.match(line)
+        if match and not FRAMEWORK_PREFIXES.match(match.group(1)):
+            candidates.add(match.group(1))
+
+counts = Counter()
+for text in texts.values():
+    for word in re.findall(r"\b\w+\b", text):
+        if word in candidates:
+            counts[word] += 1
+
+dead = sorted(name for name in candidates if counts[name] <= 1)
+if not dead:
+    sys.exit(0)
+
+print("Объявлено и ни разу не использовано:", file=sys.stderr)
+for name in dead:
+    for path, text in texts.items():
+        for number, line in enumerate(text.split("\n"), 1):
+            if re.search(rf"\b{re.escape(name)}\b", line):
+                print(f"  {path}:{number}: {name}", file=sys.stderr)
+                break
+        else:
+            continue
+        break
+sys.exit(1)
+DEADCODE
+
+# Сьют самотестов, не достижимый из `--self-test all`, — тот же мёртвый код,
+# только в тестах: написан, но не выполняется никогда. Исключения объявлены
+# поимённо, дописать четвёртое молча не выйдет.
+python3 - <<'SUITES'
+import re, sys
+src = open("swift/Sources/Dictor/SelfTests.swift", encoding="utf-8").read()
+excluded = {"all", "clipboard-paste-live", "corrections-cost", "insertion-target-live"}
+body = re.search(r"private static func testAll\(\).*?\n    \}", src, re.S)
+if not body:
+    sys.exit("check.sh: не нашёл testAll в SelfTests.swift")
+missing = [
+    (suite, fn)
+    for suite, fn in re.findall(r'runSuite\("([a-z-]+)",\s*(test\w+)\)', src)
+    if suite not in excluded and f"try {fn}()" not in body.group(0)
+]
+if missing:
+    for suite, fn in missing:
+        print(f"Сьют {suite} ({fn}) не достижим из --self-test all", file=sys.stderr)
+    sys.exit(1)
+SUITES
+
+# Документация, разъехавшаяся с кодом. Так испортился CONTRIBUTING.md: он звал
+# таргет и файл, которых в проекте давно нет, и заметить это можно было, только
+# выполнив его команды.
+python3 - <<'DOCS'
+import pathlib, re, sys
+problems = []
+sources = "\n".join(p.read_text(encoding="utf-8") for p in pathlib.Path("swift/Sources/Dictor").glob("*.swift"))
+readmes = {name: pathlib.Path(name).read_text(encoding="utf-8") for name in ("README.md", "README.ru.md")}
+
+for flag in sorted(set(re.findall(r'"(--export-[a-z-]+)"', sources))):
+    for name, text in readmes.items():
+        if flag not in text:
+            problems.append(f"{name}: не описан ключ {flag}")
+
+for doc in sorted(set(re.findall(r"\b([A-Z][A-Z_]+\.md)\b", sources))):
+    if not pathlib.Path(doc).exists():
+        problems.append(f"исходники ссылаются на {doc}, которого нет")
+
+for name in ("README.md", "README.ru.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md"):
+    text = pathlib.Path(name).read_text(encoding="utf-8")
+    for script in set(re.findall(r"(scripts/[a-z-]+\.sh)", text)):
+        if not pathlib.Path(script).exists():
+            problems.append(f"{name}: ссылается на {script}, которого нет")
+
+if problems:
+    print("\n".join(problems), file=sys.stderr)
+    sys.exit(1)
+DOCS
+
 # Страница канала. Ломается она тихо: битая ссылка на картинку видна только
 # на выложенном сайте, а незаполненная подстановка — только человеку, который
 # пришёл скачивать.
