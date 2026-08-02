@@ -1227,12 +1227,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = t("Стереть всю историю диктовок?", "Erase all dictation history?")
-        alert.informativeText = t("Действие необратимо. Модель и настройки не затрагиваются.",
-                                  "This cannot be undone. The model and settings stay intact.")
+        alert.informativeText = t("Действие необратимо: сотрутся и закреплённые. Модель и настройки не затрагиваются.",
+                                  "This cannot be undone; pinned dictations are erased too. The model and settings stay intact.")
         alert.addButton(withTitle: t("Отмена", "Cancel"))
         alert.addButton(withTitle: t("Стереть", "Erase"))
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         settings.recentTranscriptEntries = []
+        // Пины — полные тексты диктовок в том же plist; «стереть всю
+        // историю», оставив их, было бы обратимым ровно наполовину.
+        settings.pinnedTranscripts = []
         refresh(force: true)
     }
 
@@ -3123,6 +3126,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         guard entries.indices.contains(index) else { return }
         let removed = entries.remove(at: index)
         settings.recentTranscriptEntries = entries
+        // Явное удаление сильнее закрепления: без снятия пина его текст
+        // оставался в plist невидимкой — фильтр «Закреплённые» ищет пины
+        // только среди записей архива.
+        if !entries.contains(where: { $0.text == removed.text }) {
+            settings.pinnedTranscripts = settings.pinnedTranscripts.filter { $0 != removed.text }
+        }
         if historySelectionKey == historyEntryKey(removed) {
             historySelectionKey = nil
         }

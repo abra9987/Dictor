@@ -397,7 +397,7 @@ final class Settings: @unchecked Sendable {
                         createdAt: entry.createdAt
                     )
                 }
-                return limitedTranscriptHistoryArchive(cleaned)
+                return limitedTranscriptHistoryArchive(cleaned, pinned: Set(pinnedTranscripts))
             }
 
             return recentTranscriptHistory.map { TranscriptHistoryEntry(text: $0) }
@@ -413,7 +413,8 @@ final class Settings: @unchecked Sendable {
                         asrTiming: entry.asrTiming,
                         createdAt: entry.createdAt
                     )
-                }
+                },
+                pinned: Set(pinnedTranscripts)
             )
 
             guard !cleaned.isEmpty else {

@@ -3728,7 +3728,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         // успеть стереть историю или удалить запись.
         settings.refreshFromDisk()
         let onDisk = settings.recentTranscriptEntries
-        let next = limitedTranscriptHistoryArchive([entry] + onDisk)
+        let next = limitedTranscriptHistoryArchive([entry] + onDisk,
+                                                   pinned: Set(settings.pinnedTranscripts))
         guard next != onDisk else { return }
         persistHistoryArchive(next)
         if rebuildMenuAfterPersisting {
@@ -3749,6 +3750,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         guard settings.recentTranscriptLimit == .off, !history.isEmpty else { return }
         let removed = history.count
         persistHistoryArchive([])
+        settings.pinnedTranscripts = []
         log("recent transcript history disabled and cleared (\(removed) entries)")
     }
 
@@ -3775,6 +3777,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         guard !history.isEmpty else { return }
         let count = history.count
         persistHistoryArchive([])
+        // «Стереть историю» стирает и закреплённые: пины хранятся полными
+        // текстами диктовок, оставить их — значит оставить в plist ровно то,
+        // что человек попросил уничтожить.
+        settings.pinnedTranscripts = []
         log("history cleared (\(count) entries)")
         rebuildMenu()
     }

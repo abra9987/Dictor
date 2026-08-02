@@ -1101,6 +1101,16 @@ enum DictorSelfTest {
             equals: 6,
             "the archive should retain entries beyond the visible history limit"
         )
+        // Закреплённая запись переживает чистку по лимиту: пин существует
+        // ради «не потерять», а вытеснение убивало запись из «Закреплённых».
+        // Незакреплённый хвост при этом честно вытесняется.
+        try expect(
+            limitedTranscriptHistoryArchive(timedEntries,
+                                            maximumCount: 4,
+                                            pinned: ["sixth"]).map(\.text),
+            equals: ["newest", "second", "third", "fourth", "sixth"],
+            "a pinned entry must survive the archive limit while the unpinned tail is evicted"
+        )
         let archiveAfterDeletion = transcriptHistoryArchive(archivedEntries, removing: 2)
         try expect(
             limitedRecentTranscriptEntries(archiveAfterDeletion, limit: .last5).map(\.text),

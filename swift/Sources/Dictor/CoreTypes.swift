@@ -807,10 +807,23 @@ func limitedRecentTranscriptEntries(_ entries: [TranscriptHistoryEntry],
 }
 
 func limitedTranscriptHistoryArchive(_ entries: [TranscriptHistoryEntry],
-                                     maximumCount: Int = TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES) -> [TranscriptHistoryEntry] {
+                                     maximumCount: Int = TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES,
+                                     pinned: Set<String> = []) -> [TranscriptHistoryEntry] {
     guard maximumCount > 0 else { return [] }
     guard entries.count > maximumCount else { return entries }
-    return Array(entries.prefix(maximumCount))
+    var kept = Array(entries.prefix(maximumCount))
+    // Закреплённые не вытесняются лимитом: пин существует ради «не потерять»,
+    // а фильтр «Закреплённые» ищет пины в архиве — вытесненная запись
+    // исчезала из него вместе со смыслом пина. Пинов не больше 200 (предел
+    // pinnedTranscripts), так что архив ограниченным быть не перестаёт.
+    guard !pinned.isEmpty else { return kept }
+    var keptTexts = Set(kept.map(\.text))
+    for entry in entries.dropFirst(maximumCount)
+    where pinned.contains(entry.text) && !keptTexts.contains(entry.text) {
+        kept.append(entry)
+        keptTexts.insert(entry.text)
+    }
+    return kept
 }
 
 func transcriptHistoryArchive(_ entries: [TranscriptHistoryEntry],
