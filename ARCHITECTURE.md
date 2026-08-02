@@ -107,7 +107,7 @@ is written out in [docs/updates.md](docs/updates.md).
 - **`scripts/check.sh`** — static: manifests, the signing pin against the
   keychain, site markup and asset existence, and grep rules that guard defects
   this project has actually shipped. It does not compile.
-- **Self-tests** — 30 suites in `SelfTests.swift`, 27 in `all`, three excluded
+- **Self-tests** — 32 suites in `SelfTests.swift`, 29 in `all`, three excluded
   by name because they need a live machine. They exist only in DEBUG builds.
   Several assert *reachability* rather than behaviour: that a control is not
   covered by another view, that an action has a receiver, that a suite is
@@ -140,6 +140,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
 | `TextInsertion.swift` | clipboard and keystroke insertion |
 | `Settings.swift`, `CoreTypes.swift` | stored settings and shared types |
+| `SettingsCatalog.swift` | the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable |
 | `Statistics.swift` | what the Statistics section shows |
 | `UpdateCheck.swift`, `UpdateWindow.swift` | the updater |
 | `ModelIntegrity.swift` | per-file SHA-256 verification of the model, cache paths, disk space |
