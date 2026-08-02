@@ -65,6 +65,9 @@ func hotkeyIsModifierPrefix(_ prefix: HotkeyChoice,
 }
 
 enum ControlPanelUpdateState: Equatable, Sendable {
+    /// Проверка не выполнялась: автопроверка выключена или окно только что
+    /// открылось. Не путать с `.checking` — тут в сеть никто не ходил.
+    case notChecked
     case checking
     case upToDate(String)
     case available(DictorRelease)
@@ -86,7 +89,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// Пауза перед показом коротких состояний службы (макет 8c).
     private let statusHold = ServiceStatusHold()
     private var statusHoldTimer: Timer?
-    private var updateState: ControlPanelUpdateState = .checking
+    private var updateState: ControlPanelUpdateState = .notChecked
     private var lastRenderFingerprint = ""
     private let settings = Settings.shared
     private var permissionClickCount: [Permission: Int] = [:]
@@ -154,7 +157,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             object: nil)
         showWindow()
         startRefreshTimer()
-        checkForUpdates()
+        // Автопроверка при открытии окна уважает тумблер: вкладка
+        // «Приватность» обещает «0 сетевых запросов — обновления отключены»,
+        // и до этого guard'а само открытие окна делало обещание ложью.
+        // Ручная кнопка «Проверить» работает независимо от тумблера — как и
+        // ручная проверка из поповера службы.
+        if settings.checkForUpdates {
+            checkForUpdates()
+        }
         if settings.agentEnabled && !DictorAgentService.isAgentRunning() {
             beginServiceOperation(.starting)
         }
@@ -476,6 +486,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func updateStateFingerprint() -> String {
         switch updateState {
+        case .notChecked:
+            // Подпись этого состояния зависит от тумблера автопроверки —
+            // без него в отпечатке строка не перерисуется при переключении.
+            return "notChecked:\(settings.checkForUpdates)"
         case .checking:
             return "checking"
         case .upToDate(let version):
@@ -722,9 +736,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         root.addArrangedSubview(SDRowView(
             title: t("Проверять обновления", "Check for updates"),
             subtitle: t("Раз в 6 часов приложение спрашивает номер последней версии. "
-                        + "Выключите — и оно не ходит в сеть вовсе.",
+                        + "Выключите — и оно само в сеть не ходит.",
                         "Every 6 hours the app asks for the latest version number. "
-                        + "Turn it off and it stops using the network at all."),
+                        + "Turn it off and it stops going online on its own."),
             control: updatesToggle
         ))
 
@@ -742,6 +756,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let subtitle: String
 
         switch updateState {
+        case .notChecked:
+            subtitle = settings.checkForUpdates
+                ? t("Проверка ещё не выполнялась", "No check has run yet")
+                : t("Автопроверка выключена", "Automatic checks are off")
+            button = panelButton(t("Проверить", "Check"),
+                                 action: #selector(updateRowButtonClicked(_:)))
         case .checking:
             subtitle = t("Проверяю обновления…", "Checking for updates…")
             button = panelButton(t("Проверить", "Check"),
@@ -785,7 +805,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             beginInAppUpdate(for: release)
         case .checking, .preparing:
             return
-        case .upToDate, .failed:
+        case .notChecked, .upToDate, .failed:
             checkForUpdates()
         }
     }
