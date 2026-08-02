@@ -8,8 +8,9 @@ issue.
 ## How the app is distributed
 
 Dictor requires no account and no cloud transcription service. It is distributed
-as a signed disk image from `https://dictor.raulgumerov.com` and updates itself
-from the same channel.
+as a disk image from `https://dictor.raulgumerov.com` and updates itself
+from the same channel. The disk image itself is not signed; the signature lives
+on the app bundle inside it.
 
 The bundle is signed with this project's own certificate — **not** notarized by
 Apple. On a first install macOS therefore says it cannot verify the developer,
