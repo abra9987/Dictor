@@ -2420,7 +2420,7 @@ enum DictorSelfTest {
                                                              headroomBytes: 100)
         try expect(
             requiredBytes,
-            equals: 700 * 1024 * 1024 + 100,
+            equals: 460 * 1024 * 1024 + 100,
             "speech model download requirement should include model estimate plus headroom"
         )
         try expect(

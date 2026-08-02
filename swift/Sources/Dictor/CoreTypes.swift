@@ -578,12 +578,15 @@ enum SpeechModelProfile: String, CaseIterable {
         }
     }
 
+    /// Реальная модель на диске — 461 МБ. Раньше здесь стояло 700 МБ, текст
+    /// говорил «500-700 MB», а строка Needed: под ним (оценка + запас на
+    /// подготовку CoreML) — 1,2 ГБ: три числа расходились втрое.
     var estimatedDownloadBytes: Int64 {
-        700 * 1024 * 1024
+        460 * 1024 * 1024
     }
 
     var downloadSizeText: String {
-        "about 500-700 MB"
+        "about 460 MB"
     }
 }
 

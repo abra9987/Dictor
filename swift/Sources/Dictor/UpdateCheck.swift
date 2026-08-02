@@ -71,7 +71,7 @@ enum UpdateCheck {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         // The privacy docs promise exactly this fixed token — no
         // version, device, or user identifiers. Must stay in sync with
-        // docs/privacy/network-calls.json.
+        // docs/updates.md and PRIVACY.md.
         req.setValue("dictor-update-check", forHTTPHeaderField: "User-Agent")
         req.timeoutInterval = 10
         let config = URLSessionConfiguration.ephemeral

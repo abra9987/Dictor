@@ -40,7 +40,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Dictor uses System Events to paste transcribed text at your cursor and to mute the system audio output during recording.</string>
+	<string>Dictor sends a system volume command to mute audio output during recording, when that option is enabled. Text insertion uses keyboard events, not AppleScript.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

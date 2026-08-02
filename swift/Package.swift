@@ -8,7 +8,7 @@
 // is what Tahoe 26 checks before exposing the app in Privacy &
 // Security → Microphone; on macOS 14–25 the legacy sandbox key
 // (`com.apple.security.device.microphone`) is the fallback. Both
-// ship in the same build so a single notarised binary works
+// ship in the same build so a single signed binary works
 // across the supported range.
 import PackageDescription
 
@@ -42,7 +42,7 @@ let package = Package(
             // executable, which `codesign --deep` won't accept as a
             // signable component because it lacks Info.plist. Instead,
             // the menubar PNGs are copied into Contents/Resources/ by
-            // dev-run.sh and ship-swift.sh — the canonical .app layout
+            // scripts/build-app.sh — the canonical .app layout
             // where Bundle.main finds them via the standard search
             // path. Source PNGs live in swift/Resources/ at the repo
             // root, NOT in the SwiftPM target, so SwiftPM never sees them.

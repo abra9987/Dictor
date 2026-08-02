@@ -22,7 +22,9 @@ exists partly so that decision can be an informed one.
 
 Four things, and any one of them failing aborts the update:
 
-1. the version in the manifest is newer than the running one;
+1. the version in the manifest is newer than the running one — and the
+   installer later verifies that the unpacked bundle carries exactly the
+   agreed version;
 2. the archive URL is **derived from that version**, never read from the
    manifest — a tampered manifest cannot point the download at another host;
 3. the download is size-capped and its SHA-256 must match the manifest;

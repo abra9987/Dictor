@@ -15,10 +15,12 @@ A static host serves three things:
 - `Dictor-<version>.dmg` — the disk image for a first install
 
 There is no API, no account, and nothing that identifies the machine asking.
-The check sends a fixed `User-Agent` of `dictor-update-check` and no other
-header. It runs 30 seconds after the service starts and every six hours after
-that, and it can be switched off in the menu-bar panel — with it off, the app
-makes no network calls at all once the speech model is downloaded.
+The check sends a fixed `User-Agent` of `dictor-update-check` plus an
+`Accept: application/json` header; the in-app installer downloads the archive
+with its own fixed token, `dictor-in-app-update`. The check runs 30 seconds
+after the service starts and every six hours after that, and it can be
+switched off in Settings → General — with it off, the app stops calling the
+update channel on its own.
 
 **Why not GitHub Releases:** the update flow predates this repository being
 public, and it stays as it is because the app must not depend on a service that
@@ -43,8 +45,9 @@ people who look for a download button there.
    host. The manifest is our own file, but it is still treated as untrusted
    input.
 
-3. **The download is capped** at 64 MB, and its SHA-256 must equal the digest
-   in the manifest.
+3. **The downloaded archive is rejected above 64 MB** — the size is checked
+   once the download completes — and its SHA-256 must equal the digest in the
+   manifest.
 
 4. **The extracted bundle must satisfy a code-signing requirement**, not merely
    be signed:

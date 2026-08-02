@@ -53,7 +53,7 @@ Seven links, `App.swift` `handleRelease` being the spine:
    an unfixable lie.
 6. **`Statistics` and history** — both written before insertion, so what the
    person sees in History is exactly what was pasted.
-7. **`DictationLatencyMetrics`** — 21 measurements of that path, one line per
+7. **`DictationLatencyMetrics`** — 26 measurements of that path, one line per
    dictation in `~/Library/Logs/Dictor.log`.
 
 Measured on real use: about **97% of the delay is the model itself**; everything
@@ -86,7 +86,7 @@ else together is under 10 ms.
 |---|---|
 | Settings, history, statistics, dictionary | `~/Library/Preferences/com.raul.dictor.plist` |
 | Service status for the window, panel PID, dictionary sync file | `~/Library/Application Support/Dictor/` |
-| Log | `~/Library/Logs/Dictor.log` |
+| Log | `~/Library/Logs/Dictor.log`; launchd captures the same stream into `~/Library/Logs/Dictor-agent.launchd.log` |
 | Speech model (~460 MB, downloaded once) | `~/Library/Application Support/FluidAudio/Models/` |
 | Audio | nowhere after the text exists; during recording, a crash-recovery journal that is deleted as soon as the dictation is handled |
 
