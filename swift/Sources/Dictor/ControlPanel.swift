@@ -471,6 +471,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 settings.primaryCompletionBehavior.rawValue,
                 settings.alternateCompletionEnabled ? "alternate-on" : "alternate-off",
                 settings.triggerMode.rawValue,
+                "suffix:\(settings.pasteSuffix.rawValue)",
                 settings.recordingHUDRecordingColor.rawValue,
                 settings.recordingHUDTranscribingColor.rawValue,
                 settings.recordingHUDBackgroundStyle.rawValue,
@@ -599,7 +600,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         bar.orientation = .horizontal
         bar.spacing = 2
         let tabs = [("general", t("Основное", "General")),
-                    ("hotkeys", t("Хоткеи", "Hotkeys")),
+                    ("hotkeys", t("Диктовка", "Dictation")),
                     ("model", t("Модель", "Model")),
                     ("dict", t("Словарь", "Dictionary")),
                     ("look", t("Внешний вид", "Appearance")),
@@ -713,34 +714,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             control: SDFieldButton(popup: microphonePopup)
         ))
 
-        let completionPills = SDPills(options: [
-            .init(title: t("Ничего", "Nothing"), value: DictationCompletionBehavior.insert.rawValue),
-            .init(title: t("Нажать Enter", "Press Enter"),
-                  value: DictationCompletionBehavior.insertAndEnter.rawValue),
-        ], selected: settings.primaryCompletionBehavior.rawValue)
-        completionPills.onSelect = { [weak self] raw in
-            guard let behavior = DictationCompletionBehavior(rawValue: raw) else { return }
-            self?.settings.primaryCompletionBehavior = behavior
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("После вставки текста", "After inserting text"),
-            control: completionPills
-        ))
-
-        let delayStepper = SDStepperRow(value: settings.enterDelayMilliseconds,
-                                        step: 20,
-                                        range: 0...ENTER_DELAY_MAX_MILLISECONDS,
-                                        suffix: "ms")
-        delayStepper.onChange = { [weak self] value in
-            self?.settings.enterDelayMilliseconds = value
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Задержка перед Enter", "Delay before Enter"),
-            subtitle: t("Пауза между вставкой и подтверждением",
-                        "Pause between inserting and confirming"),
-            control: delayStepper
-        ))
-
         let soundsToggle = SDToggle()
         soundsToggle.isOn = settings.playFeedbackSounds
         soundsToggle.onToggle = { [weak self] enabled in
@@ -851,12 +824,103 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             title: t("Начать / остановить диктовку", "Start / stop dictation"),
             control: hotkeyControl(shortcut: draft.dictationHotkey, kind: .dictation)
         ))
+
+        // Режим клавиши жил только в старом меню («Trigger») — по-английски и
+        // не там, где настраивают саму клавишу.
+        let triggerPills = SDPills(options: [
+            .init(title: t("Удерживать", "Hold"), value: TriggerMode.hold.rawValue),
+            .init(title: t("Переключать", "Toggle"), value: TriggerMode.toggle.rawValue),
+        ], selected: settings.triggerMode.rawValue)
+        triggerPills.onSelect = { [weak self] raw in
+            guard let mode = TriggerMode(rawValue: raw) else { return }
+            self?.settings.triggerMode = mode
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Режим клавиши", "Key behavior"),
+            subtitle: t("Удерживать — запись, пока клавиша зажата. Переключать — "
+                        + "нажатие включает, следующее выключает",
+                        "Hold records while the key is down. Toggle starts on one "
+                        + "press and stops on the next"),
+            control: triggerPills
+        ))
+
+        // Тумблер существовал только как ключ в настройках: выключить
+        // альтернативное завершение из интерфейса было нельзя вовсе.
+        let altToggle = SDToggle()
+        altToggle.isOn = draft.alternateCompletionEnabled
+        altToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            var draft = self.settingsDraft ?? ControlPanelSettingsDraft(settings: self.settings)
+            draft.alternateCompletionEnabled = enabled
+            self.settingsDraft = draft
+            self.hotkeyNotice = self.settingsValidationMessage(draft)
+            self.scheduleSettingsApply(after: 0.15)
+            self.refresh(force: true)
+        }
         root.addArrangedSubview(SDRowView(
             title: t("Альтернативное завершение", "Alternative finish"),
-            subtitle: t("Завершает диктовку противоположным действием",
-                        "Finishes dictation with the opposite action"),
-            control: hotkeyControl(shortcut: draft.alternateCompletionHotkey, kind: .alternateCompletion)
+            subtitle: t("Второе сочетание завершает диктовку противоположным действием",
+                        "A second shortcut finishes dictation with the opposite action"),
+            control: altToggle
         ))
+        if draft.alternateCompletionEnabled {
+            root.addArrangedSubview(SDRowView(
+                title: t("Сочетание завершения", "Finish shortcut"),
+                control: hotkeyControl(shortcut: draft.alternateCompletionHotkey,
+                                       kind: .alternateCompletion)
+            ))
+        }
+
+        let completionPills = SDPills(options: [
+            .init(title: t("Ничего", "Nothing"), value: DictationCompletionBehavior.insert.rawValue),
+            .init(title: t("Нажать Enter", "Press Enter"),
+                  value: DictationCompletionBehavior.insertAndEnter.rawValue),
+        ], selected: settings.primaryCompletionBehavior.rawValue)
+        completionPills.onSelect = { [weak self] raw in
+            guard let self, let behavior = DictationCompletionBehavior(rawValue: raw) else { return }
+            self.settings.primaryCompletionBehavior = behavior
+            // Черновик обязан узнать о прямой записи: иначе следующая запись
+            // хоткея применит черновик со вчерашним значением поверх только
+            // что сделанного выбора.
+            self.settingsDraft?.primaryCompletionBehavior = behavior
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("После вставки текста", "After inserting text"),
+            control: completionPills
+        ))
+
+        let delayStepper = SDStepperRow(value: settings.enterDelayMilliseconds,
+                                        step: 20,
+                                        range: 0...ENTER_DELAY_MAX_MILLISECONDS,
+                                        suffix: "ms")
+        delayStepper.onChange = { [weak self] value in
+            self?.settings.enterDelayMilliseconds = value
+            self?.settingsDraft?.enterDelayMilliseconds = value
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("Задержка перед Enter", "Delay before Enter"),
+            subtitle: t("Пауза между вставкой и подтверждением",
+                        "Pause between inserting and confirming"),
+            control: delayStepper
+        ))
+
+        // «After Pasting» из старого меню: что дописать после вставленного
+        // текста. Пробел стоит по умолчанию, чтобы следующая диктовка не
+        // приклеивалась к предыдущей.
+        let suffixPills = SDPills(options: [
+            .init(title: t("Пробел", "Space"), value: PasteSuffix.appendSpace.rawValue),
+            .init(title: t("Ничего", "Nothing"), value: PasteSuffix.none.rawValue),
+            .init(title: t("Новая строка", "New line"), value: PasteSuffix.appendNewline.rawValue),
+        ], selected: settings.pasteSuffix.rawValue)
+        suffixPills.onSelect = { [weak self] raw in
+            guard let suffix = PasteSuffix(rawValue: raw) else { return }
+            self?.settings.pasteSuffix = suffix
+        }
+        root.addArrangedSubview(SDRowView(
+            title: t("После текста добавлять", "Append after the text"),
+            control: suffixPills
+        ))
+
         // Кнопки «Сохранить» в макете нет: записанное сочетание применяется
         // само, служба перезапускается следом.
         if let notice = hotkeyNotice {
