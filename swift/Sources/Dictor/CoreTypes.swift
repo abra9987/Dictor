@@ -121,6 +121,10 @@ let ENTER_AFTER_PASTE_READ_GRACE_SECONDS: TimeInterval = 1.0
 /// Вспышка «текст не вставился» держится дольше обычной: в ней целая фраза о
 /// том, где искать текст, а не один восклицательный знак.
 let PASTE_NEVER_READ_FLASH_SECONDS: TimeInterval = 4.0
+/// Потолок «Задержки перед Enter» — один для степпера в окне и для
+/// нормализации в Settings. Пока это были два разных числа (2000 и 500),
+/// степпер честно крутился до 2000, а настройка молча резалась до 500.
+let ENTER_DELAY_MAX_MILLISECONDS = 2000
 let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]
 let AUDIO_IDLE_STOP_DELAY_SECONDS: TimeInterval = 5
 let AUDIO_CONFIGURATION_CHANGE_SUPPRESSION_SECONDS: TimeInterval = 1

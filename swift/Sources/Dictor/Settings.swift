@@ -179,9 +179,13 @@ final class Settings: @unchecked Sendable {
             guard defaults.object(forKey: Self.keyEnterDelayMilliseconds) != nil else {
                 return 120
             }
-            return max(0, min(500, defaults.integer(forKey: Self.keyEnterDelayMilliseconds)))
+            return max(0, min(ENTER_DELAY_MAX_MILLISECONDS,
+                              defaults.integer(forKey: Self.keyEnterDelayMilliseconds)))
         }
-        set { defaults.set(max(0, min(500, newValue)), forKey: Self.keyEnterDelayMilliseconds) }
+        set {
+            defaults.set(max(0, min(ENTER_DELAY_MAX_MILLISECONDS, newValue)),
+                         forKey: Self.keyEnterDelayMilliseconds)
+        }
     }
 
     var interfaceLanguage: InterfaceLanguage {

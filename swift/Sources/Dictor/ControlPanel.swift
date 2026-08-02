@@ -697,7 +697,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
         let delayStepper = SDStepperRow(value: settings.enterDelayMilliseconds,
                                         step: 20,
-                                        range: 0...2000,
+                                        range: 0...ENTER_DELAY_MAX_MILLISECONDS,
                                         suffix: "ms")
         delayStepper.onChange = { [weak self] value in
             self?.settings.enterDelayMilliseconds = value
