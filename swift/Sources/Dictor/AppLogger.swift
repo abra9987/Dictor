@@ -232,6 +232,20 @@ enum DictorAgentService {
         writeStoppedState()
     }
 
+    /// Снять автозапуск, не трогая работающую службу. Настройка «Запускать
+    /// диктовку в фоне» обещает ровно это: следующий вход в систему пройдёт
+    /// без диктовки, а текущий сеанс остаётся каким был. Убрать хоткей
+    /// сейчас — это пауза в панели меню-бара, отдельное действие.
+    ///
+    /// Механика: launchd читает plist один раз, при загрузке джоба. Удаление
+    /// файла не выгружает уже загруженное — процесс живёт, — но при входе в
+    /// систему загружать становится нечего.
+    static func disableAutostart() {
+        guard FileManager.default.fileExists(atPath: launchAgentURL.path) else { return }
+        try? FileManager.default.removeItem(at: launchAgentURL)
+        log("launch agent: autostart removed, the running service is left alone")
+    }
+
     static func isAgentRunning() -> Bool {
         if let state = AgentRuntimeStateStore.read(),
            state.pid > 0,

@@ -89,7 +89,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private let settings = Settings.shared
     private var permissionClickCount: [Permission: Int] = [:]
     private var settingsDraft: ControlPanelSettingsDraft?
-    var settingsTab = "general"
+    var settingsTab = SETTINGS_TABS[0].id
     private var hotkeyRecorder: HotkeyRecorderController?
     private var onboardingFlow: OnboardingFlow?
     private var onboardingPage: OnboardingPageView?
@@ -536,32 +536,35 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
-        // Макет: контент padding 6px 24px 20px, вертикальные отступы
-        // живут внутри строк (13px), между строками — только hairline.
+        // Таб-бар лежит на своей полосе во всю ширину, поэтому боковых
+        // отступов у корня нет: их держит стек содержимого.
         root.spacing = 0
-        root.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 20, right: 24)
+        root.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         root.translatesAutoresizingMaskIntoConstraints = false
 
         root.addArrangedSubview(settingsTabBar())
-        let tabsHairline = SDHairlineView()
-        root.addArrangedSubview(tabsHairline)
-        root.setCustomSpacing(6, after: tabsHairline)
+
+        // Содержимое вкладки — стопка групп, а не строк: между группами
+        // 18 pt, внутри группы строки лежат вплотную под общей крышей.
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 18
+        content.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 20, right: 22)
+        content.translatesAutoresizingMaskIntoConstraints = false
         switch settingsTab {
-        case "hotkeys":
-            addHotkeyTabRows(to: root, draft: draft)
-        case "model":
-            addModelTabRows(to: root)
-        case "dict":
-            addDictTabRows(to: root)
+        case "text":
+            addTextTabRows(to: content, draft: draft)
         case "look":
-            addLookTabRows(to: root, draft: draft)
-        case "advanced":
-            addAdvancedTabRows(to: root)
+            addLookTabRows(to: content, draft: draft)
         case "privacy":
-            addPrivacyTabRows(to: root)
+            addPrivacyTabRows(to: content)
+        case "app":
+            addAppTabRows(to: content)
         default:
-            addGeneralTabRows(to: root, draft: draft)
+            addDictationTabRows(to: content, draft: draft)
         }
+        root.addArrangedSubview(content)
 
         let background = PaperBackgroundView()
         background.fill = SD.C.settingsPaper
@@ -574,10 +577,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             root.bottomAnchor.constraint(lessThanOrEqualTo: background.bottomAnchor),
         ])
 
-        let innerWidthInset = -(root.edgeInsets.left + root.edgeInsets.right)
         for view in root.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: root.widthAnchor,
-                                        constant: innerWidthInset).isActive = true
+            view.widthAnchor.constraint(equalTo: root.widthAnchor).isActive = true
+        }
+        let contentInset = -(content.edgeInsets.left + content.edgeInsets.right)
+        for view in content.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: content.widthAnchor,
+                                        constant: contentInset).isActive = true
         }
         return background
     }
@@ -590,10 +596,27 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // ширине окна (многострочные подписи).
         let widthPin = root.widthAnchor.constraint(equalToConstant: width)
         widthPin.isActive = true
-        root.layoutSubtreeIfNeeded()
-        // Второй проход: переносимые подписи узнают свою ширину в layout()
-        // первого прохода, и только после него intrinsic-высота честная.
-        root.layoutSubtreeIfNeeded()
+        // Переносимая подпись узнаёт свою ширину в layout() — из фрейма
+        // контрола, а не из констрейнтов. Пока у контейнера нет фрейма,
+        // фреймы детей нулевые, перенос не случается, и высота считается по
+        // однострочной подписи: вторая строка потом налезала на разделитель.
+        // Поэтому сначала даём заведомо просторный фрейм, раскладываемся —
+        // и только потом меряем. Крутим до устойчивой высоты: перенос одной
+        // строки может сдвинуть соседнюю.
+        let probeHeight = MAIN_WINDOW_SIZE.height * 3
+        view.frame = NSRect(x: 0, y: 0, width: width, height: probeHeight)
+        // Проходов именно несколько, и выйти по «высота не изменилась» нельзя:
+        // перенос проявляется только на третьем. Первый даёт строке фрейм,
+        // второй в layout() выставляет ширину переноса, и лишь третий видит
+        // двухстрочную подпись. Ранний выход по совпадению первых двух
+        // замеров возвращал высоту на строку меньше — и стек, у которого
+        // строка сжимаема, съедал у неё нижний отступ: подпись налезала на
+        // разделитель.
+        for _ in 0..<4 {
+            view.layoutSubtreeIfNeeded()
+            _ = root.fittingSize
+        }
+        view.layoutSubtreeIfNeeded()
         let fitting = root.fittingSize.height
         widthPin.isActive = false
         return max(404, ceil(fitting))
@@ -602,21 +625,18 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     // MARK: - Вкладки настроек (дизайн 2c, адаптировано)
 
     private func settingsTabBar() -> NSView {
-        let wrapper = NSView()
+        // Полоса вкладок — своя поверхность с линией снизу: пять вкладок
+        // прижаты к левому краю, как строки под ними, а не парят по центру.
+        let wrapper = PaperBackgroundView()
+        wrapper.fill = SD.C.listPaper
         let bar = NSStackView()
         bar.orientation = .horizontal
         bar.spacing = 2
-        let tabs = [("general", t("Основное", "General")),
-                    ("hotkeys", t("Диктовка", "Dictation")),
-                    ("model", t("Модель", "Model")),
-                    ("dict", t("Словарь", "Dictionary")),
-                    ("look", t("Внешний вид", "Appearance")),
-                    ("advanced", t("Продвинутые", "Advanced")),
-                    ("privacy", t("Приватность", "Privacy"))]
         // Макет: таб padding 5px 12px, радиус 7, шрифт 12; активный —
         // 600, ink, пилюля rgba(0,0,0,.08)/rgba(255,255,255,.1);
         // неактивный — 400 graphite. Ряд: padding 10px 0.
-        for (id, title) in tabs {
+        for tab in SETTINGS_TABS {
+            let (id, title) = (tab.id, tab.title(language))
             let button = SDTabButton(title: title, target: self,
                                      action: #selector(settingsTabClicked(_:)))
             button.isBordered = false
@@ -631,11 +651,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             bar.addArrangedSubview(button)
         }
         bar.translatesAutoresizingMaskIntoConstraints = false
+        let hairline = SDHairlineView()
+        hairline.translatesAutoresizingMaskIntoConstraints = false
         wrapper.addSubview(bar)
+        wrapper.addSubview(hairline)
         NSLayoutConstraint.activate([
-            wrapper.heightAnchor.constraint(equalToConstant: 47),
-            bar.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
+            wrapper.heightAnchor.constraint(equalToConstant: 44),
+            bar.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 16),
+            bar.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor,
+                                          constant: -16),
             bar.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor),
+            hairline.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            hairline.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            hairline.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            hairline.heightAnchor.constraint(equalToConstant: 1),
         ])
         return wrapper
     }
@@ -647,112 +676,77 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refresh(force: true)
     }
 
-    private func addGeneralTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
+    // MARK: Вкладка «Диктовка» — всё, что происходит до текста
+
+    private func addDictationTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
         let missingPermissions = Permission.allCases.filter { !Permissions.isGranted($0) }
         if !missingPermissions.isEmpty {
             root.addArrangedSubview(compactPermissionsCard())
         }
 
-        // Язык интерфейса включался только через defaults write — английский
-        // интерфейс существовал целиком и был недостижим.
-        let interfacePills = SDPills(options: [
-            .init(title: "Русский", value: InterfaceLanguage.russian.rawValue),
-            .init(title: "English", value: InterfaceLanguage.english.rawValue),
-        ], selected: settings.interfaceLanguage.rawValue)
-        interfacePills.onSelect = { [weak self] raw in
-            guard let self, let chosen = InterfaceLanguage(rawValue: raw) else { return }
-            self.settings.interfaceLanguage = chosen
+        var startRows: [NSView] = [
+            SDRowView(
+                title: t("Начать и остановить диктовку", "Start and stop dictation"),
+                subtitle: t("Работает в любом приложении, пока служба включена",
+                            "Works in any app while the service is running"),
+                control: hotkeyControl(shortcut: draft.dictationHotkey, kind: .dictation),
+                style: .card
+            ),
+        ]
+
+        // Режим клавиши жил только в старом меню («Trigger») — по-английски и
+        // не там, где настраивают саму клавишу.
+        let triggerPills = SDPills(options: [
+            .init(title: t("Удерживать", "Hold"), value: TriggerMode.hold.rawValue),
+            .init(title: t("Переключать", "Toggle"), value: TriggerMode.toggle.rawValue),
+        ], selected: settings.triggerMode.rawValue)
+        triggerPills.onSelect = { [weak self] raw in
+            guard let mode = TriggerMode(rawValue: raw) else { return }
+            self?.settings.triggerMode = mode
+        }
+        startRows.append(SDRowView(
+            title: t("Режим клавиши", "Key behavior"),
+            subtitle: t("Удерживать — запись, пока клавиша зажата. Переключать — "
+                        + "нажатие включает, следующее выключает",
+                        "Hold records while the key is down. Toggle starts on one "
+                        + "press and stops on the next"),
+            control: triggerPills,
+            style: .card
+        ))
+
+        // Тумблер существовал только как ключ в настройках: выключить
+        // альтернативное завершение из интерфейса было нельзя вовсе.
+        let altToggle = SDToggle()
+        altToggle.isOn = draft.alternateCompletionEnabled
+        altToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            var draft = self.settingsDraft ?? ControlPanelSettingsDraft(settings: self.settings)
+            draft.alternateCompletionEnabled = enabled
+            self.settingsDraft = draft
+            self.hotkeyNotice = self.settingsValidationMessage(draft)
+            self.scheduleSettingsApply(after: 0.15)
             self.refresh(force: true)
         }
-        root.addArrangedSubview(SDRowView(
-            title: t("Язык интерфейса", "Interface language"),
-            control: interfacePills
+        startRows.append(SDRowView(
+            title: t("Отдельное сочетание для завершения", "Separate finish shortcut"),
+            subtitle: t("Второе сочетание завершает диктовку противоположным действием",
+                        "A second shortcut finishes dictation with the opposite action"),
+            control: altToggle,
+            style: .card
         ))
+        // Сочетание — условие тумблера над ним, а не самостоятельная строка:
+        // вложенность видна отступом, и объяснять её словами не приходится.
+        if draft.alternateCompletionEnabled {
+            startRows.append(SDRowView(
+                title: t("Сочетание завершения", "Finish shortcut"),
+                control: hotkeyControl(shortcut: draft.alternateCompletionHotkey,
+                                       kind: .alternateCompletion),
+                style: .cardNested
+            ))
+        }
+        root.addArrangedSubview(settingsGroup(t("Как начать", "How it starts"), rows: startRows))
 
-        // Два разных «входа в систему», которые носили одну подпись: тумблер
-        // службы (она стартует при входе сама, пока включена) и логин-айтем
-        // окна. Смешение обещало одно, а делало другое — аудит №16.
-        let running = DictorAgentService.isAgentRunning()
-        let serviceToggle = SDToggle()
-        serviceToggle.isOn = running && settings.agentEnabled
-        serviceToggle.onToggle = { [weak self] enabled in
-            guard let self else { return }
-            if enabled {
-                self.startAgentClicked(NSButton())
-            } else {
-                self.stopAgentClicked(NSButton())
-                self.refresh(force: true)
-            }
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Служба диктовки", "Dictation service"),
-            subtitle: t("Слушает хоткей в фоне, без окон, и запускается при входе в систему",
-                        "Listens for the hotkey in the background, no windows, and starts at login"),
-            control: serviceToggle
-        ))
-
-        let loginItemStatus = SMAppService.mainApp.status
-        let loginToggle = SDToggle()
-        loginToggle.isOn = loginItemStatus == .enabled || loginItemStatus == .requiresApproval
-        loginToggle.onToggle = { [weak self] enabled in
-            guard let self else { return }
-            do {
-                if enabled {
-                    try SMAppService.mainApp.register()
-                    log("panel login item enabled")
-                } else {
-                    try SMAppService.mainApp.unregister()
-                    log("panel login item disabled")
-                }
-            } catch {
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = self.t("Не удалось изменить объект входа",
-                                           "Login item couldn't be changed")
-                alert.informativeText = error.localizedDescription
-                alert.addButton(withTitle: "OK")
-                alert.runModal()
-            }
-            self.refresh(force: true)
-        }
-        let loginSubtitle = loginItemStatus == .requiresApproval
-            ? t("Ждёт одобрения: Системные настройки → Основные → Объекты входа",
-                "Waiting for approval: System Settings → General → Login Items")
-            : t("Не нужно для самой диктовки — служба выше стартует сама",
-                "Not needed for dictation itself — the service above starts on its own")
-        root.addArrangedSubview(SDRowView(
-            title: t("Открывать это окно при входе", "Open this window at login"),
-            subtitle: loginSubtitle,
-            control: loginToggle
-        ))
-
-        // Полный список языков раньше жил только в меню по правому клику.
-        // Подписи ведут с алфавита: настройка ограничивает алфавит вывода,
-        // и «Кириллица» для английской речи означает «инглиш по-русски».
-        let languagePopup = NSPopUpButton()
-        for option in dictationLanguageMenuOrder() {
-            if option == dictationLanguageMenuOrder().dropFirst(3).first {
-                languagePopup.menu?.addItem(.separator())
-            }
-            languagePopup.addItem(withTitle: dictationLanguageMenuTitle(
-                option, interfaceLanguage: language))
-            languagePopup.lastItem?.representedObject = option.rawValue
-        }
-        if let index = languagePopup.itemArray.firstIndex(where: {
-            ($0.representedObject as? String) == settings.dictationLanguage.rawValue
-        }) {
-            languagePopup.selectItem(at: index)
-        }
-        languagePopup.target = self
-        languagePopup.action = #selector(selectDictationLanguageFromPanel(_:))
-        root.addArrangedSubview(SDRowView(
-            title: t("Алфавит вывода", "Output script"),
-            subtitle: t("Авто — смешанная речь. Кириллица — английские слова "
-                        + "запишутся по-русски",
-                        "Auto handles mixed speech. Cyrillic makes English words "
-                        + "come out in Russian letters"),
-            control: SDFieldButton(popup: languagePopup)
-        ))
+        var inputRows: [NSView] = []
 
         let microphonePopup = NSPopUpButton()
         microphonePopup.addItem(withTitle: t("Системный по умолчанию", "System default"))
@@ -778,13 +772,43 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             microphoneSubtitle = t("\(failed) отказал — запись идёт с системного входа",
                                    "\(failed) failed — recording from the system default input")
         } else {
-            microphoneSubtitle = t("Если пропадёт — вернёмся к встроенному",
-                                   "Falls back to the built-in mic if it disappears")
+            microphoneSubtitle = t("Если этот пропадёт — вернёмся ко встроенному",
+                                   "Falls back to the built-in mic if this one disappears")
         }
-        root.addArrangedSubview(SDRowView(
+        inputRows.append(SDRowView(
             title: t("Микрофон", "Microphone"),
             subtitle: microphoneSubtitle,
-            control: SDFieldButton(popup: microphonePopup)
+            control: SDFieldButton(popup: microphonePopup),
+            style: .card
+        ))
+
+        // Полный список языков раньше жил только в меню по правому клику.
+        // Подписи ведут с алфавита: настройка ограничивает алфавит вывода,
+        // и «Кириллица» для английской речи означает «инглиш по-русски».
+        let languagePopup = NSPopUpButton()
+        for option in dictationLanguageMenuOrder() {
+            if option == dictationLanguageMenuOrder().dropFirst(3).first {
+                languagePopup.menu?.addItem(.separator())
+            }
+            languagePopup.addItem(withTitle: dictationLanguageMenuTitle(
+                option, interfaceLanguage: language))
+            languagePopup.lastItem?.representedObject = option.rawValue
+        }
+        if let index = languagePopup.itemArray.firstIndex(where: {
+            ($0.representedObject as? String) == settings.dictationLanguage.rawValue
+        }) {
+            languagePopup.selectItem(at: index)
+        }
+        languagePopup.target = self
+        languagePopup.action = #selector(selectDictationLanguageFromPanel(_:))
+        inputRows.append(SDRowView(
+            title: t("Алфавит вывода", "Output script"),
+            subtitle: t("Авто — смешанная речь. Кириллица — английские слова "
+                        + "запишутся по-русски",
+                        "Auto handles mixed speech. Cyrillic makes English words "
+                        + "come out in Russian letters"),
+            control: SDFieldButton(popup: languagePopup),
+            style: .card
         ))
 
         // Глушение жило только в старом меню («Mute system audio…»).
@@ -793,11 +817,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         muteToggle.onToggle = { [weak self] enabled in
             self?.settings.muteWhileRecording = enabled
         }
-        root.addArrangedSubview(SDRowView(
+        inputRows.append(SDRowView(
             title: t("Глушить звук во время записи", "Mute audio while recording"),
             subtitle: t("Музыка и уведомления приглушаются, чтобы не попасть в диктовку",
                         "Music and alerts are ducked so they don't leak into the dictation"),
-            control: muteToggle
+            control: muteToggle,
+            style: .card
         ))
 
         let soundsToggle = SDToggle()
@@ -805,35 +830,55 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         soundsToggle.onToggle = { [weak self] enabled in
             self?.settings.playFeedbackSounds = enabled
         }
-        root.addArrangedSubview(SDRowView(
-            title: t("Звуки", "Sounds"),
-            subtitle: t("Сигналы начала, конца и ошибки диктовки",
+        inputRows.append(SDRowView(
+            title: t("Звуки диктовки", "Dictation sounds"),
+            subtitle: t("Сигналы начала, конца и ошибки",
                         "Cues for start, finish and errors"),
-            control: soundsToggle
+            control: soundsToggle,
+            style: .card
         ))
+        root.addArrangedSubview(settingsGroup(t("Чем слушаем", "What listens"),
+                                              rows: inputRows))
 
-        // Выключить автопроверку было можно и раньше — но только через меню по
-        // правому клику на иконке в строке меню. Первый же человек со стороны
-        // попросил «чтобы проверку обновлений можно было убрать»: настройка,
-        // которую нельзя найти там, где её ищут, всё равно что отсутствует.
-        let updatesToggle = SDToggle()
-        updatesToggle.isOn = settings.checkForUpdates
-        updatesToggle.onToggle = { [weak self] enabled in
-            guard let self else { return }
-            self.settings.checkForUpdates = enabled
-            log("update checks \(enabled ? "enabled" : "disabled") from settings")
-            self.refresh(force: true)
+        if let notice = hotkeyNotice {
+            let noticeLabel = panelLabel(notice, size: 11.5, weight: .medium, color: SD.C.voice)
+            noticeLabel.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
+                - MAIN_WINDOW_SIDEBAR_WIDTH - 100
+            root.addArrangedSubview(noticeLabel)
         }
-        root.addArrangedSubview(SDRowView(
-            title: t("Проверять обновления", "Check for updates"),
-            subtitle: t("Раз в 6 часов приложение спрашивает номер последней версии. "
-                        + "Выключите — и оно само в сеть не ходит.",
-                        "Every 6 hours the app asks for the latest version number. "
-                        + "Turn it off and it stops going online on its own."),
-            control: updatesToggle
-        ))
+        root.addArrangedSubview(settingsFootnote(
+            t("Микрофон и алфавит вывода продублированы в панели меню-бара. Это осознанный дубль: их меняют в момент диктовки, а не в момент настройки.",
+              "The microphone and the output script are also in the menu-bar panel. That duplicate is deliberate: they get changed while dictating, not while configuring.")))
+    }
 
-        root.addArrangedSubview(versionRow())
+    /// Сноска под группами: точка-маркер и приглушённый текст. Место для
+    /// правды, которая не является настройкой, — например про осознанный
+    /// дубль в другом месте интерфейса.
+    private func settingsFootnote(_ text: String) -> NSView {
+        let dot = PaperBackgroundView()
+        dot.fill = SD.C.subtle
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 2.5
+        dot.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = panelLabel(text, size: 11.5, color: SD.C.subtle)
+        label.preferredMaxLayoutWidth = 600
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let wrapper = NSView()
+        wrapper.addSubview(dot)
+        wrapper.addSubview(label)
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 2),
+            dot.topAnchor.constraint(equalTo: wrapper.topAnchor, constant: 5),
+            dot.widthAnchor.constraint(equalToConstant: 5),
+            dot.heightAnchor.constraint(equalToConstant: 5),
+            label.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 9),
+            label.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor),
+            label.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+        ])
+        return wrapper
     }
 
     /// Версия и проверка обновлений. Ни того, ни другого в интерфейсе не было:
@@ -887,7 +932,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return SDRowView(title: t("Версия", "Version"),
                          subtitle: subtitle,
                          control: control,
-                         hairline: false)
+                         style: .card)
     }
 
     @objc private func updateRowButtonClicked(_ sender: NSButton) {
@@ -911,57 +956,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         settings.dictationLanguage = chosen
     }
 
-    private func addHotkeyTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        root.addArrangedSubview(SDRowView(
-            title: t("Начать / остановить диктовку", "Start / stop dictation"),
-            control: hotkeyControl(shortcut: draft.dictationHotkey, kind: .dictation)
-        ))
+    // MARK: Вкладка «Текст» — в каком виде придёт сказанное
 
-        // Режим клавиши жил только в старом меню («Trigger») — по-английски и
-        // не там, где настраивают саму клавишу.
-        let triggerPills = SDPills(options: [
-            .init(title: t("Удерживать", "Hold"), value: TriggerMode.hold.rawValue),
-            .init(title: t("Переключать", "Toggle"), value: TriggerMode.toggle.rawValue),
-        ], selected: settings.triggerMode.rawValue)
-        triggerPills.onSelect = { [weak self] raw in
-            guard let mode = TriggerMode(rawValue: raw) else { return }
-            self?.settings.triggerMode = mode
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Режим клавиши", "Key behavior"),
-            subtitle: t("Удерживать — запись, пока клавиша зажата. Переключать — "
-                        + "нажатие включает, следующее выключает",
-                        "Hold records while the key is down. Toggle starts on one "
-                        + "press and stops on the next"),
-            control: triggerPills
-        ))
-
-        // Тумблер существовал только как ключ в настройках: выключить
-        // альтернативное завершение из интерфейса было нельзя вовсе.
-        let altToggle = SDToggle()
-        altToggle.isOn = draft.alternateCompletionEnabled
-        altToggle.onToggle = { [weak self] enabled in
-            guard let self else { return }
-            var draft = self.settingsDraft ?? ControlPanelSettingsDraft(settings: self.settings)
-            draft.alternateCompletionEnabled = enabled
-            self.settingsDraft = draft
-            self.hotkeyNotice = self.settingsValidationMessage(draft)
-            self.scheduleSettingsApply(after: 0.15)
-            self.refresh(force: true)
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Альтернативное завершение", "Alternative finish"),
-            subtitle: t("Второе сочетание завершает диктовку противоположным действием",
-                        "A second shortcut finishes dictation with the opposite action"),
-            control: altToggle
-        ))
-        if draft.alternateCompletionEnabled {
-            root.addArrangedSubview(SDRowView(
-                title: t("Сочетание завершения", "Finish shortcut"),
-                control: hotkeyControl(shortcut: draft.alternateCompletionHotkey,
-                                       kind: .alternateCompletion)
-            ))
-        }
+    private func addTextTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
+        var insertedRows: [NSView] = []
 
         let completionPills = SDPills(options: [
             .init(title: t("Ничего", "Nothing"), value: DictationCompletionBehavior.insert.rawValue),
@@ -975,10 +973,16 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             // хоткея применит черновик со вчерашним значением поверх только
             // что сделанного выбора.
             self.settingsDraft?.primaryCompletionBehavior = behavior
+            // Задержка ниже приглушается и оживает вместе с выбором —
+            // перерисовываем, иначе строка врёт про своё состояние.
+            self.refresh(force: true)
         }
-        root.addArrangedSubview(SDRowView(
+        insertedRows.append(SDRowView(
             title: t("После вставки текста", "After inserting text"),
-            control: completionPills
+            subtitle: t("Enter отправляет сообщение в мессенджерах и почте",
+                        "Enter sends the message in chat apps and mail"),
+            control: completionPills,
+            style: .card
         ))
 
         let delayStepper = SDStepperRow(value: settings.enterDelayMilliseconds,
@@ -989,12 +993,23 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             self?.settings.enterDelayMilliseconds = value
             self?.settingsDraft?.enterDelayMilliseconds = value
         }
-        root.addArrangedSubview(SDRowView(
+        // Задержка осмысленна только рядом с Enter. Раньше она стояла в
+        // полную силу всегда — настройка, которая ни на что не влияет, но
+        // выглядит рабочей, читается как поломка.
+        let enterChosen = settings.primaryCompletionBehavior == .insertAndEnter
+        let delayRow = SDRowView(
             title: t("Задержка перед Enter", "Delay before Enter"),
-            subtitle: t("Пауза между вставкой и подтверждением",
-                        "Pause between inserting and confirming"),
-            control: delayStepper
-        ))
+            subtitle: enterChosen
+                ? t("Пауза между вставкой и подтверждением",
+                    "Pause between inserting and confirming")
+                : t("Заработает, когда выбрано «Нажать Enter»",
+                    "Takes effect once “Press Enter” is chosen"),
+            control: delayStepper,
+            style: .card
+        )
+        delayStepper.isEnabled = enterChosen
+        delayRow.alphaValue = enterChosen ? 1 : 0.55
+        insertedRows.append(delayRow)
 
         // «After Pasting» из старого меню: что дописать после вставленного
         // текста. Пробел стоит по умолчанию, чтобы следующая диктовка не
@@ -1008,29 +1023,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             guard let suffix = PasteSuffix(rawValue: raw) else { return }
             self?.settings.pasteSuffix = suffix
         }
-        root.addArrangedSubview(SDRowView(
+        insertedRows.append(SDRowView(
             title: t("После текста добавлять", "Append after the text"),
-            control: suffixPills
+            subtitle: t("Чтобы следующая диктовка не склеилась с этой",
+                        "So the next dictation doesn't run into this one"),
+            control: suffixPills,
+            style: .card
         ))
+        root.addArrangedSubview(settingsGroup(t("Когда текст вставлен", "Once the text is in"),
+                                              rows: insertedRows))
 
-        // Кнопки «Сохранить» в макете нет: записанное сочетание применяется
-        // само, служба перезапускается следом.
-        if let notice = hotkeyNotice {
-            let noticeLabel = panelLabel(notice, size: 11.5, weight: .medium, color: SD.C.voice)
-            noticeLabel.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
-                - MAIN_WINDOW_SIDEBAR_WIDTH - 100
-            root.setCustomSpacing(12, after: root.arrangedSubviews.last ?? noticeLabel)
-            root.addArrangedSubview(noticeLabel)
-        }
-        let hint = panelLabel(
-            t("Клик по «Изменить» — поле слушает клавиши. Esc отменяет. Новое сочетание начинает работать через секунду, перезапускать ничего не нужно.",
-              "Click “Change” and press the new combo. Esc cancels. It starts working a second later — nothing needs restarting."),
-            size: 11, color: SD.C.graphite)
-        hint.preferredMaxLayoutWidth = MAIN_WINDOW_SIZE.width
-            - MAIN_WINDOW_SIDEBAR_WIDTH - 100
-        root.setCustomSpacing(14, after: root.arrangedSubviews.last ?? hint)
-        root.addArrangedSubview(hint)
+        addTextCleanupGroup(to: root)
+        addTextDictionaryGroup(to: root)
     }
+
 
     private func hotkeyControl(shortcut: HotkeyChoice, kind: ControlPanelShortcutKind) -> NSView {
         let caps = SDKeycaps(keys: keycapLabels(for: shortcut, language: language))
@@ -1047,145 +1053,97 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return stack
     }
 
-    private func addModelTabRows(to root: NSStackView) {
-        // Карточка одна. Вторая («Parakeet Unified») обещала выбор, которого
-        // нет: профиль выведен из производства, сеттер молча нормализует его
-        // обратно, и «Выбрать» стоила человеку перезапуска службы с нулевым
-        // эффектом (аудит №15). Неактивная карточка — обещание, которое
-        // программа не собирается выполнять.
-        let profile = SpeechModelProfile.productionDefault
-        let card = SDModelCard(
-            title: profile.shortName + " · " + t("используется", "in use"),
-            detail: t("~460 МБ · русский, английский и ещё 16 языков · Neural Engine",
-                      "~460 MB · Russian, English and 16 more · Neural Engine"),
-            active: true,
-            actionTitle: nil,
-            target: nil,
-            action: nil,
-            identifier: profile.rawValue
-        )
-        root.addArrangedSubview(card)
-        if let lastCard = root.arrangedSubviews.last {
-            root.setCustomSpacing(12, after: lastCard)
-        }
-        let note = panelLabel(
-            t("Модель работает целиком на этом Mac. Скачивается с huggingface.co при установке — и заново, если кэш повреждён.",
-              "The model runs entirely on this Mac. It downloads from huggingface.co at setup — and again if the cache is damaged."),
-            size: 11, color: SD.C.graphite)
-        root.addArrangedSubview(note)
-    }
-
-    private func addDictTabRows(to root: NSStackView) {
-        let addButton = NSButton(title: "+ " + t("Добавить", "Add"),
-                                 target: self,
-                                 action: #selector(addCorrectionFromPanel(_:)))
-        addButton.isBordered = false
-        addButton.font = .systemFont(ofSize: 12, weight: .semibold)
-        addButton.contentTintColor = SD.C.voice
-        let headerRow = NSStackView(views: [
-            panelLabel(t("Автозамены после распознавания", "Corrections applied after transcription"),
-                       size: 12, color: SD.C.graphite),
-            NSView(),
-            addButton,
-        ])
-        headerRow.orientation = .horizontal
-        headerRow.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 10, right: 0)
-        root.addArrangedSubview(headerRow)
-
-        let corrections = settings.transcriptCorrections
-        if corrections.isEmpty {
-            root.addArrangedSubview(panelLabel(
-                t("Пока пусто. Добавьте термины, которые модель слышит неправильно.",
-                  "Empty so far. Add terms the model keeps mishearing."),
-                size: 12, color: SD.C.graphite))
-        }
-        // Макет: строка словаря — padding 10px 0, слово 13px ink слева,
-        // приглушённая аннотация 11px справа, hairline снизу.
-        for (index, correction) in corrections.prefix(8).enumerated() {
-            let annotation = panelLabel("«\(correction.source)»", size: 11, color: SD.C.subtle)
-            let remove = NSButton(title: "✕", target: self,
-                                  action: #selector(removeCorrectionFromPanel(_:)))
-            remove.isBordered = false
-            remove.font = .systemFont(ofSize: 11)
-            remove.contentTintColor = SD.C.graphite
-            remove.tag = index
-            let right = NSStackView(views: [annotation, remove])
-            right.orientation = .horizontal
-            right.spacing = 10
-            root.addArrangedSubview(SDRowView(
-                title: correction.replacement,
-                control: right,
-                verticalPadding: 10
-            ))
-        }
-        if corrections.count > 8 {
-            root.addArrangedSubview(panelLabel(
-                t("…и ещё \(corrections.count - 8). Полный список — в разделе «Словарь».",
-                  "…and \(corrections.count - 8) more. Full list in the Dictionary section."),
-                size: 11, color: SD.C.subtle))
-        }
-
+    /// «Чистится само» — встроенные правки, которые применяются без участия
+    /// человека. Раньше жили вкладкой «Словарь» вперемешку со своим списком
+    /// замен; это тоже вид текста, а не работа со словарём.
+    private func addTextCleanupGroup(to root: NSStackView) {
         let fillerToggle = SDToggle()
         fillerToggle.isOn = settings.removeFillerWords
         fillerToggle.onToggle = { [weak self] enabled in
             self?.settings.removeFillerWords = enabled
         }
-        root.addArrangedSubview(SDRowView(
+        let fillerRow = SDRowView(
             title: t("Убирать слова-паразиты", "Remove filler words"),
             subtitle: t("«Эээ», «ммм» и подобное исчезают из текста",
                         "“Uh”, “um” and similar vanish from the text"),
-            control: fillerToggle
-        ))
+            control: fillerToggle,
+            style: .card
+        )
 
-        // Встроенные наборы дублируют карточки раздела «Словарь» сайдбара —
-        // сознательно: раньше вкладка и раздел показывали разные подмножества
-        // словарных настроек, и человек, открывший одно из двух, был уверен,
-        // что видел всё (аудит, мелочь №13). Теперь вкладка полна, а обе
-        // копии синхронизирует отпечаток перерисовки.
+        // Тумблеры встроенных наборов живут здесь и только здесь: карточки-
+        // дубли в разделе «Словарь» сняты. Два места для одной настройки
+        // неизбежно расходятся — сначала подписью, потом поведением.
         let spellingsToggle = SDToggle()
         spellingsToggle.isOn = settings.builtInSpellingsEnabled
         spellingsToggle.onToggle = { [weak self] enabled in
             self?.settings.builtInSpellingsEnabled = enabled
         }
-        root.addArrangedSubview(SDRowView(
+        let spellingsRow = SDRowView(
             title: t("Написание названий", "Name spelling"),
-            subtitle: t("postgres → PostgreSQL, sql → SQL, macos → macOS",
-                        "postgres → PostgreSQL, sql → SQL, macos → macOS"),
-            control: spellingsToggle
-        ))
+            subtitle: t("\(BuiltInSpellings.count) названий: postgres → PostgreSQL · sql → SQL · macos → macOS",
+                        "\(BuiltInSpellings.count) names: postgres → PostgreSQL · sql → SQL · macos → macOS"),
+            control: spellingsToggle,
+            style: .card
+        )
 
         let latinToggle = SDToggle()
         latinToggle.isOn = settings.latinTermRestorationsEnabled
         latinToggle.onToggle = { [weak self] enabled in
             self?.settings.latinTermRestorationsEnabled = enabled
         }
-        root.addArrangedSubview(SDRowView(
+        let latinRow = SDRowView(
             title: t("Названия латиницей", "Names in Latin script"),
-            subtitle: t("гитхаб → GitHub, постгрес → PostgreSQL",
-                        "гитхаб → GitHub, постгрес → PostgreSQL"),
-            control: latinToggle
-        ))
+            subtitle: t("\(LatinTermRestorations.count) названий: гитхаб → GitHub · постгрес → PostgreSQL",
+                        "\(LatinTermRestorations.count) names: гитхаб → GitHub · постгрес → PostgreSQL"),
+            control: latinToggle,
+            style: .card
+        )
+
+        root.addArrangedSubview(settingsGroup(t("Чистится само", "Cleaned up automatically"),
+                                              rows: [fillerRow, spellingsRow, latinRow]))
+    }
+
+    /// «Свой словарь» — настройки списка замен и явная дверь в сам список.
+    /// Список остался разделом окна: с ним работают долго, как с историей,
+    /// и строкой настроек он не притворяется.
+    private func addTextDictionaryGroup(to root: NSStackView) {
+        let count = settings.transcriptCorrections.count
+        let openButton = panelButton(t("Открыть словарь", "Open dictionary"),
+                                     action: #selector(openDictionarySectionFromPanel(_:)))
+        let listRow = SDRowView(
+            title: t("Список автозамен", "Correction list"),
+            subtitle: count == 0
+                ? t("Пока пусто — сам список живёт в разделе «Словарь»",
+                    "Empty so far — the list itself lives in the Dictionary section")
+                : t("\(count) \(pluralizeRU(count, "своя замена", "свои замены", "своих замен")) · сам список живёт в разделе «Словарь»",
+                    "\(count) own \(count == 1 ? "replacement" : "replacements") · the list itself lives in the Dictionary section"),
+            control: openButton,
+            style: .card
+        )
 
         // Синхронизация и перенос жили только в старом меню по правому клику —
         // то есть их не существовало ни для кого, кто в это меню не заглядывал.
         let syncPath = settings.transcriptCorrectionsSyncFile
+        let syncRow: SDRowView
         if syncPath.isEmpty {
-            root.addArrangedSubview(SDRowView(
+            syncRow = SDRowView(
                 title: t("Синхронизация файлом", "Sync through a file"),
                 subtitle: t("Файл в iCloud Drive или Dropbox держит словарь общим "
                             + "для нескольких Mac",
                             "A file in iCloud Drive or Dropbox keeps the dictionary "
                             + "shared between Macs"),
                 control: panelButton(t("Настроить…", "Set up…"),
-                                     action: #selector(setUpDictionarySyncFromPanel(_:)))
-            ))
+                                     action: #selector(setUpDictionarySyncFromPanel(_:))),
+                style: .card
+            )
         } else {
-            root.addArrangedSubview(SDRowView(
+            syncRow = SDRowView(
                 title: t("Синхронизация файлом", "Sync through a file"),
                 subtitle: (syncPath as NSString).abbreviatingWithTildeInPath,
                 control: panelButton(t("Отключить…", "Disconnect…"),
-                                     action: #selector(stopDictionarySyncFromPanel(_:)))
-            ))
+                                     action: #selector(stopDictionarySyncFromPanel(_:))),
+                style: .card
+            )
         }
 
         let transferButtons = NSStackView(views: [
@@ -1196,14 +1154,162 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         ])
         transferButtons.orientation = .horizontal
         transferButtons.spacing = 8
-        root.addArrangedSubview(SDRowView(
+        let transferRow = SDRowView(
             title: t("Перенос словаря", "Move the dictionary"),
-            subtitle: t("Файл автозамен можно переслать и импортировать на другом Mac",
-                        "The corrections file can be sent to and imported on another Mac"),
+            subtitle: t("Файлом — на другой Mac или в резерв",
+                        "As a file — to another Mac or to a backup"),
             control: transferButtons,
-            hairline: false
-        ))
+            style: .card
+        )
+
+        root.addArrangedSubview(settingsGroup(t("Свой словарь", "Your dictionary"),
+                                              rows: [listRow, syncRow, transferRow]))
     }
+
+    @objc private func openDictionarySectionFromPanel(_ sender: NSButton) {
+        mainSection = .dictionary
+        refresh(force: true)
+    }
+
+    @objc private func openServiceSectionFromPanel(_ sender: NSButton) {
+        mainSection = .service
+        refresh(force: true)
+    }
+
+    /// Автозапуск диктовки. Включение поднимает службу сразу — ждать входа в
+    /// систему, чтобы проверить, что тумблер сработал, никто не станет.
+    /// Выключение только снимает автозапуск: живую службу не трогаем, иначе
+    /// строка под заголовком «При входе в систему» делала бы вторую вещь
+    /// молча — ту самую путаницу, ради которой её и разделили.
+    private func setDictationAutostart(_ enabled: Bool) {
+        settings.agentEnabled = enabled
+        _ = settings.refreshFromDisk()
+        if enabled {
+            beginServiceOperation(.starting)
+        } else {
+            DictorAgentService.disableAutostart()
+            refresh(force: true)
+        }
+    }
+
+    // MARK: Вкладка «Приложение» — про сам продукт, а не про диктовку
+
+    private func addAppTabRows(to root: NSStackView) {
+        // Язык интерфейса включался только через defaults write — английский
+        // интерфейс существовал целиком и был недостижим.
+        let interfacePills = SDPills(options: [
+            .init(title: "Русский", value: InterfaceLanguage.russian.rawValue),
+            .init(title: "English", value: InterfaceLanguage.english.rawValue),
+        ], selected: settings.interfaceLanguage.rawValue)
+        interfacePills.onSelect = { [weak self] raw in
+            guard let self, let chosen = InterfaceLanguage(rawValue: raw) else { return }
+            self.settings.interfaceLanguage = chosen
+            self.refresh(force: true)
+        }
+        root.addArrangedSubview(settingsGroup(nil, rows: [SDRowView(
+            title: t("Язык интерфейса", "Interface language"),
+            subtitle: t("Языки диктовки от этого не зависят — они в «Диктовке»",
+                        "Dictation languages are separate — they live in Dictation"),
+            control: interfacePills,
+            style: .card
+        )]))
+
+        // Две разные вещи, которые носили одну подпись: автозапуск службы и
+        // логин-айтем окна (аудит №16). Тумблер службы значил вдобавок третье
+        // — «включена сейчас»; это состояние, и оно уехало в панель меню-бара.
+        let autostartToggle = SDToggle()
+        autostartToggle.isOn = settings.agentEnabled
+        autostartToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            self.setDictationAutostart(enabled)
+        }
+        let autostartRow = SDRowView(
+            title: t("Запускать диктовку в фоне", "Start dictation in the background"),
+            subtitle: t("Служба поднимается вместе с системой и слушает хоткей — без окон",
+                        "The service comes up with the system and listens for the hotkey — no windows"),
+            control: autostartToggle,
+            style: .card
+        )
+
+        let loginItemStatus = SMAppService.mainApp.status
+        let loginToggle = SDToggle()
+        loginToggle.isOn = loginItemStatus == .enabled || loginItemStatus == .requiresApproval
+        loginToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            do {
+                if enabled {
+                    try SMAppService.mainApp.register()
+                    log("panel login item enabled")
+                } else {
+                    try SMAppService.mainApp.unregister()
+                    log("panel login item disabled")
+                }
+            } catch {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = self.t("Не удалось изменить объект входа",
+                                           "Login item couldn't be changed")
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+            self.refresh(force: true)
+        }
+        let loginSubtitle = loginItemStatus == .requiresApproval
+            ? t("Ждёт одобрения: Системные настройки → Основные → Объекты входа",
+                "Waiting for approval: System Settings → General → Login Items")
+            : t("Только окно. Диктовка работает и без него",
+                "The window only. Dictation works without it")
+        let loginRow = SDRowView(
+            title: t("Открывать это окно", "Open this window"),
+            subtitle: loginSubtitle,
+            control: loginToggle,
+            style: .card
+        )
+        root.addArrangedSubview(settingsGroup(t("При входе в систему", "At login"),
+                                              rows: [autostartRow, loginRow]))
+        root.addArrangedSubview(settingsFootnote(
+            t("Здесь только автозапуск. Приостановить диктовку прямо сейчас — тумблером в панели меню-бара: служба остаётся на месте, хоткей молчит.",
+              "Autostart only. To pause dictation right now use the toggle in the menu-bar panel: the service stays, the hotkey goes quiet.")))
+
+        // Выключить автопроверку было можно и раньше — но только через меню по
+        // правому клику на иконке в строке меню. Первый же человек со стороны
+        // попросил «чтобы проверку обновлений можно было убрать»: настройка,
+        // которую нельзя найти там, где её ищут, всё равно что отсутствует.
+        let updatesToggle = SDToggle()
+        updatesToggle.isOn = settings.checkForUpdates
+        updatesToggle.onToggle = { [weak self] enabled in
+            guard let self else { return }
+            self.settings.checkForUpdates = enabled
+            log("update checks \(enabled ? "enabled" : "disabled") from settings")
+            self.refresh(force: true)
+        }
+        let updatesRow = SDRowView(
+            title: t("Проверять обновления", "Check for updates"),
+            subtitle: t("Раз в 6 часов приложение спрашивает номер последней версии. "
+                        + "Это единственный сетевой запрос — он же виден в «Приватности»",
+                        "Every 6 hours the app asks for the latest version number. "
+                        + "It is the only network request — Privacy shows the same one"),
+            control: updatesToggle,
+            style: .card
+        )
+        root.addArrangedSubview(settingsGroup(t("Обновления", "Updates"),
+                                              rows: [updatesRow, versionRow()]))
+
+        // Состояние службы вкладкой не является: переключать там нечего.
+        // Дверь оставляем здесь, где человек ищет «а где всё остальное».
+        root.addArrangedSubview(settingsGroup(nil, rows: [SDRowView(
+            title: t("Разрешения, модель, измерения и диагностика",
+                     "Permissions, model, measurements and diagnostics"),
+            subtitle: t("Это состояние, а не настройки — они в разделе «Служба»",
+                        "That is state, not preferences — it lives in the Service section"),
+            control: panelButton(t("Открыть «Службу»", "Open Service"),
+                                 action: #selector(openServiceSectionFromPanel(_:))),
+            style: .card
+        )]))
+    }
+
+
 
     @objc private func addCorrectionFromPanel(_ sender: NSButton) {
         _ = presentCorrectionDialog(heard: "")
@@ -1569,6 +1675,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         alert.runModal()
     }
 
+    // MARK: Вкладка «Приватность» — что уходит с этого Mac
+
     private func addPrivacyTabRows(to root: NSStackView) {
         // Витрина: волна + главное обещание продукта.
         let wave = QuickPanelWaveView()
@@ -1583,34 +1691,18 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // канал обновлений: раз в 6 часов приложение спрашивает версию.
         // Строка ниже говорит, сколько это запросов и за чем именно.
         let sub = panelLabel(
-            t("Запись, распознавание и история живут локально. В сеть Dictor выходит за моделью и за обновлениями.",
-              "Recording, transcription and history live locally. Dictor goes online for the model and for updates."),
+            t("Речь распознаётся моделью на этом компьютере. Ни звук, ни расшифровка никуда не отправляются.",
+              "Speech is transcribed by a model on this computer. Neither the audio nor the transcript is sent anywhere."),
             size: 12, color: SD.C.graphite)
         sub.maximumNumberOfLines = 2
         sub.alignment = .center
-        sub.preferredMaxLayoutWidth = 380
+        sub.preferredMaxLayoutWidth = 420
         let showcase = NSStackView(views: [wave, headline, sub])
         showcase.orientation = .vertical
         showcase.alignment = .centerX
         showcase.spacing = 8
-        // Макет: витрина padding 22px 0 18px + hairline снизу.
-        showcase.edgeInsets = NSEdgeInsets(top: 22, left: 0, bottom: 18, right: 0)
+        showcase.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 4, right: 0)
         root.addArrangedSubview(showcase)
-        showcase.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -48).isActive = true
-        root.addArrangedSubview(SDHairlineView())
-
-        // Значение было зашито как «0 — обновления отключены». Пока проверка
-        // стояла за мёртвым `return`, это была правда; в 1.1.0 канал включён,
-        // и строка стала бы враньём ровно в той вкладке, где человек решает,
-        // насколько приложению верить. Считаем по настройке.
-        root.addArrangedSubview(SDRowView(
-            title: t("Сетевые запросы", "Network requests"),
-            control: monoValueLabel(settings.checkForUpdates
-                ? t("1 раз в 6 ч — проверка обновлений",
-                    "once every 6 h — update check")
-                : t("0 — обновления отключены", "0 — updates disabled")),
-            verticalPadding: 12
-        ))
 
         // Раньше здесь стоял один переключатель «Выкл / 1 / 5 / 10» с
         // подписью «Хранить историю», и он врал: цифры никогда не были
@@ -1628,16 +1720,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // Подпись обещала «стереть» — а выключение только останавливает
         // запись новых текстов; стирает кнопка ниже. И «больше не
         // записывать» неточно в другую сторону: обезличенные счётчики
-        // статистики считаются в любом случае. Тумблер без подтверждения,
-        // молча уничтожающий 10 000 записей, был бы хуже неточной подписи —
-        // поэтому чинится подпись, а не поведение.
-        root.addArrangedSubview(SDRowView(
-            title: t("Хранить историю", "Keep history"),
-            subtitle: t("Локально, до \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .russian)) диктовок. Выключение останавливает запись текстов (счётчики статистики считаются в любом случае); стереть записанное — кнопкой ниже",
-                        "Locally, up to \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .english)) dictations. Switching off stops recording texts (anonymous statistics counters still run); erase what's stored with the button below"),
+        // статистики считаются в любом случае.
+        var diskRows: [NSView] = [SDRowView(
+            title: t("Хранить историю диктовок", "Keep dictation history"),
+            subtitle: t("Локально, до \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .russian)) записей. Выключение останавливает запись текстов; счётчики статистики считаются в любом случае",
+                        "Locally, up to \(groupedNumberLabel(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES, language: .english)) entries. Switching off stops recording texts; statistics counters keep running either way"),
             control: historyToggle,
-            verticalPadding: 12
-        ))
+            style: .card
+        )]
 
         if settings.recentTranscriptLimit != .off {
             let menuLimits: [RecentTranscriptLimit] = [.last1, .last5, .last10]
@@ -1648,29 +1738,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 guard let limit = RecentTranscriptLimit(rawValue: raw) else { return }
                 self?.settings.recentTranscriptLimit = limit
             }
-            root.addArrangedSubview(SDRowView(
+            diskRows.append(SDRowView(
                 title: t("Недавнее в панели меню-бара", "Recent list in the menu-bar panel"),
-                subtitle: t("Сколько последних диктовок показывает панель по клику на иконку. Окно «История» показывает все",
-                            "How many recent dictations the menu-bar panel shows. The History window shows all of them"),
+                subtitle: t("Длина списка по клику на иконку. Окно «История» показывает все",
+                            "How long the list is when you click the icon. The History window shows all of them"),
                 control: limitPills,
-                verticalPadding: 12
+                style: .card
             ))
         }
-
-        // Макет: значение здесь обычным шрифтом 12/500, не mono.
-        // «Удаляется сразу» без оговорок было полуправдой: на время обработки
-        // на диске живёт страховочный журнал, и при сбое он сознательно
-        // остаётся — чтобы следующий запуск вернул диктовку в историю.
-        let audioRow = SDRowView(
-            title: t("Аудио после распознавания", "Audio after transcription"),
-            subtitle: t("На время обработки на диске живёт страховочный журнал; при сбое он остаётся, чтобы вернуть диктовку в историю",
-                        "A crash-recovery journal lives on disk while a dictation is handled; after a failure it stays so the dictation can be recovered"),
-            control: panelLabel(t("Удаляется после вставки", "Deleted once the text exists"),
-                                size: 12, weight: .medium),
-            verticalPadding: 12
-        )
-        root.addArrangedSubview(audioRow)
-        root.setCustomSpacing(14, after: audioRow)
 
         let showModels = NSButton(title: t("Показать файлы моделей…", "Show model files…"),
                                   target: self, action: #selector(revealModelFilesFromPanel(_:)))
@@ -1682,10 +1757,65 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         showModels.contentTintColor = SD.C.ink
         wipeHistory.contentTintColor = SD.C.voice
-        let actions = NSStackView(views: [showModels, wipeHistory, NSView()])
+        let actions = NSStackView(views: [showModels, wipeHistory])
         actions.orientation = .horizontal
         actions.spacing = 16
-        root.addArrangedSubview(actions)
+        diskRows.append(SDRowView(title: t("Файлы на диске", "Files on disk"),
+                                  control: actions,
+                                  style: .card))
+
+        root.addArrangedSubview(settingsGroup(t("Что хранится на диске", "What is kept on disk"),
+                                              rows: diskRows))
+
+        // Факты — не переключатели. Раньше они стояли строками вперемешку с
+        // тумблерами и выглядели одинаково; здесь у них своя приглушённая
+        // карточка без правого столбца управления, и видно, что это ответы.
+        // Значение сетевых запросов было зашито как «0 — обновления
+        // отключены»: пока проверка стояла за мёртвым `return`, это была
+        // правда, а с включённым каналом стало бы враньём ровно в той
+        // вкладке, где человек решает, насколько приложению верить.
+        let networkFact = privacyFactRow(
+            title: t("Сетевые запросы", "Network requests"),
+            subtitle: settings.checkForUpdates
+                ? t("Единственный. Отключается в «Приложение» → Обновления",
+                    "The only one. Switched off in App → Updates")
+                : t("Автопроверка выключена — приложение само в сеть не ходит",
+                    "Automatic checks are off — the app does not go online on its own"),
+            value: settings.checkForUpdates
+                ? t("1 раз в 6 ч", "once every 6 h")
+                : t("нет", "none"))
+        let audioFact = privacyFactRow(
+            title: t("Аудио после распознавания", "Audio after transcription"),
+            subtitle: t("На время обработки на диске живёт страховочный журнал. При сбое он остаётся, чтобы вернуть диктовку в историю",
+                        "A crash-recovery journal lives on disk while a dictation is handled. After a failure it stays so the dictation can be recovered"),
+            value: t("удаляется", "deleted"))
+        let notificationsFact = privacyFactRow(
+            title: t("Системные уведомления", "System notifications"),
+            subtitle: t("Приложение не показывает баннеров — ни разу, ни при ошибке",
+                        "The app shows no banners — not once, not even on failure"),
+            value: t("не отправляются", "never sent"))
+
+        let factsCard = SDFactCard(rows: [networkFact, audioFact, notificationsFact])
+        let factsGroup = NSStackView(views: [
+            serviceGroupHeader(t("Факты, а не переключатели", "Facts, not switches")),
+            factsCard,
+        ])
+        factsGroup.orientation = .vertical
+        factsGroup.alignment = .leading
+        factsGroup.spacing = 7
+        for view in factsGroup.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: factsGroup.widthAnchor).isActive = true
+        }
+        root.addArrangedSubview(factsGroup)
+    }
+
+    /// Строка-факт: слева вопрос, справа ответ. Контрола нет намеренно —
+    /// это утверждение о поведении программы, а не то, что можно изменить.
+    private func privacyFactRow(title: String, subtitle: String, value: String) -> NSView {
+        SDRowView(title: title,
+                  subtitle: subtitle,
+                  control: panelLabel(value, size: 12, weight: .medium, color: SD.C.graphite),
+                  style: .card)
     }
 
     private func monoValueLabel(_ text: String) -> NSTextField {
@@ -1742,6 +1872,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             content = makeStatsSectionView()
         case .dictionary:
             content = makeDictionarySectionView()
+        case .service:
+            content = makeServiceSectionView()
         case .settings:
             content = makeSettingsSectionView()
         }
@@ -2023,9 +2155,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     @objc private func serviceStatusPrimaryClicked(_ sender: Any?) {
         switch currentServiceStatus() {
         case .needsPermission:
-            mainSection = .settings
-            settingsTab = "advanced"
-            settingsDraft = ControlPanelSettingsDraft(settings: settings)
+            // Разрешения — состояние службы, и живут они в разделе «Служба».
+            // Подвал сайдбара ведёт ровно туда, где ответ.
+            mainSection = .service
             refresh(force: true)
         case .failed:
             settings.agentEnabled = true
@@ -2039,9 +2171,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     @objc private func serviceStatusSecondaryClicked(_ sender: Any?) {
-        mainSection = .settings
-        settingsTab = "advanced"
-        settingsDraft = ControlPanelSettingsDraft(settings: settings)
+        mainSection = .service
         refresh(force: true)
     }
 
@@ -2942,59 +3072,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
         // Встроенные наборы правят текст молча, поэтому о них надо сказать
         // вслух — и дать выключить. Обе карточки устроены одинаково.
-        func toggleCard(title: String,
-                        subtitle: String,
-                        isOn: Bool,
-                        onToggle: @escaping (Bool) -> Void) -> NSView {
-            let toggle = SDToggle()
-            toggle.isOn = isOn
-            toggle.onToggle = onToggle
-            let cardBackground = SDCardBackgroundView()
-            let row = SDRowView(title: title,
-                                subtitle: subtitle,
-                                control: toggle,
-                                hairline: false)
-            row.translatesAutoresizingMaskIntoConstraints = false
-            cardBackground.addSubview(row)
-            NSLayoutConstraint.activate([
-                row.leadingAnchor.constraint(equalTo: cardBackground.leadingAnchor,
-                                             constant: 16),
-                row.trailingAnchor.constraint(equalTo: cardBackground.trailingAnchor,
-                                              constant: -16),
-                row.topAnchor.constraint(equalTo: cardBackground.topAnchor, constant: 4),
-                row.bottomAnchor.constraint(equalTo: cardBackground.bottomAnchor,
-                                            constant: -4),
-            ])
-            return cardBackground
-        }
-
-        let spellingsCard = toggleCard(
-            title: t("Написание названий", "Name spelling"),
-            subtitle: t("\(BuiltInSpellings.count) технических названий пишутся правильно: "
-                        + "postgres → PostgreSQL, sql → SQL, macos → macOS",
-                        "\(BuiltInSpellings.count) technical names come out spelled properly: "
-                        + "postgres → PostgreSQL, sql → SQL, macos → macOS"),
-            isOn: settings.builtInSpellingsEnabled,
-            onToggle: { [weak self] enabled in
-                self?.settings.builtInSpellingsEnabled = enabled
-            })
-
-        // Второй набор меняет алфавит, а не форму записи, — и это заметнее.
-        // Пример в подписи именно поэтому: человек должен увидеть, что
-        // произойдёт с его текстом, до того как это произойдёт.
-        let restorationsCard = toggleCard(
-            title: t("Названия латиницей", "Names in Latin script"),
-            subtitle: t("\(LatinTermRestorations.count) названий, услышанных по-русски, "
-                        + "возвращаются к своему написанию: гитхаб → GitHub, "
-                        + "постгрес → PostgreSQL",
-                        "\(LatinTermRestorations.count) names heard in Russian go back to "
-                        + "their own spelling: гитхаб → GitHub, постгрес → PostgreSQL"),
-            isOn: settings.latinTermRestorationsEnabled,
-            onToggle: { [weak self] enabled in
-                self?.settings.latinTermRestorationsEnabled = enabled
-            })
-
-        let column = NSStackView(views: [card, spellingsCard, restorationsCard])
+        let column = NSStackView(views: [card])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 14
@@ -3013,10 +3091,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor),
         ])
         card.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -56).isActive = true
-        spellingsCard.widthAnchor.constraint(equalTo: column.widthAnchor,
-                                             constant: -56).isActive = true
-        restorationsCard.widthAnchor.constraint(equalTo: column.widthAnchor,
-                                                constant: -56).isActive = true
         return root
     }
 
@@ -3645,124 +3719,29 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refresh(force: true)
     }
 
+    // MARK: Вкладка «Вид» — что видно на экране
+
     private func addLookTabRows(to root: NSStackView, draft: ControlPanelSettingsDraft) {
-        // Капсула записи — временная, показывается только на время диктовки.
-        // Тумблер жил в старом меню («Show recording waveform»), а место ему
-        // первое: строки ниже настраивают именно эту капсулу.
+        // Главный шов старой раскладки: капсула записи была разорвана между
+        // «Внешним видом» (тумблер, фон, цвет) и «Продвинутыми» (размер,
+        // положение). Пять настроек одного объекта теперь стоят вместе, под
+        // одним превью, и видно, что меняется.
+        let preview = SDCapsulePreview(size: settings.recordingHUDSize)
+        preview.translatesAutoresizingMaskIntoConstraints = false
+
         let hudToggle = SDToggle()
         hudToggle.isOn = settings.showRecordingWaveform
         hudToggle.onToggle = { [weak self] enabled in
             self?.settings.showRecordingWaveform = enabled
         }
-        root.addArrangedSubview(SDRowView(
-            title: t("Капсула записи", "Recording capsule"),
+        let showRow = SDRowView(
+            title: t("Показывать капсулу", "Show the capsule"),
             subtitle: t("Волна и таймер на экране, пока идёт диктовка",
                         "Wave and timer on screen while dictation runs"),
-            control: hudToggle
-        ))
-
-        // Размер капсулы переехал в «Продвинутые» — там он стоит рядом с
-        // положением и живым превью, как в макете 6d. Два места для одной
-        // настройки неизбежно начинают расходиться.
-        let backgroundPills = SDPills(options: RecordingHUDBackgroundStyle.allCases.map {
-            .init(title: localizedBackgroundName($0), value: $0.rawValue)
-        }, selected: settings.recordingHUDBackgroundStyle.rawValue)
-        backgroundPills.onSelect = { [weak self] raw in
-            guard let style = RecordingHUDBackgroundStyle(rawValue: raw) else { return }
-            self?.settings.recordingHUDBackgroundStyle = style
-            self?.settingsDraft?.backgroundStyle = style
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Фон капсулы", "Capsule background"),
-            control: backgroundPills
-        ))
-
-        // Макет: кружки-свотчи 22px вместо пилюль с названиями.
-        let swatches = SDColorSwatches(
-            swatches: RecordingHUDAccentColor.allCases.map {
-                .init(value: $0.rawValue, color: $0.nsColor)
-            },
-            selected: settings.recordingHUDRecordingColor.rawValue
+            control: hudToggle,
+            style: .card
         )
-        swatches.onSelect = { [weak self] raw in
-            guard let color = RecordingHUDAccentColor(rawValue: raw) else { return }
-            self?.settings.recordingHUDRecordingColor = color
-            self?.settingsDraft?.recordingColor = color
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Цвет волны", "Wave color"),
-            subtitle: t("Один цвет для записи и бренда", "One color for recording and brand"),
-            control: swatches
-        ))
 
-        // Плавающая капсула (макет 6c) стоит ПОСЛЕ настроек вида: фон и цвет
-        // выше управляют капсулой записи, а не ею — рядом с её тумблером они
-        // читались как её настройки, которые «не работают» (аудит №6).
-        // Выключена по умолчанию: это объект поверх чужих окон, и появляться
-        // он должен по приглашению.
-        let capsuleToggle = SDToggle()
-        capsuleToggle.isOn = settings.floatingCapsuleEnabled
-        capsuleToggle.onToggle = { [weak self] enabled in
-            self?.settings.floatingCapsuleEnabled = enabled
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Плавающая капсула", "Floating capsule"),
-            subtitle: t("Всегда под рукой: перетаскивается, прилипает к краям и помнит "
-                        + "место. Вид у неё свой, по макету — настройки выше на неё "
-                        + "не действуют",
-                        "Always at hand: drag it, it sticks to the edges and remembers "
-                        + "its place. Its look is fixed by design — the settings above "
-                        + "don't apply to it"),
-            control: capsuleToggle
-        ))
-
-        // Настройка существовала всегда, но shouldShowDockIcon жёстко
-        // возвращал false — пункт старого меню переключал её впустую.
-        // Значок принадлежит службе и показывается, пока это окно закрыто.
-        let dockToggle = SDToggle()
-        dockToggle.isOn = settings.showInDock
-        dockToggle.onToggle = { [weak self] enabled in
-            self?.settings.showInDock = enabled
-        }
-        root.addArrangedSubview(SDRowView(
-            title: t("Значок в Dock", "Dock icon"),
-            subtitle: t("Клик по значку открывает это окно",
-                        "Clicking the icon opens this window"),
-            control: dockToggle,
-            hairline: false
-        ))
-    }
-
-
-
-
-
-    // MARK: - Вкладка «Продвинутые» (макет 6d)
-    //
-    // Из макета сюда сознательно не перенесены четыре элемента, под
-    // которыми нет ни данных, ни поведения:
-    //
-    // • «В покое» (прозрачность) и «Прятать капсулу» — управляют
-    //   капсулой, которой между диктовками не существует. Обе строки
-    //   требуют постоянной плавающей капсулы из макета 6c.
-    // • «Перетащите капсулу мышью» — то же самое: тащить нечего.
-    // • «Предлагать слова в словарь» — такой функции в приложении нет,
-    //   тумблер включал бы пустоту.
-    //
-    // «Системные уведомления» и «Держать модель в памяти» остались, но
-    // как факты, а не тумблеры: уведомлений приложение не шлёт вообще,
-    // а модель и так никогда не выгружается, кроме смены модели. Тумблер,
-    // который ничего не переключает, врёт убедительнее отсутствующего.
-    private func addAdvancedTabRows(to root: NSStackView) {
-        addPermissionsSection(to: root)
-        // «Капсула записи», не просто «Капсула»: плавающая капсула этими
-        // настройками не управляется (аудит №6), и заголовок обязан говорить,
-        // о которой из двух идёт речь.
-        root.addArrangedSubview(advancedSectionHeader(t("Капсула записи", "Recording capsule")))
-
-        // Размер — с живым превью справа: переключение S/M/L видно сразу,
-        // не открывая диктовку.
-        let preview = SDCapsulePreview(size: settings.recordingHUDSize)
         let sizes: [RecordingHUDSize] = [.compact, .standard, .large]
         let sizeSegmented = SDSegmented(titles: ["S", "M", "L"],
                                         values: sizes.map(\.rawValue),
@@ -3773,9 +3752,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             self?.settingsDraft?.hudSize = size
             preview?.setSize(size)
         }
-        root.addArrangedSubview(advancedCapsuleRow(title: t("Размер", "Size"),
-                                                   control: sizeSegmented,
-                                                   trailing: preview))
+        let sizeRow = SDRowView(title: t("Размер", "Size"),
+                                control: sizeSegmented,
+                                style: .card)
 
         let placement = NSPopUpButton()
         placement.isBordered = false
@@ -3796,63 +3775,333 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // Макет предлагал ещё и «перетащите капсулу мышью». Тащить нечего:
         // между диктовками капсулы не существует, это макет 6c. Вместо
         // выдуманной подсказки — правда о запасном варианте.
-        let placementHint = panelLabel(t("Если поле ввода не найдено — сверху по центру",
-                                         "If no text field is found — top center"),
-                                       size: 11.5, color: SD.C.subtle)
-        root.addArrangedSubview(advancedCapsuleRow(title: t("Положение", "Position"),
-                                                   control: placement,
-                                                   trailing: placementHint))
+        let placementRow = SDRowView(
+            title: t("Положение", "Position"),
+            subtitle: t("Если поле ввода не найдено — сверху по центру",
+                        "If no text field is found — top center"),
+            control: SDFieldButton(popup: placement),
+            style: .card
+        )
 
-        root.addArrangedSubview(advancedSectionHeader(t("Тишина", "Silence")))
-        let silenceNote = panelLabel(
-            t("По умолчанию приложение молчит: ни баннеров, ни звуков. Всё, что нужно сказать, показывает сама капсула.",
-              "The app stays quiet by default: no banners, no sounds. Anything worth saying, the capsule says itself."),
-            size: 11.5, color: SD.C.graphite)
-        silenceNote.maximumNumberOfLines = 2
-        silenceNote.preferredMaxLayoutWidth = 470
-        let noteRow = NSStackView(views: [silenceNote])
-        noteRow.orientation = .vertical
-        noteRow.alignment = .leading
-        noteRow.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 10, right: 0)
-        root.addArrangedSubview(noteRow)
+        let backgroundPills = SDPills(options: RecordingHUDBackgroundStyle.allCases.map {
+            .init(title: localizedBackgroundName($0), value: $0.rawValue)
+        }, selected: settings.recordingHUDBackgroundStyle.rawValue)
+        backgroundPills.onSelect = { [weak self] raw in
+            guard let style = RecordingHUDBackgroundStyle(rawValue: raw) else { return }
+            self?.settings.recordingHUDBackgroundStyle = style
+            self?.settingsDraft?.backgroundStyle = style
+        }
+        let backgroundRow = SDRowView(title: t("Фон", "Background"),
+                                      control: backgroundPills,
+                                      style: .card)
 
-        root.addArrangedSubview(SDRowView(
-            title: t("Системные уведомления", "System notifications"),
-            control: panelLabel(t("Не отправляются", "Never sent"), size: 12, weight: .medium),
-            verticalPadding: 12
+        // Макет: кружки-свотчи 22px вместо пилюль с названиями.
+        let swatches = SDColorSwatches(
+            swatches: RecordingHUDAccentColor.allCases.map {
+                .init(value: $0.rawValue, color: $0.nsColor)
+            },
+            selected: settings.recordingHUDRecordingColor.rawValue
+        )
+        swatches.onSelect = { [weak self] raw in
+            guard let color = RecordingHUDAccentColor(rawValue: raw) else { return }
+            self?.settings.recordingHUDRecordingColor = color
+            self?.settingsDraft?.recordingColor = color
+        }
+        let colorRow = SDRowView(
+            title: t("Цвет волны", "Wave color"),
+            subtitle: t("Он же цвет приложения. Цвет фазы распознавания задаётся только через defaults write",
+                        "Also the app color. The transcribing phase color is set through defaults write only"),
+            control: swatches,
+            style: .card
+        )
+
+        // Превью стоит над карточкой: оно показывает то, что настраивают
+        // строки под ним, — а не одну из них.
+        let previewStage = NSStackView(views: [preview])
+        previewStage.orientation = .vertical
+        previewStage.alignment = .centerX
+        previewStage.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 12, right: 0)
+
+        let capsuleGroup = NSStackView(views: [
+            serviceGroupHeader(t("Капсула записи", "Recording capsule")),
+            previewStage,
+            SDSettingsGroupCard(rows: [showRow, sizeRow, placementRow,
+                                       backgroundRow, colorRow]),
+        ])
+        capsuleGroup.orientation = .vertical
+        capsuleGroup.alignment = .leading
+        capsuleGroup.spacing = 7
+        for view in capsuleGroup.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: capsuleGroup.widthAnchor).isActive = true
+        }
+        root.addArrangedSubview(capsuleGroup)
+
+        // Плавающая капсула отделена в свою группу именно потому, что
+        // настройки капсулы записи на неё не действуют: соседство в одной
+        // карточке обещало бы обратное (аудит №6).
+        let capsuleToggle = SDToggle()
+        capsuleToggle.isOn = settings.floatingCapsuleEnabled
+        capsuleToggle.onToggle = { [weak self] enabled in
+            self?.settings.floatingCapsuleEnabled = enabled
+        }
+        let floatingRow = SDRowView(
+            title: t("Плавающая капсула", "Floating capsule"),
+            subtitle: t("Постоянная капсула: перетаскивается, прилипает к краям, помнит "
+                        + "место. Вид фиксированный — настройки выше на неё не действуют",
+                        "A permanent capsule: drag it, it sticks to the edges and remembers "
+                        + "its place. Its look is fixed — the settings above don't apply"),
+            control: capsuleToggle,
+            style: .card
+        )
+
+        // Настройка существовала всегда, но shouldShowDockIcon жёстко
+        // возвращал false — пункт старого меню переключал её впустую.
+        // Значок принадлежит службе и показывается, пока это окно закрыто.
+        let dockToggle = SDToggle()
+        dockToggle.isOn = settings.showInDock
+        dockToggle.onToggle = { [weak self] enabled in
+            self?.settings.showInDock = enabled
+        }
+        let dockRow = SDRowView(
+            title: t("Значок в Dock", "Dock icon"),
+            subtitle: t("Клик по значку открывает это окно. Иконка в меню-баре остаётся всегда",
+                        "Clicking it opens this window. The menu-bar icon always stays"),
+            control: dockToggle,
+            style: .card
+        )
+        root.addArrangedSubview(settingsGroup(t("На рабочем столе", "On the desktop"),
+                                              rows: [floatingRow, dockRow]))
+    }
+
+    // MARK: - Раздел «Служба» — состояние, а не настройки
+
+    /// Разрешения, модель, измерения и обслуживание. Ни одного переключателя
+    /// предпочтений: всё здесь — ответ на вопрос «что там со службой», и
+    /// приходят сюда из подвала сайдбара или из «Приложения».
+    private func makeServiceSectionView() -> NSView {
+        let root = PaperBackgroundView()
+        root.fill = SD.C.settingsPaper
+        let header = makeSectionHeader(title: MainWindowSection.service.title(language),
+                                       accessory: nil)
+
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 18
+        content.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 20, right: 22)
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        addServicePermissionsGroup(to: content)
+        addServiceModelGroup(to: content)
+        addServiceMeasurementsGroup(to: content)
+        addServiceMaintenanceGroup(to: content)
+
+        let paneWidth = MAIN_WINDOW_SIZE.width - MAIN_WINDOW_SIDEBAR_WIDTH - 1
+        let contentInset = -(content.edgeInsets.left + content.edgeInsets.right)
+        for view in content.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: content.widthAnchor,
+                                        constant: contentInset).isActive = true
+        }
+
+        let documentView = SDFlippedView()
+        documentView.addSubview(content)
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        // Столько же проходов, сколько у вкладок настроек, и по той же
+        // причине: перенос подписи виден только с третьего.
+        let widthPin = content.widthAnchor.constraint(equalToConstant: paneWidth)
+        widthPin.isActive = true
+        content.frame = NSRect(x: 0, y: 0, width: paneWidth,
+                               height: MAIN_WINDOW_SIZE.height * 3)
+        for _ in 0..<4 {
+            content.layoutSubtreeIfNeeded()
+            _ = content.fittingSize
+        }
+        content.layoutSubtreeIfNeeded()
+        let contentHeight = max(404, ceil(content.fittingSize.height))
+        widthPin.isActive = false
+
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+            content.topAnchor.constraint(equalTo: documentView.topAnchor),
+            content.heightAnchor.constraint(equalToConstant: contentHeight),
+            documentView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.verticalScroller?.controlSize = .small
+        scroll.documentView = documentView
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
+
+        header.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(header)
+        root.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+        return root
+    }
+
+    private func addServicePermissionsGroup(to root: NSStackView) {
+        let report = PermissionsDoctor.report()
+        var rows: [NSView] = []
+        for (index, row) in report.rows.enumerated() {
+            let copy = onboardingPermissionCopy(row.permission, language: language)
+            let control: NSView
+            if row.diagnosis == .missing {
+                let button = NSButton(title: t("Разрешить", "Allow"),
+                                      target: self,
+                                      action: #selector(permissionGrantClicked(_:)))
+                button.tag = index
+                button.bezelStyle = .rounded
+                button.font = .systemFont(ofSize: 12)
+                control = button
+            } else {
+                control = panelLabel(PermissionsDoctor.explain(row.diagnosis, language: language),
+                                     size: 12, weight: .medium,
+                                     color: row.diagnosis == .granted ? SD.C.positive : SD.C.graphite)
+            }
+            rows.append(SDRowView(title: copy.name,
+                                  subtitle: copy.why,
+                                  control: control,
+                                  style: .card))
+        }
+
+        let fix = NSButton(title: t("Проверить и починить", "Check and repair"),
+                           target: self,
+                           action: #selector(permissionRepairClicked(_:)))
+        fix.bezelStyle = .rounded
+        fix.font = .systemFont(ofSize: 12, weight: .semibold)
+        rows.append(SDRowView(
+            title: t("Разрешение выдано, а не работает", "Granted but not working"),
+            subtitle: t("Частая причина — вторая копия приложения или устаревшая "
+                        + "запись системы после смены подписи",
+                        "Usually a second copy of the app or a stale system record "
+                        + "after the signature changed"),
+            control: fix,
+            style: .card
         ))
+        root.addArrangedSubview(settingsGroup(t("Разрешения macOS", "macOS permissions"),
+                                              rows: rows))
 
-        // Тумблер звуков живёт во вкладке «Основное» и только там. Здесь стоял
-        // второй, для той же настройки: два места неизбежно начинают
-        // расходиться — сначала подписью, потом поведением.
+        // Что кнопка сделает — показываем заранее, а после нажатия заменяем
+        // на отчёт о том, что сделано.
+        let lines = permissionRepairNotes.isEmpty
+            ? PermissionsDoctor.repairPlan(report, language: language)
+            : permissionRepairNotes
+        for (index, line) in lines.enumerated() {
+            // Запуск не из «Программ» — не совет, а причина, по которой всё
+            // остальное бесполезно. Он всегда первый и выделен цветом.
+            let isBlocker = index == 0 && !report.isInstalledInApplications
+            root.addArrangedSubview(permissionsNoteRow(line,
+                                                       color: isBlocker ? SD.C.voice : SD.C.subtle))
+        }
+    }
 
-        root.addArrangedSubview(advancedSectionHeader(t("Производительность", "Performance")))
-        root.addArrangedSubview(performanceTilesRow())
+    private func addServiceModelGroup(to root: NSStackView) {
+        let profile = SpeechModelProfile.productionDefault
+        let card = SDModelCard(
+            title: profile.shortName + " · " + t("используется", "in use"),
+            detail: t("~460 МБ · русский, английский и ещё 16 языков · Neural Engine. "
+                      + "Работает целиком на этом Mac; скачивается с huggingface.co при установке.",
+                      "~460 MB · Russian, English and 16 more · Neural Engine. "
+                      + "Runs entirely on this Mac; downloads from huggingface.co at setup."),
+            active: true,
+            actionTitle: nil,
+            target: nil,
+            action: nil,
+            identifier: profile.rawValue
+        )
+        card.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addArrangedSubview(SDRowView(
+        let memoryRow = SDRowView(
             title: t("Модель в памяти", "Model in memory"),
             subtitle: t("Выгружается только при смене модели — первая диктовка без задержки",
                         "Unloaded only when the model changes — the first dictation has no warm-up"),
-            control: panelLabel(t("Всегда", "Always"), size: 12, weight: .medium),
-            verticalPadding: 12
-        ))
+            control: panelLabel(t("всегда", "always"), size: 12, weight: .medium),
+            style: .card
+        )
 
+        let wrapper = NSStackView(views: [card, settingsGroup(nil, rows: [memoryRow])])
+        wrapper.orientation = .vertical
+        wrapper.alignment = .leading
+        wrapper.spacing = 10
+        for view in wrapper.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: wrapper.widthAnchor).isActive = true
+        }
+
+        let group = NSStackView(views: [
+            serviceGroupHeader(t("Модель", "Model")),
+            wrapper,
+        ])
+        group.orientation = .vertical
+        group.alignment = .leading
+        group.spacing = 7
+        for view in group.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        }
+        root.addArrangedSubview(group)
+    }
+
+    private func addServiceMeasurementsGroup(to root: NSStackView) {
+        let tiles = performanceTilesRow()
+        tiles.translatesAutoresizingMaskIntoConstraints = false
+        let group = NSStackView(views: [
+            serviceGroupHeader(t("Измерения", "Measurements")),
+            tiles,
+        ])
+        group.orientation = .vertical
+        group.alignment = .leading
+        group.spacing = 7
+        for view in group.arrangedSubviews {
+            view.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
+        }
+        root.addArrangedSubview(group)
+    }
+
+    private func addServiceMaintenanceGroup(to root: NSStackView) {
         // Подсказки «Сегодня» закрываются навсегда — правило макета 6e.
         // Раньше «навсегда» было буквальным: dismissedHints нигде не
         // сбрасывался, и вернуть подсказки не мог никто (аудит, мелочь №15).
         let dismissed = settings.dismissedHints.count
-        root.addArrangedSubview(SDRowView(
-            title: t("Подсказки на экране «Сегодня»", "Hints on the Today screen"),
+        let hintsRow = SDRowView(
+            title: t("Закрытые подсказки", "Dismissed hints"),
             subtitle: dismissed > 0
-                ? t("Закрытых: \(dismissed). Возврат покажет их снова",
-                    "Dismissed: \(dismissed). Restoring shows them again")
+                ? t("\(dismissed) \(pluralizeRU(dismissed, "подсказка скрыта", "подсказки скрыты", "подсказок скрыто")) на экране «Сегодня»",
+                    "\(dismissed) \(dismissed == 1 ? "hint is" : "hints are") hidden on the Today screen")
                 : t("Закрытых нет", "Nothing is dismissed"),
             control: panelButton(t("Вернуть", "Restore"),
                                  action: #selector(restoreDismissedHintsFromPanel(_:)),
                                  enabled: dismissed > 0),
-            hairline: false,
-            verticalPadding: 12
-        ))
+            style: .card
+        )
+        root.addArrangedSubview(settingsGroup(t("Обслуживание", "Maintenance"),
+                                              rows: [hintsRow]))
+    }
+
+    /// Заголовок группы раздела «Служба» — тот же, что у групп настроек:
+    /// раздел читается как продолжение вкладок, а не как чужой экран.
+    private func serviceGroupHeader(_ title: String) -> NSView {
+        let header = settingsGroupHeaderLabel(title)
+        let wrapper = NSView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 2),
+            header.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            header.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor),
+        ])
+        return wrapper
     }
 
     @objc private func restoreDismissedHintsFromPanel(_ sender: NSButton) {
@@ -3908,56 +4157,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     /// Разрешения и их починка. Живут в «Продвинутых», потому что сюда идут
     /// именно тогда, когда что-то не работает.
-    private func addPermissionsSection(to root: NSStackView) {
-        let report = PermissionsDoctor.report()
-        root.addArrangedSubview(advancedSectionHeader(t("Разрешения macOS", "macOS permissions")))
-
-        for (index, row) in report.rows.enumerated() {
-            let copy = onboardingPermissionCopy(row.permission, language: language)
-            let state = panelLabel(PermissionsDoctor.explain(row.diagnosis, language: language),
-                                   size: 12,
-                                   color: row.diagnosis == .granted ? SD.C.positive : SD.C.graphite)
-            let trailing: NSView
-            if row.diagnosis == .missing {
-                let button = NSButton(title: t("Разрешить", "Allow"),
-                                      target: self,
-                                      action: #selector(permissionGrantClicked(_:)))
-                button.tag = index
-                button.bezelStyle = .rounded
-                button.font = .systemFont(ofSize: 12)
-                trailing = button
-            } else {
-                trailing = NSView()
-            }
-            root.addArrangedSubview(advancedCapsuleRow(title: copy.name,
-                                                       control: state,
-                                                       trailing: trailing))
-        }
-
-        let fix = NSButton(title: t("Проверить и починить", "Check and repair"),
-                           target: self,
-                           action: #selector(permissionRepairClicked(_:)))
-        fix.bezelStyle = .rounded
-        fix.font = .systemFont(ofSize: 12, weight: .semibold)
-        root.addArrangedSubview(advancedCapsuleRow(
-            title: t("Диагностика", "Diagnostics"),
-            control: fix,
-            trailing: NSView()))
-
-        // Что кнопка сделает — показываем заранее, а после нажатия заменяем
-        // на отчёт о том, что сделано.
-        let lines = permissionRepairNotes.isEmpty
-            ? PermissionsDoctor.repairPlan(report, language: language)
-            : permissionRepairNotes
-        for (index, line) in lines.enumerated() {
-            // Запуск не из «Программ» — не совет, а причина, по которой всё
-            // остальное бесполезно. Он всегда первый и выделен цветом.
-            let isBlocker = index == 0 && !report.isInstalledInApplications
-            root.addArrangedSubview(permissionsNoteRow(line,
-                                                       color: isBlocker ? SD.C.voice : SD.C.subtle))
-        }
-    }
-
     private func permissionsNoteRow(_ text: String, color: NSColor) -> NSView {
         let label = panelLabel("• " + text, size: 11.5, color: color)
         // Без уступки по сжатию строка вылезала за правый край окна. Точки
@@ -4010,17 +4209,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         log("permissions repair: \(notes.count) action(s)")
         permissionRepairNotes = notes
         refresh(force: true)
-    }
-
-    private func advancedSectionHeader(_ title: String) -> NSView {
-        let label = historySectionLabel(title)
-        let wrapper = NSStackView(views: [label])
-        wrapper.orientation = .vertical
-        wrapper.alignment = .leading
-        // Макет: секция отбита сверху заметно сильнее, чем строки между
-        // собой — 20px против 13px внутри строки.
-        wrapper.edgeInsets = NSEdgeInsets(top: 20, left: 0, bottom: 4, right: 0)
-        return wrapper
     }
 
     private func performanceTilesRow() -> NSView {
@@ -4425,25 +4613,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
     }
 
-    @objc private func startAgentClicked(_ sender: NSButton) {
-        settings.agentEnabled = true
-        _ = settings.refreshFromDisk()
-        beginServiceOperation(.starting)
-    }
-
-    @objc private func stopAgentClicked(_ sender: NSButton) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = t("Остановить службу диктовки?", "Stop Dictation Service?")
-        alert.informativeText = t("Хоткей перестанет работать, но история, модель и настройки сохранятся.",
-                                  "The shortcut will stop, but history, model, and settings remain saved.")
-        alert.addButton(withTitle: t("Оставить включённой", "Keep Running"))
-        alert.addButton(withTitle: t("Остановить", "Stop Service"))
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-        settings.agentEnabled = false
-        _ = settings.refreshFromDisk()
-        beginServiceOperation(.stopping)
-    }
 
     @objc private func recordDictationShortcutClicked(_ sender: NSButton) {
         guard serviceOperation == nil,
@@ -4637,7 +4806,10 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
     let fileManager = FileManager.default
     try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
     let panel = DictorControlPanelApp()
-    let size = NSSize(width: 620, height: 560)
+    // Ширина настоящая: раздел «Настройки» = окно минус сайдбар минус линия.
+    // На 620 вкладки мерились уже, и это давало ложные «строки вылезли».
+    let size = NSSize(width: MAIN_WINDOW_SIZE.width - MAIN_WINDOW_SIDEBAR_WIDTH - 1,
+                      height: 560)
     // Вне NSWindow layer-backed view не проходит через window server и
     // bitmapImageRepForCachingDisplay возвращает пустой битмап — поэтому
     // рендерим в офскрин-окне.
@@ -4647,13 +4819,14 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
                           defer: false)
     window.colorSpace = .sRGB
     var exported = 0
-    for tab in ["general", "hotkeys", "model", "dict", "look", "advanced", "privacy"] {
+    for tab in SETTINGS_TABS.map(\.id) {
         panel.settingsTab = tab
         for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                          ("dark", NSAppearance.Name.darkAqua)] {
             window.appearance = NSAppearance(named: appearanceName)
             let view = panel.makeSettingsContentView()
-            let height = DictorControlPanelApp.settingsContentHeight(for: view)
+            let height = DictorControlPanelApp.settingsContentHeight(for: view,
+                                                                     width: size.width)
             window.setContentSize(NSSize(width: size.width, height: height))
             view.frame = NSRect(origin: .zero,
                                 size: NSSize(width: size.width, height: height))
@@ -4777,7 +4950,7 @@ func exportHistoryPanelPreviews(to directory: URL,
     window.colorSpace = .sRGB
     var exported = 0
     // Каждый раздел окна (макет 6a/6b) в обеих темах.
-    for section in [MainWindowSection.today, .history, .stats, .dictionary, .settings] {
+    for section in MainWindowSection.allCases {
         for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                          ("dark", NSAppearance.Name.darkAqua)] {
             window.appearance = NSAppearance(named: appearanceName)
