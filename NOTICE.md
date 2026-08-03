@@ -6,9 +6,8 @@ project where upstream names appear.
 
 # Attribution
 
-Dictor descends from SuperDictate, which is itself derived from
-[Parakey](https://github.com/rcourtman/parakey), originally created by
-Richard Courtman and distributed under the MIT License.
+Dictor descends from [Parakey](https://github.com/rcourtman/parakey),
+originally created by Richard Courtman and distributed under the MIT License.
 
 The original copyright notice and license are preserved in `LICENSE`.
 
