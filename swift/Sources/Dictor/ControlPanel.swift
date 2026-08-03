@@ -656,7 +656,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         wrapper.addSubview(bar)
         wrapper.addSubview(hairline)
         NSLayoutConstraint.activate([
-            wrapper.heightAnchor.constraint(equalToConstant: 44),
+            // Ровно та же высота, что у верхней полосы сайдбара: вкладки —
+            // первое, что есть в панели, и встают вровень с кнопками окна.
+            wrapper.heightAnchor.constraint(equalToConstant: MAIN_WINDOW_HEADER_HEIGHT),
             bar.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 16),
             bar.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor,
                                           constant: -16),
@@ -2953,11 +2955,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     /// Настройки — такой же раздел окна, как «Сегодня» и «История».
     /// Отдельного окна больше нет: в макете 6a это пункт сайдбара.
+    /// Шапки с названием раздела здесь нет намеренно. Слово «Настройки» уже
+    /// подсвечено в сайдбаре в тридцати пунктах левее, а содержимое называет
+    /// полоса вкладок — заголовок между ними был чистым повтором и съедал
+    /// 52 pt высоты у вкладок, которые и так длиннее экрана. У остальных
+    /// разделов шапка остаётся: у «Словаря» она несёт кнопку «Добавить», а
+    /// «Службе», «Истории» и «Статистике» больше нечем назвать экран.
     private func makeSettingsSectionView() -> NSView {
         let root = PaperBackgroundView()
         root.fill = SD.C.settingsPaper
-        let header = makeSectionHeader(title: MainWindowSection.settings.title(language),
-                                       accessory: nil)
 
         let content = makeSettingsContentView()
         content.translatesAutoresizingMaskIntoConstraints = false
@@ -2983,16 +2989,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         scroll.translatesAutoresizingMaskIntoConstraints = false
         documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
 
-        header.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(header)
         root.addSubview(scroll)
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.topAnchor.constraint(equalTo: root.topAnchor),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scroll.topAnchor.constraint(equalTo: root.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         return root
