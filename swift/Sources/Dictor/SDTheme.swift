@@ -98,6 +98,29 @@ enum SD {
                 ? NSColor.white.withAlphaComponent(0.07)
                 : NSColor.black.withAlphaComponent(0.06)
         }
+        /// Группа-карточка настроек: строки одной темы лежат на своей
+        /// бумаге, чуть светлее фона вкладки.
+        static let groupCard = adaptive(light: 0xFDFCFB, dark: 0x2B2A27)
+        static let groupCardBorder = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.07)
+                : NSColor.black.withAlphaComponent(0.06)
+        }
+        /// Разделитель строк внутри карточки — тоньше внешней рамки.
+        static let groupRowDivider = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.06)
+                : NSColor.black.withAlphaComponent(0.055)
+        }
+        /// Подложка вложенной строки: она подчинена тумблеру над собой.
+        static let nestedRowWash = NSColor(name: nil) { appearance in
+            appearance.isDark
+                ? NSColor.white.withAlphaComponent(0.025)
+                : NSColor.black.withAlphaComponent(0.018)
+        }
+        /// Карточка фактов «Приватности»: ответы, а не переключатели, —
+        /// приглушённая подложка отличает их от строк с контролами.
+        static let factCard = adaptive(light: 0xEFEDE8, dark: 0x232220)
         /// Заливка капсулы в тёмном исполнении (дефолт дизайна).
         static let capsuleDark = NSColor(calibratedRed: 28 / 255,
                                          green: 27 / 255,

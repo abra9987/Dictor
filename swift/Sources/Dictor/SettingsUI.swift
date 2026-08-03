@@ -16,8 +16,65 @@ protocol SettingsRowProviding {
     var control: NSView { get }
 }
 
+/// Оформление строки. `plain` — старый вид (во всю ширину, хайрлайн снизу):
+/// им живут строки вне вкладок настроек. `card` и `cardNested` — новая
+/// раскладка, где строки лежат внутри группы-карточки: разделители рисует
+/// группа, а строка знает только про свои отступы и типографику.
+/// `cardNested` — строка-условие тумблера над ней (отступ и подложка
+/// показывают подчинение, не повторяя его словами).
+enum SDRowStyle {
+    case plain
+    case card
+    case cardNested
+
+    var leadingInset: CGFloat {
+        switch self {
+        case .plain: return 0
+        case .card: return 14
+        case .cardNested: return 30
+        }
+    }
+
+    var trailingInset: CGFloat {
+        switch self {
+        case .plain: return 0
+        case .card, .cardNested: return 14
+        }
+    }
+
+    var verticalPadding: CGFloat {
+        switch self {
+        case .plain: return 13
+        case .card, .cardNested: return 11
+        }
+    }
+
+    var titleFont: NSFont {
+        switch self {
+        case .plain: return .systemFont(ofSize: 13)
+        case .card: return .systemFont(ofSize: 12.5, weight: .semibold)
+        case .cardNested: return .systemFont(ofSize: 12.5, weight: .medium)
+        }
+    }
+
+    var titleColor: NSColor {
+        switch self {
+        case .plain, .card: return SD.C.ink
+        case .cardNested: return SD.C.inkSecondary
+        }
+    }
+
+    var subtitleSize: CGFloat {
+        switch self {
+        case .plain: return 11
+        case .card, .cardNested: return 11.5
+        }
+    }
+}
+
 final class SDRowView: NSView, SettingsRowProviding {
     private let hairline: Bool
+    private let style: SDRowStyle
     /// Заголовок и контрол — открыты для самотеста settings-reachable:
     /// он находит строку по заголовку и бьёт hitTest в центр контрола.
     let rowTitle: String
@@ -30,14 +87,17 @@ final class SDRowView: NSView, SettingsRowProviding {
          subtitle: String? = nil,
          control: NSView,
          hairline: Bool = true,
-         verticalPadding: CGFloat = 13) {
-        self.hairline = hairline
+         verticalPadding: CGFloat? = nil,
+         style: SDRowStyle = .plain) {
+        self.hairline = hairline && style == .plain
+        self.style = style
         self.rowTitle = title
         self.control = control
+        let verticalPadding = verticalPadding ?? style.verticalPadding
         super.init(frame: .zero)
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 13)
-        titleLabel.textColor = SD.C.ink
+        titleLabel.font = style.titleFont
+        titleLabel.textColor = style.titleColor
 
         let textStack = NSStackView()
         textStack.orientation = .vertical
@@ -46,7 +106,7 @@ final class SDRowView: NSView, SettingsRowProviding {
         textStack.addArrangedSubview(titleLabel)
         if let subtitle, !subtitle.isEmpty {
             let subtitleLabel = NSTextField(labelWithString: subtitle)
-            subtitleLabel.font = .systemFont(ofSize: 11)
+            subtitleLabel.font = .systemFont(ofSize: style.subtitleSize)
             subtitleLabel.textColor = SD.C.subtle
             // Длинная подпись переносится, а не толкает контрол за правый
             // край панели: однострочная intrinsic-ширина у трёх вкладок
@@ -70,12 +130,14 @@ final class SDRowView: NSView, SettingsRowProviding {
         squeeze.priority = .defaultLow
         NSLayoutConstraint.activate([
             squeeze,
-            textStack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textStack.leadingAnchor.constraint(equalTo: leadingAnchor,
+                                               constant: style.leadingInset),
             textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             textStack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor,
                                            constant: verticalPadding),
             textStack.trailingAnchor.constraint(lessThanOrEqualTo: control.leadingAnchor, constant: -12),
-            control.trailingAnchor.constraint(equalTo: trailingAnchor),
+            control.trailingAnchor.constraint(equalTo: trailingAnchor,
+                                              constant: -style.trailingInset),
             control.centerYAnchor.constraint(equalTo: centerYAnchor),
             control.topAnchor.constraint(greaterThanOrEqualTo: topAnchor,
                                          constant: verticalPadding),
@@ -95,7 +157,7 @@ final class SDRowView: NSView, SettingsRowProviding {
         // поэтому доступное подписи место от подписи не зависит — обратной
         // связи и вечной перераскладки тут нет.
         guard let subtitleLabel else { return }
-        let available = control.frame.minX - 12
+        let available = control.frame.minX - 12 - style.leadingInset
         if available > 80, abs(subtitleLabel.preferredMaxLayoutWidth - available) > 0.5 {
             subtitleLabel.preferredMaxLayoutWidth = available
             subtitleLabel.invalidateIntrinsicContentSize()
@@ -104,12 +166,150 @@ final class SDRowView: NSView, SettingsRowProviding {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Вложенная строка живёт на приглушённой подложке во всю ширину
+        // карточки: отступа слева мало, чтобы прочесть подчинение.
+        if style == .cardNested {
+            SD.C.nestedRowWash.setFill()
+            bounds.fill()
+        }
         guard hairline else { return }
         SD.C.rowHairline.setFill()
         NSRect(x: 0, y: bounds.maxY - 1, width: bounds.width, height: 1).fill()
     }
 
     override var isFlipped: Bool { true }
+}
+
+// MARK: - Группа настроек (заголовок + карточка со строками)
+
+/// Карточка одной темы: заголовок-подпись над бумагой, внутри — строки,
+/// разделённые тонкой линией. Заголовок группы делает то, что раньше
+/// сделала бы подвкладка, и позволяет держать навигацию плоской.
+final class SDSettingsGroupCard: NSView {
+    private let rowViews: [NSView]
+
+    init(rows: [NSView]) {
+        self.rowViews = rows
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
+
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        for row in rows {
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let card = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: 10, yRadius: 10)
+        SD.C.groupCard.setFill()
+        card.fill()
+        // Разделители рисует карточка, а не строки: строке не полагается
+        // знать, первая она в группе или последняя.
+        // Координаты строки берём переводом, а не из frame: строки лежат в
+        // NSStackView, чья система координат не перевёрнута, а карточка —
+        // перевёрнута. Прямое чтение frame.minY отсчитывало разделители от
+        // низа, и они ложились поперёк подписей.
+        SD.C.groupRowDivider.setFill()
+        for row in rowViews.dropFirst() {
+            let top = row.convert(row.bounds, to: self).minY
+            NSRect(x: 0, y: top, width: bounds.width, height: 1).fill()
+        }
+        SD.C.groupCardBorder.setStroke()
+        card.lineWidth = 1
+        card.stroke()
+    }
+}
+
+/// Карточка фактов: та же геометрия, что у группы настроек, но приглушённая
+/// подложка и никакого правого столбца управления. Утверждение и переключатель
+/// больше не выглядят одинаково — а ни один ответ при этом не потерян.
+final class SDFactCard: NSView {
+    private let rowViews: [NSView]
+
+    init(rows: [NSView]) {
+        self.rowViews = rows
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
+
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        for row in rows {
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let card = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+                                xRadius: 10, yRadius: 10)
+        SD.C.factCard.setFill()
+        card.fill()
+        // Тот же перевод координат, что и в группе настроек.
+        SD.C.groupRowDivider.setFill()
+        for row in rowViews.dropFirst() {
+            let top = row.convert(row.bounds, to: self).minY
+            NSRect(x: 0, y: top, width: bounds.width, height: 1).fill()
+        }
+    }
+}
+
+/// Заголовок группы + её карточка. Отдельный тип, чтобы вкладка собиралась
+/// из групп, а не из строк: раскладка тогда описывает смысл, а не пиксели.
+@MainActor
+func settingsGroup(_ title: String?, rows: [NSView]) -> NSView {
+    let card = SDSettingsGroupCard(rows: rows)
+    card.translatesAutoresizingMaskIntoConstraints = false
+    guard let title, !title.isEmpty else { return card }
+
+    let header = settingsGroupHeaderLabel(title)
+    header.translatesAutoresizingMaskIntoConstraints = false
+
+    let wrapper = NSView()
+    wrapper.addSubview(header)
+    wrapper.addSubview(card)
+    NSLayoutConstraint.activate([
+        header.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: 2),
+        header.trailingAnchor.constraint(lessThanOrEqualTo: wrapper.trailingAnchor),
+        header.topAnchor.constraint(equalTo: wrapper.topAnchor),
+        card.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+        card.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+        card.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 7),
+        card.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+    ])
+    return wrapper
 }
 
 /// Строка «Продвинутых»: узкая подпись 96 pt, контрол и живое превью
@@ -439,6 +639,18 @@ final class SDStepperRow: NSView {
     private let range: ClosedRange<Int>
     private let suffix: String
     var onChange: ((Int) -> Void)?
+    /// Выключённый степпер приглушён И не принимает нажатий. Приглушить, но
+    /// оставить рабочим — значит показать значение, которое человек меняет,
+    /// а оно ни на что не влияет; это хуже, чем не показывать вовсе.
+    var isEnabled = true {
+        didSet {
+            alphaValue = isEnabled ? 1 : 0.55
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isEnabled ? super.hitTest(point) : nil
+    }
 
     init(value: Int, step: Int, range: ClosedRange<Int>, suffix: String) {
         self.value = value
@@ -566,16 +778,17 @@ final class SDFlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// Капс-заголовок секции («СЕГОДНЯ»), 11/600 с трекингом .05em.
+/// Капс-заголовок группы настроек. Он делает работу подвкладки: называет
+/// тему, под которой лежат строки, и позволяет держать навигацию плоской.
 @MainActor
-func historySectionLabel(_ text: String) -> NSTextField {
+func settingsGroupHeaderLabel(_ text: String) -> NSTextField {
     let label = NSTextField(labelWithString: "")
     label.attributedStringValue = NSAttributedString(
         string: text.uppercased(),
         attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: SD.C.subtle,
-            .kern: 0.55,
+            .kern: 0.6,
         ])
     return label
 }
