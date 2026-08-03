@@ -236,14 +236,18 @@ enum DictorSelfTest {
                                     height: DictorControlPanelApp.settingsContentHeight(
                                         for: view, width: width))
                 view.layoutSubtreeIfNeeded()
-                var captions: [String] = []
-                func collect(_ v: NSView) {
+                // @MainActor на вложенной функции обязателен: сама по себе
+                // она nonisolated даже внутри assumeIsolated, и обращение к
+                // NSTextField роняло сборку на CI при живой локальной.
+                @MainActor
+                func collect(_ v: NSView, into captions: inout [String]) {
                     if let label = v as? NSTextField, !label.stringValue.isEmpty {
                         captions.append(label.stringValue)
                     }
-                    v.subviews.forEach(collect)
+                    for sub in v.subviews { collect(sub, into: &captions) }
                 }
-                collect(view)
+                var captions: [String] = []
+                collect(view, into: &captions)
                 try expect(captions.contains { $0.contains("нечего настраивать") },
                            equals: true,
                            "tab «\(tab.id)» holds no settings and must say so on screen")

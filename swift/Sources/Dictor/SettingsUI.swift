@@ -1254,20 +1254,29 @@ final class SDCapsulePreview: NSView {
     /// Волна живёт, пока превью на экране: неподвижная капсула показывала бы
     /// одну застывшую полоску и снова была бы не тем, что человек увидит.
     /// Таймер привязан к окну — вкладку закрыли, движение кончилось.
+    /// Шаг волны: уровень «как в речи» — не шум и не синус, иначе волна
+    /// читается либо как помеха, либо как заставка.
+    private func advanceWave() {
+        phase += 0.16
+        hud.phase = phase
+        let base = 0.45 + 0.35 * sin(phase * 0.7)
+        let flutter = 0.12 * sin(phase * 2.3)
+        hud.level = Float(max(0.05, min(1, base + flutter)))
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         motionTimer?.invalidate()
         motionTimer = nil
         guard window != nil else { return }
+        // Замыкание таймера — Sendable, а вид живёт на главном акторе.
+        // Без assumeIsolated это собиралось локально и падало на CI: у
+        // строгой проверки конкурентности своё мнение о том, кто чей.
         let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.phase += 0.16
-            self.hud.phase = self.phase
-            // Уровень «как в речи»: не шум и не синус — иначе волна читается
-            // либо как помеха, либо как заставка.
-            let base = 0.45 + 0.35 * sin(self.phase * 0.7)
-            let flutter = 0.12 * sin(self.phase * 2.3)
-            self.hud.level = Float(max(0.05, min(1, base + flutter)))
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.advanceWave()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         motionTimer = timer
