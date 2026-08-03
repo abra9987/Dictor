@@ -157,9 +157,8 @@ enum SD {
         static let waveBarWidth: CGFloat = 2
         static let waveBarGap: CGFloat = 2
         static let waveSilenceHeight: CGFloat = 2
-        static let capsuleShadowRadius: CGFloat = 24
-        static let capsuleShadowAlpha: CGFloat = 0.28
-        static let capsuleShadowOffsetY: CGFloat = 8
+        // Метрик тени капсулы здесь больше нет: тень убрана, а константа без
+        // читателя переживает своё поведение и однажды возвращает его назад.
     }
 
     enum Anim {

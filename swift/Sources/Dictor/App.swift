@@ -200,20 +200,21 @@ final class RecordingHUDView: NSView {
                                    xRadius: height / 2,
                                    yRadius: height / 2)
 
-        NSGraphicsContext.saveGraphicsState()
-        if let context = NSGraphicsContext.current?.cgContext {
-            context.setShadow(offset: CGSize(width: 0, height: -SD.Metrics.capsuleShadowOffsetY),
-                              blur: SD.Metrics.capsuleShadowRadius,
-                              color: NSColor.black
-                                  .withAlphaComponent(SD.Metrics.capsuleShadowAlpha * capsuleAlpha)
-                                  .cgColor)
-        }
+        // Тени под капсулой нет намеренно. Она отделяла капсулу от чужих
+        // окон под ней, но капсула висит поверх всего экрана и отделена уже
+        // тем, что непрозрачна: 24 pt размытия читались не как глубина, а как
+        // грязь под объектом. Отделение держит обводка ниже.
         capsuleFill().withAlphaComponent(capsuleFillAlpha() * capsuleAlpha).setFill()
         capsule.fill()
-        NSGraphicsContext.restoreGraphicsState()
 
         if showsCapsuleStroke {
-            NSColor.white.withAlphaComponent(0.08 * capsuleAlpha).setStroke()
+            // Обводка идёт по стилю капсулы, а не всегда белая: у светлой
+            // капсулы белая линия на светлом фоне — это отсутствие линии, и
+            // без тени её край растворялся бы вовсе.
+            let stroke = shouldUseLightBackground()
+                ? NSColor.black.withAlphaComponent(0.12 * capsuleAlpha)
+                : NSColor.white.withAlphaComponent(0.08 * capsuleAlpha)
+            stroke.setStroke()
             capsule.lineWidth = 1
             capsule.stroke()
         }
