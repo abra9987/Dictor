@@ -81,9 +81,37 @@ unrelated field — and the error capsule says where to find it.
   without an app being up.
 - The LaunchAgent uses `KeepAlive: {SuccessfulExit: false}`. Plain `true` means
   "relaunch after any exit", which once made the app impossible to quit.
+- launchd reads the plist once, when the job is bootstrapped. Deleting the file
+  therefore removes autostart without touching the running service — which is
+  exactly what "Start dictation in the background" promises, and why switching
+  it off does not kill the current session. Stopping dictation *now* is the
+  pause toggle in the menu-bar panel; quitting is Quit.
 - Code signing uses a stable self-signed certificate. Ad-hoc signatures change
   every build, and macOS ties microphone, accessibility and input-monitoring
   grants to the signature — with ad-hoc, every install demands all three again.
+
+## How the settings are divided
+
+A tab answers one question a person has, not one region of the code:
+**Dictation** is everything before the text, **Text** is everything after,
+**Look** is what shows up on screen, **Privacy** is what leaves this Mac,
+**App** is the product itself. A setting lives where it is looked for at the
+moment it is needed — the microphone is remembered when you are about to
+speak, not while reading a tab called "General".
+
+Two consequences worth keeping:
+
+- **State is not a preference.** Permissions, the model, the measurements and
+  the maintenance actions have nothing to toggle, so they are a window section
+  ("Service"), not a tab. A tab with no settings in it — the old "Model" — is
+  the symptom this rule exists to prevent.
+- **Facts are not switches.** "Notifications: never sent", "audio: deleted",
+  "network: once every 6 h" are answers, and they sit in their own muted card
+  with no control column. A switch that switches nothing is worse than an
+  absent one, but the fact itself must not disappear either.
+
+Navigation stays flat: five tabs fit 767 pt in both languages, so a group
+header inside a tab does the job a sub-tab would have done.
 
 ## Where state lives
 
@@ -132,7 +160,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 |---|---|
 | `main.swift` | entry point, argument handling, the three process modes |
 | `App.swift` | the agent: menu bar, hotkey handling, the dictation pipeline, diagnostics |
-| `ControlPanel.swift` | the window: sections, settings tabs, dictionary |
+| `ControlPanel.swift` | the window: sections, settings tabs, dictionary, the Service section |
 | `MainWindow.swift`, `SettingsUI.swift`, `SDTheme.swift` | the design system — every control is drawn by hand to match the mockups in both themes |
 | `HotkeyListener.swift` | the event tap and chord handling |
 | `AudioCapture.swift`, `AudioInputDevices.swift` | recording, conversion, device selection |
@@ -140,7 +168,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
 | `TextInsertion.swift` | clipboard and keystroke insertion |
 | `Settings.swift`, `CoreTypes.swift` | stored settings and shared types |
-| `SettingsCatalog.swift` | the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable |
+| `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |
 | `Statistics.swift` | what the Statistics section shows |
 | `UpdateCheck.swift`, `UpdateWindow.swift` | the updater |
 | `ModelIntegrity.swift` | per-file SHA-256 verification of the model, cache paths, disk space |

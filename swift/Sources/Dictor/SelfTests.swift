@@ -164,6 +164,20 @@ enum DictorSelfTest {
             settings.interfaceLanguage = .russian
             defer { settings.interfaceLanguage = savedLanguage }
 
+            // Две строки показываются по условию: «Сочетание завершения»
+            // живёт при включённом альтернативном завершении, «Задержка перед
+            // Enter» оживает при выбранном Enter. Достижимость проверяется в
+            // том состоянии, где строка вправду работает, — иначе тест ловил
+            // бы приглушённый контрол и требовал от него отклика.
+            let savedAlternate = settings.alternateCompletionEnabled
+            let savedCompletion = settings.primaryCompletionBehavior
+            settings.alternateCompletionEnabled = true
+            settings.primaryCompletionBehavior = .insertAndEnter
+            defer {
+                settings.alternateCompletionEnabled = savedAlternate
+                settings.primaryCompletionBehavior = savedCompletion
+            }
+
             let panel = DictorControlPanelApp()
             // Та же ширина, что даёт вкладкам настоящее окно: раздел
             // «Настройки» = окно минус сайдбар минус линия-разделитель.
@@ -182,6 +196,23 @@ enum DictorSelfTest {
                 if case .settingsRow(let tab, let title, let toggleTest) = entry.exposure {
                     byTab[tab, default: []].append((title, toggleTest, entry.property))
                 }
+            }
+
+            // Вкладка из реестра обязана существовать. Без этой проверки
+            // запись с чужим идентификатором молча получала бы вкладку по
+            // умолчанию (`default:` в makeSettingsContentView) — и, если бы
+            // заголовок там случайно нашёлся, тест прошёл бы на настройке,
+            // до которой человеку не добраться.
+            let known = Set(SETTINGS_TABS.map(\.id))
+            for tab in byTab.keys.sorted() {
+                try expect(known.contains(tab), equals: true,
+                           "the catalog points at tab «\(tab)», which is not in SETTINGS_TABS")
+            }
+            // И наоборот: вкладка без единой строки — пустой экран, который
+            // человек откроет и закроет. Вкладка «Модель» такой и была.
+            for tab in SETTINGS_TABS {
+                try expect(byTab[tab.id]?.isEmpty == false, equals: true,
+                           "tab «\(tab.id)» has no settings rows in the catalog")
             }
 
             for (tab, expectations) in byTab.sorted(by: { $0.key < $1.key }) {
