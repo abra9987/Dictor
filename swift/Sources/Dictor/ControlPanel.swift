@@ -3780,7 +3780,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // «Внешним видом» (тумблер, фон, цвет) и «Продвинутыми» (размер,
         // положение). Пять настроек одного объекта теперь стоят вместе, под
         // одним превью, и видно, что меняется.
-        let preview = SDCapsulePreview(size: settings.recordingHUDSize)
+        let preview = SDCapsulePreview(
+            size: settings.recordingHUDSize,
+            backgroundStyle: settings.recordingHUDBackgroundStyle,
+            color: settings.recordingHUDRecordingColor.nsColor,
+            transcribingColor: settings.recordingHUDTranscribingColor.nsColor,
+            language: language)
         preview.translatesAutoresizingMaskIntoConstraints = false
 
         let hudToggle = SDToggle()
@@ -3804,7 +3809,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             guard let size = RecordingHUDSize(rawValue: raw) else { return }
             self?.settings.recordingHUDSize = size
             self?.settingsDraft?.hudSize = size
-            preview?.setSize(size)
+            preview?.apply(size: size)
         }
         let sizeRow = SDRowView(title: t("Размер", "Size"),
                                 control: sizeSegmented,
@@ -3840,10 +3845,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let backgroundPills = SDPills(options: RecordingHUDBackgroundStyle.allCases.map {
             .init(title: localizedBackgroundName($0), value: $0.rawValue)
         }, selected: settings.recordingHUDBackgroundStyle.rawValue)
-        backgroundPills.onSelect = { [weak self] raw in
+        backgroundPills.onSelect = { [weak self, weak preview] raw in
             guard let style = RecordingHUDBackgroundStyle(rawValue: raw) else { return }
             self?.settings.recordingHUDBackgroundStyle = style
             self?.settingsDraft?.backgroundStyle = style
+            preview?.apply(backgroundStyle: style)
         }
         let backgroundRow = SDRowView(title: t("Фон", "Background"),
                                       control: backgroundPills,
@@ -3856,15 +3862,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             },
             selected: settings.recordingHUDRecordingColor.rawValue
         )
-        swatches.onSelect = { [weak self] raw in
+        swatches.onSelect = { [weak self, weak preview] raw in
             guard let color = RecordingHUDAccentColor(rawValue: raw) else { return }
             self?.settings.recordingHUDRecordingColor = color
             self?.settingsDraft?.recordingColor = color
+            preview?.apply(color: color.nsColor)
         }
         let colorRow = SDRowView(
             title: t("Цвет волны", "Wave color"),
-            subtitle: t("Он же цвет приложения. Цвет фазы распознавания задаётся только через defaults write",
-                        "Also the app color. The transcribing phase color is set through defaults write only"),
+            // «Он же цвет приложения» тут стояло из макета и было неправдой:
+            // акцент интерфейса — константа и за этой настройкой не следует.
+            // Правдой это делать нельзя как есть: в палитре белый и серый,
+            // подобранные под тёмную капсулу, — акцентом всего окна белый
+            // сделал бы невидимыми «Стереть историю…» и точку обновления.
+            subtitle: t("Волна в капсуле выше. Цвет фазы распознавания задаётся только через defaults write",
+                        "The wave in the capsule above. The transcribing phase color is set through defaults write only"),
             control: swatches,
             style: .card
         )

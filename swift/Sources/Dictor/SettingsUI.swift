@@ -1187,67 +1187,94 @@ final class SDSegmented: NSView {
 /// волна, mono-таймер. Пропорции берутся у настоящей капсулы, поэтому
 /// переключение S/M/L видно сразу — в макете превью нарисованы статикой,
 /// но статичная картинка рядом с переключателем ничего не сообщает.
+/// Превью капсулы записи — настоящая `RecordingHUDView`, а не её рисунок.
+///
+/// Рисунком оно и было: пилюля 132×34 фиксированного размера, ширина —
+/// выдуманная доля от него (0.66 / 0.84 / 1), заливка и цвет волны —
+/// константы. Значит S/M/L меняли картинку на несколько пикселей и никогда
+/// не показывали настоящий размер, а свотчи цвета и вовсе не доходили сюда:
+/// человек выбирал розовый и видел коралловый. Превью, которое врёт про
+/// то, что настраивают прямо под ним, хуже отсутствующего.
 final class SDCapsulePreview: NSView {
-    private var size: RecordingHUDSize
+    private let hud = RecordingHUDView(frame: .zero)
+    private var hudWidth: NSLayoutConstraint!
+    private var hudHeight: NSLayoutConstraint!
+    private var motionTimer: Timer?
+    private var phase: CGFloat = 0
 
-    init(size: RecordingHUDSize) {
-        self.size = size
+    init(size: RecordingHUDSize,
+         backgroundStyle: RecordingHUDBackgroundStyle,
+         color: NSColor,
+         transcribingColor: NSColor,
+         language: InterfaceLanguage) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 34).isActive = true
-        widthAnchor.constraint(equalToConstant: 132).isActive = true
+        hud.translatesAutoresizingMaskIntoConstraints = false
+        hud.mode = .recording
+        hud.revealProgress = 1
+        hud.recordingElapsed = 7
+        hud.interfaceLanguage = language
+        hud.recordingColor = color
+        hud.transcribingColor = transcribingColor
+        hud.backgroundStyle = backgroundStyle
+        addSubview(hud)
+
+        hudWidth = hud.widthAnchor.constraint(equalToConstant: size.expandedSize.width)
+        hudHeight = hud.heightAnchor.constraint(equalToConstant: size.expandedSize.height)
+        NSLayoutConstraint.activate([
+            // Высота держится по самой большой капсуле: иначе карточка
+            // прыгала бы на 24 pt при каждом переключении S/M/L.
+            heightAnchor.constraint(equalToConstant: RecordingHUDSize.large.expandedSize.height),
+            hud.centerXAnchor.constraint(equalTo: centerXAnchor),
+            hud.centerYAnchor.constraint(equalTo: centerYAnchor),
+            hudWidth,
+            hudHeight,
+        ])
+        apply(size: size)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    func setSize(_ newSize: RecordingHUDSize) {
-        size = newSize
-        needsDisplay = true
+    func apply(size: RecordingHUDSize) {
+        hud.hudSize = size
+        hud.visualScale = size.visualScale
+        hudWidth.constant = size.expandedSize.width
+        hudHeight.constant = size.expandedSize.height
+        needsLayout = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let dark = effectiveAppearance.isDark
-        // Пилюля той же высоты, что и настоящая капсула, ужатая под строку.
-        let height = min(bounds.height, size.capsuleHeight * 0.72)
-        let width = bounds.width * (size == .compact ? 0.66 : (size == .standard ? 0.84 : 1))
-        let rect = NSRect(x: bounds.maxX - width,
-                          y: bounds.midY - height / 2,
-                          width: width,
-                          height: height)
-        (dark ? NSColor(hex: 0x111111) : NSColor(hex: 0x1C1B19)).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: height / 2, yRadius: height / 2).fill()
+    func apply(color: NSColor) {
+        hud.recordingColor = color
+    }
 
-        // Волна: пять полос разной высоты, как в записи.
-        let heights: [CGFloat] = [0.35, 0.7, 1, 0.55, 0.8]
-        let barWidth: CGFloat = 2.5
-        let gap: CGFloat = 2.5
-        let waveHeight = height * 0.45
-        var x = rect.minX + height / 2
-        SD.C.voiceDark.setFill()
-        for factor in heights {
-            let barHeight = max(2, waveHeight * factor)
-            NSBezierPath(roundedRect: NSRect(x: x,
-                                             y: rect.midY - barHeight / 2,
-                                             width: barWidth,
-                                             height: barHeight),
-                         xRadius: 1.25, yRadius: 1.25).fill()
-            x += barWidth + gap
+    func apply(backgroundStyle: RecordingHUDBackgroundStyle) {
+        hud.backgroundStyle = backgroundStyle
+    }
+
+    /// Волна живёт, пока превью на экране: неподвижная капсула показывала бы
+    /// одну застывшую полоску и снова была бы не тем, что человек увидит.
+    /// Таймер привязан к окну — вкладку закрыли, движение кончилось.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        motionTimer?.invalidate()
+        motionTimer = nil
+        guard window != nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.phase += 0.16
+            self.hud.phase = self.phase
+            // Уровень «как в речи»: не шум и не синус — иначе волна читается
+            // либо как помеха, либо как заставка.
+            let base = 0.45 + 0.35 * sin(self.phase * 0.7)
+            let flutter = 0.12 * sin(self.phase * 2.3)
+            self.hud.level = Float(max(0.05, min(1, base + flutter)))
         }
-
-        let timer = "0:14"
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: max(9, height * 0.32), weight: .regular),
-            .foregroundColor: NSColor(hex: 0xF2F1EE),
-        ]
-        let timerSize = timer.size(withAttributes: attrs)
-        if x + timerSize.width + height / 2 <= rect.maxX {
-            timer.draw(at: NSPoint(x: x + 4, y: rect.midY - timerSize.height / 2),
-                       withAttributes: attrs)
-        }
+        RunLoop.main.add(timer, forMode: .common)
+        motionTimer = timer
     }
 
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        needsDisplay = true
-    }
+    // deinit таймер не трогает: он @MainActor-изолирован, а deinit — нет.
+    // Гасит его viewDidMoveToWindow(window == nil), то есть уход вкладки с
+    // экрана; вкладка пересобирается целиком, так что этот путь и есть
+    // обычный конец жизни превью.
 }
