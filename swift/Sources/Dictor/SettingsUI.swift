@@ -336,22 +336,30 @@ final class SDTabButton: NSButton {
         didSet { restyle() }
     }
 
+    /// Активная вкладка приподнята над полосой: белая карточка с мягкой
+    /// тенью (в тёмной теме — светлее фона полосы). Прежняя заливка
+    /// «чуть темнее фона» читалась как нажатая, а не как выбранная.
     static let activeFill = NSColor(name: nil) { appearance in
         appearance.isDark
-            ? NSColor.white.withAlphaComponent(0.1)
-            : NSColor.black.withAlphaComponent(0.08)
+            ? NSColor(hex: 0x403D39)
+            : NSColor.white
     }
 
     func restyle() {
         wantsLayer = true
         layer?.cornerRadius = 7
-        font = .systemFont(ofSize: 12, weight: isActiveTab ? .semibold : .regular)
+        font = .systemFont(ofSize: 12.5, weight: isActiveTab ? .semibold : .medium)
         if isActiveTab {
             layer?.backgroundColor = resolvedCGColor(SDTabButton.activeFill)
             contentTintColor = SD.C.ink
+            layer?.shadowColor = NSColor.black.cgColor
+            layer?.shadowOpacity = effectiveAppearance.isDark ? 0.28 : 0.10
+            layer?.shadowOffset = CGSize(width: 0, height: -1)
+            layer?.shadowRadius = 1.5
         } else {
             layer?.backgroundColor = .clear
             contentTintColor = SD.C.graphite
+            layer?.shadowOpacity = 0
         }
     }
 

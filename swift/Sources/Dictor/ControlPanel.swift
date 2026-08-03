@@ -632,9 +632,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let bar = NSStackView()
         bar.orientation = .horizontal
         bar.spacing = 2
-        // Макет: таб padding 5px 12px, радиус 7, шрифт 12; активный —
-        // 600, ink, пилюля rgba(0,0,0,.08)/rgba(255,255,255,.1);
-        // неактивный — 400 graphite. Ряд: padding 10px 0.
+        // Макет: таб 27 pt высотой, padding 0 13px, радиус 7, шрифт 12.5;
+        // активный — 600 ink на белой карточке с мягкой тенью, неактивный —
+        // 500 graphite без подложки.
         for tab in SETTINGS_TABS {
             let (id, title) = (tab.id, tab.title(language))
             let button = SDTabButton(title: title, target: self,
@@ -645,7 +645,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             button.translatesAutoresizingMaskIntoConstraints = false
             button.heightAnchor.constraint(equalToConstant: 27).isActive = true
             let textWidth = ceil(title.size(withAttributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
+                .font: NSFont.systemFont(ofSize: 12.5, weight: .semibold)
             ]).width)
             button.widthAnchor.constraint(equalToConstant: textWidth + 24).isActive = true
             bar.addArrangedSubview(button)
@@ -2598,6 +2598,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.verticalScroller?.controlSize = .small
+        // Окно с fullSizeContentView: скролл сам добавил бы сверху отступ
+        // высотой с тайтлбар, чтобы содержимое не уезжало под кнопки окна.
+        // Кнопки лежат над сайдбаром, а не над этой панелью, так что отступ
+        // здесь — просто пустая полоса над первой строкой.
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsetsZero
         scroll.documentView = documentView
         scroll.translatesAutoresizingMaskIntoConstraints = false
         documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
@@ -2985,6 +2991,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.verticalScroller?.controlSize = .small
+        // Окно с fullSizeContentView: скролл сам добавил бы сверху отступ
+        // высотой с тайтлбар, чтобы содержимое не уезжало под кнопки окна.
+        // Кнопки лежат над сайдбаром, а не над этой панелью, так что отступ
+        // здесь — просто пустая полоса над первой строкой.
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsetsZero
         scroll.documentView = documentView
         scroll.translatesAutoresizingMaskIntoConstraints = false
         documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
@@ -3444,6 +3456,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.verticalScroller?.controlSize = .small
+        // Окно с fullSizeContentView: скролл сам добавил бы сверху отступ
+        // высотой с тайтлбар, чтобы содержимое не уезжало под кнопки окна.
+        // Кнопки лежат над сайдбаром, а не над этой панелью, так что отступ
+        // здесь — просто пустая полоса над первой строкой.
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsetsZero
         scroll.documentView = documentView
         scroll.translatesAutoresizingMaskIntoConstraints = false
         documentView.translatesAutoresizingMaskIntoConstraints = false
@@ -3933,6 +3951,12 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.verticalScroller?.controlSize = .small
+        // Окно с fullSizeContentView: скролл сам добавил бы сверху отступ
+        // высотой с тайтлбар, чтобы содержимое не уезжало под кнопки окна.
+        // Кнопки лежат над сайдбаром, а не над этой панелью, так что отступ
+        // здесь — просто пустая полоса над первой строкой.
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsetsZero
         scroll.documentView = documentView
         scroll.translatesAutoresizingMaskIntoConstraints = false
         documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
@@ -4944,10 +4968,17 @@ func exportHistoryPanelPreviews(to directory: URL,
     // о расхождении версий — правду про запуск из /tmp, но не про программу.
     panel.previewStatusOverride = .ready(latencyMilliseconds: 180)
     let size = MAIN_WINDOW_SIZE
+    // Окно рендера повторяет настоящее: `.titled` + `.fullSizeContentView`.
+    // В безрамочном окне AppKit не считает безопасную зону под тайтлбар — и
+    // пустая полоса, которую скролл сам себе добавлял над первой строкой, в
+    // превью не появлялась вовсе. Дефект, невидимый рендером, ловится только
+    // глазами на живом окне; повторяем конфигурацию, чтобы не ловить.
     let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
-                          styleMask: [.borderless],
+                          styleMask: [.titled, .fullSizeContentView],
                           backing: .buffered,
                           defer: false)
+    window.titlebarAppearsTransparent = true
+    window.titleVisibility = .hidden
     window.colorSpace = .sRGB
     var exported = 0
     // Каждый раздел окна (макет 6a/6b) в обеих темах.
