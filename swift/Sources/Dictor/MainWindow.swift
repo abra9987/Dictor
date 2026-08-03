@@ -30,13 +30,19 @@ enum MainWindowSection: String, CaseIterable {
     }
 
     /// Иконка пункта. У «Сегодня» в макете вместо символа — волна.
-    var glyph: String? {
+    ///
+    /// SF Symbols, а не текстовые глифы (≡, ▨, Aa, ⚙): у случайных символов
+    /// Юникода метрики свои у каждого — знак сидит в своей коробке то выше,
+    /// то ниже, и центрируется коробка, а не сам знак. В ряду это читалось
+    /// как «иконки не напротив текста», и размер у них гулял. У символов
+    /// метрики общие и заданы под шрифт рядом.
+    var symbolName: String? {
         switch self {
         case .today: return nil
-        case .history: return "≡"
-        case .stats: return "▨"
-        case .dictionary: return "Aa"
-        case .settings: return "⚙"
+        case .history: return "clock.arrow.circlepath"
+        case .stats: return "chart.bar.fill"
+        case .dictionary: return "character.book.closed.fill"
+        case .settings: return "gearshape.fill"
         }
     }
 }
@@ -120,12 +126,20 @@ final class SDSidebarItemView: NSControl {
         addSubview(background)
 
         let icon: NSView
-        if let glyph = section.glyph {
-            let label = NSTextField(labelWithString: glyph)
-            label.font = .systemFont(ofSize: 13)
-            label.textColor = isSelected ? SD.C.ink : SD.C.graphite
-            label.alignment = .center
-            icon = label
+        if let symbolName = section.symbolName {
+            let view = NSImageView()
+            // Кегль символа берётся от подписи рядом (13.5): SF Symbols
+            // размечены под шрифт, и заданный так знак совпадает с текстом
+            // и по росту, и по весу. Прежние 13 pt в поле высотой 14
+            // обрезали знак и делали его мельче подписи.
+            view.image = NSImage(systemSymbolName: symbolName,
+                                 accessibilityDescription: title)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(
+                    pointSize: 13.5,
+                    weight: isSelected ? .semibold : .regular))
+            view.contentTintColor = isSelected ? SD.C.ink : SD.C.graphite
+            view.imageScaling = .scaleNone
+            icon = view
         } else {
             let wave = SDMiniWaveView(values: [0.3, 0.7, 1, 0.5, 0.8],
                                       color: SD.C.voice)
@@ -150,8 +164,11 @@ final class SDSidebarItemView: NSControl {
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 14),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.heightAnchor.constraint(equalToConstant: 18),
+            // Иконка равняется по подписи, а не по строке: у строки высота
+            // 34 pt, и центр у неё свой — совпадение с текстом получалось
+            // случайно и держалось только пока текст ровно посередине.
+            icon.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             titleLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 11),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
