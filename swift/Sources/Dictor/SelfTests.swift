@@ -53,6 +53,8 @@ enum DictorSelfTest {
             return runSuite("model-status", testSpeechModelStartupStatus)
         case "service-status":
             return runSuite("service-status", testServiceStatusHold)
+        case "quit-state":
+            return runSuite("quit-state", testQuitLeavesServiceEnabled)
         case "search-clear":
             return runSuite("search-clear", testHistorySearchClearButton)
         case "today-actions":
@@ -129,6 +131,7 @@ enum DictorSelfTest {
         try testAudioInputDeviceFiltering()
         try testSpeechModelStartupStatus()
         try testServiceStatusHold()
+        try testQuitLeavesServiceEnabled()
         try testHistorySearchClearButton()
         try testTodayRecentRowActions()
         try testFloatingCapsuleGeometry()
@@ -5366,6 +5369,53 @@ enum DictorSelfTest {
         _ = pending.settle(.failed, now: at(1.3))
         try expect(pending.pendingDeadline, equals: nil,
                    "a shown status should cancel its wake-up")
+    }
+
+    /// Сценарий «вышел → открыл снова»: выход обязан остановить службу
+    /// сейчас, но не отключить её насовсем. Регрессия v1.7.0: выход из окна
+    /// писал `agentEnabled = false`, флаг переживал перезапуск, и следующее
+    /// открытие Dictor поднимало окно без службы — в меню-баре пусто,
+    /// диктовка мертва, а диалог выхода обещал «пока вы не откроете Dictor
+    /// снова». Тест гоняет реальные дисковые эффекты выхода против живых
+    /// Settings и сверяет их с решением панели при следующем старте.
+    private static func testQuitLeavesServiceEnabled() throws {
+        let settings = Settings.shared
+        let saved = settings.agentEnabled
+        defer { settings.agentEnabled = saved }
+
+        // Служба была включена, человек вышел целиком.
+        settings.agentEnabled = true
+        var serviceStopped = false
+        DictorControlPanelApp.applyQuitSideEffects(settings: settings,
+                                                   stopService: { serviceStopped = true })
+        try expect(serviceStopped, equals: true,
+                   "quit must stop the running service")
+        try expect(settings.agentEnabled, equals: true,
+                   "quit must not disable the service for the next launch")
+        try expect(DictorControlPanelApp.shouldStartAgentOnLaunch(
+                       agentEnabled: settings.agentEnabled,
+                       agentAlreadyRunning: false),
+                   equals: true,
+                   "after quit, reopening Dictor must bring the service back")
+
+        // Служба выключена тумблером — выход не должен её воскрешать.
+        settings.agentEnabled = false
+        DictorControlPanelApp.applyQuitSideEffects(settings: settings,
+                                                   stopService: {})
+        try expect(settings.agentEnabled, equals: false,
+                   "quit must not re-enable a service the user switched off")
+        try expect(DictorControlPanelApp.shouldStartAgentOnLaunch(
+                       agentEnabled: settings.agentEnabled,
+                       agentAlreadyRunning: false),
+                   equals: false,
+                   "a switched-off service must stay off after reopening")
+
+        // Служба уже работает — второй запуск не поднимает её повторно.
+        try expect(DictorControlPanelApp.shouldStartAgentOnLaunch(
+                       agentEnabled: true,
+                       agentAlreadyRunning: true),
+                   equals: false,
+                   "a running service must not be started twice")
     }
 
     private static func expect<T: Equatable>(

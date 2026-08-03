@@ -160,7 +160,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         if settings.checkForUpdates {
             checkForUpdates()
         }
-        if settings.agentEnabled && !DictorAgentService.isAgentRunning() {
+        if Self.shouldStartAgentOnLaunch(
+            agentEnabled: settings.agentEnabled,
+            agentAlreadyRunning: DictorAgentService.isAgentRunning()) {
             beginServiceOperation(.starting)
         }
         startOnboardingIfNeeded(force: CommandLine.arguments.contains("--onboarding"))
@@ -2087,9 +2089,31 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         log("control panel: quitting the app and the dictation service")
         // Здесь ждать можно: это окно, а не агент. Дедлок ловил только сам
         // агент, который своим bootout ждал собственной смерти.
-        DictorAgentService.stop()
-        settings.agentEnabled = false
+        Self.applyQuitSideEffects(settings: settings,
+                                  stopService: DictorAgentService.stop)
         NSApp.terminate(nil)
+    }
+
+    /// Всё, что полный выход делает помимо закрытия окна. Вынесено из
+    /// `quitEverythingClicked` ради self-теста «quit-state»: однажды выход
+    /// записывал `agentEnabled = false`, флаг переживал перезапуск, и
+    /// следующее открытие Dictor поднимало окно без службы и без иконки в
+    /// меню-баре — вопреки обещанию диалога «пока вы не откроете Dictor
+    /// снова». Выход — про «сейчас», тумблер службы — про «насовсем»,
+    /// поэтому настроек здесь не трогаем; выход из меню-бара их тоже не
+    /// трогает — пути совпадают. Новые дисковые эффекты выхода добавляйте
+    /// сюда, а не в обработчик кнопки, иначе они пройдут мимо теста.
+    nonisolated static func applyQuitSideEffects(settings: Settings,
+                                                 stopService: () -> Void) {
+        stopService()
+    }
+
+    /// Решение панели при старте: поднимать ли службу. Пара к
+    /// `applyQuitSideEffects` в self-тесте «quit-state»: вместе они
+    /// закрепляют сценарий «вышел → открыл снова → служба вернулась».
+    nonisolated static func shouldStartAgentOnLaunch(agentEnabled: Bool,
+                                                     agentAlreadyRunning: Bool) -> Bool {
+        agentEnabled && !agentAlreadyRunning
     }
 
     @objc private func sidebarItemClicked(_ sender: SDSidebarItemView) {
