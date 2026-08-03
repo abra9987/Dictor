@@ -107,7 +107,7 @@ is written out in [docs/updates.md](docs/updates.md).
 - **`scripts/check.sh`** — static: manifests, the signing pin against the
   keychain, site markup and asset existence, and grep rules that guard defects
   this project has actually shipped. It does not compile.
-- **Self-tests** — 32 suites in `SelfTests.swift`, 29 in `all`, three excluded
+- **Self-tests** — 33 suites in `SelfTests.swift`, 30 in `all`, three excluded
   by name because they need a live machine. They exist only in DEBUG builds.
   Several assert *reachability* rather than behaviour: that a control is not
   covered by another view, that an action has a receiver, that a suite is
