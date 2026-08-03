@@ -56,6 +56,7 @@ final class DictorQuickPanel: NSPanel {
     /// и нажимал.
     private var showsUpToDate = false
     private var upToDateWorkItem: DispatchWorkItem?
+    private var copyResetWorkItem: DispatchWorkItem?
 
     static let panelWidth: CGFloat = 360
 
@@ -756,6 +757,24 @@ final class DictorQuickPanel: NSPanel {
     @objc private func copyRecentClicked(_ sender: NSButton) {
         guard let text = sender.cell?.representedObject as? String else { return }
         quickDelegate?.quickPanelDidCopyRecent(text: text)
+        confirmCopy(on: sender)
+    }
+
+    /// Копирование — единственное действие панели, которое ничего не меняет
+    /// на экране: окно остаётся открытым, текст уходит в буфер молча, и
+    /// человеку неоткуда узнать, сработало ли. Кнопка отвечает за себя сама.
+    private func confirmCopy(on button: NSButton) {
+        copyResetWorkItem?.cancel()
+        let originalTitle = t("Скопировать", "Copy")
+        button.title = t("Скопировано", "Copied")
+        button.contentTintColor = SD.C.positive
+        let reset = DispatchWorkItem { [weak button] in
+            guard let button else { return }
+            button.title = originalTitle
+            button.contentTintColor = SD.C.ink
+        }
+        copyResetWorkItem = reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4, execute: reset)
     }
 
     @objc private func pasteRecentClicked(_ sender: NSButton) {
