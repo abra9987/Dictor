@@ -95,23 +95,30 @@ unrelated field — and the error capsule says where to find it.
 A tab answers one question a person has, not one region of the code:
 **Dictation** is everything before the text, **Text** is everything after,
 **Look** is what shows up on screen, **Privacy** is what leaves this Mac,
-**App** is the product itself. A setting lives where it is looked for at the
+**App** is the product itself, **Service** is whether any of it works right
+now. A setting lives where it is looked for at the
 moment it is needed — the microphone is remembered when you are about to
 speak, not while reading a tab called "General".
 
 Two consequences worth keeping:
 
 - **State is not a preference.** Permissions, the model, the measurements and
-  the maintenance actions have nothing to toggle, so they are a window section
-  ("Service"), not a tab. A tab with no settings in it — the old "Model" — is
-  the symptom this rule exists to prevent.
+  the maintenance actions have nothing to toggle. They live in a tab of their
+  own ("Service") whose caption says so in words — a tab row promises
+  preferences, and the promise has to be withdrawn out loud. A tab that is
+  settings-free declares itself in `SETTINGS_TABS` with a reason; every other
+  tab must hold at least one row, which is how the old empty "Model" tab is
+  kept from coming back. The sidebar stays what it is: data only.
 - **Facts are not switches.** "Notifications: never sent", "audio: deleted",
   "network: once every 6 h" are answers, and they sit in their own muted card
   with no control column. A switch that switches nothing is worse than an
   absent one, but the fact itself must not disappear either.
 
-Navigation stays flat: five tabs fit 767 pt in both languages, so a group
-header inside a tab does the job a sub-tab would have done.
+Navigation stays flat: six tabs fit 767 pt in both languages, so a group
+header inside a tab does the job a sub-tab would have done. The badge dot on a
+tab label is reserved for news the person would otherwise miss — an available
+update — and not for state, which already calls out from the sidebar footer
+and the "text wasn't inserted" banner.
 
 ## Where state lives
 
@@ -135,7 +142,7 @@ is written out in [docs/updates.md](docs/updates.md).
 - **`scripts/check.sh`** — static: manifests, the signing pin against the
   keychain, site markup and asset existence, and grep rules that guard defects
   this project has actually shipped. It does not compile.
-- **Self-tests** — 33 suites in `SelfTests.swift`, 30 in `all`, three excluded
+- **Self-tests** — 34 suites in `SelfTests.swift`, 31 in `all`, three excluded
   by name because they need a live machine. They exist only in DEBUG builds.
   Several assert *reachability* rather than behaviour: that a control is not
   covered by another view, that an action has a receiver, that a suite is

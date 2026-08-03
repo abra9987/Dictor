@@ -84,7 +84,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// Пауза перед показом коротких состояний службы (макет 8c).
     private let statusHold = ServiceStatusHold()
     private var statusHoldTimer: Timer?
-    private var updateState: ControlPanelUpdateState = .notChecked
+    /// Не private ради экспорта превью: «доступно обновление» — состояние
+    /// с собственным видом (точка на ярлыке вкладки), и увидеть его надо
+    /// картинкой, а не рассуждением.
+    var updateState: ControlPanelUpdateState = .notChecked
     private var lastRenderFingerprint = ""
     private let settings = Settings.shared
     private var permissionClickCount: [Permission: Int] = [:]
@@ -561,6 +564,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             addPrivacyTabRows(to: content)
         case "app":
             addAppTabRows(to: content)
+        case "service":
+            addServiceTabRows(to: content)
         default:
             addDictationTabRows(to: content, draft: draft)
         }
@@ -632,22 +637,32 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let bar = NSStackView()
         bar.orientation = .horizontal
         bar.spacing = 2
-        // Макет: таб 27 pt высотой, padding 0 13px, радиус 7, шрифт 12.5;
+        // Макет: таб 27 pt высотой, padding 0 11px, радиус 7, шрифт 12.5;
         // активный — 600 ink на белой карточке с мягкой тенью, неактивный —
-        // 500 graphite без подложки.
+        // 500 graphite без подложки. Отступ 11, а не 13: шесть вкладок
+        // должны уместиться в 767 pt и по-русски, и по-английски.
+        let updateAvailable: Bool
+        if case .available = updateState { updateAvailable = true } else { updateAvailable = false }
         for tab in SETTINGS_TABS {
             let (id, title) = (tab.id, tab.title(language))
             let button = SDTabButton(title: title, target: self,
                                      action: #selector(settingsTabClicked(_:)))
             button.isBordered = false
             button.isActiveTab = settingsTab == id
+            // Обновление — единственная новость, которую человек иначе не
+            // заметит: версия лежит внутри вкладки, а не на виду.
+            button.showsBadge = id == "app" && updateAvailable
             button.identifier = NSUserInterfaceItemIdentifier(id)
             button.translatesAutoresizingMaskIntoConstraints = false
             button.heightAnchor.constraint(equalToConstant: 27).isActive = true
             let textWidth = ceil(title.size(withAttributes: [
                 .font: NSFont.systemFont(ofSize: 12.5, weight: .semibold)
             ]).width)
-            button.widthAnchor.constraint(equalToConstant: textWidth + 24).isActive = true
+            let badgeWidth = button.showsBadge
+                ? SDTabButton.badgeSize + SDTabButton.badgeGap
+                : 0
+            button.widthAnchor.constraint(equalToConstant: textWidth + 22 + badgeWidth)
+                .isActive = true
             bar.addArrangedSubview(button)
         }
         bar.translatesAutoresizingMaskIntoConstraints = false
@@ -1173,9 +1188,19 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         refresh(force: true)
     }
 
-    @objc private func openServiceSectionFromPanel(_ sender: NSButton) {
-        mainSection = .service
+    /// Диплинк во вкладку «Служба» — из «Приложения», из подвала сайдбара и
+    /// из баннера «текст не вставился». Состояние прячется за кликом, поэтому
+    /// каждое место, где человек упирается в неработающую диктовку, обязано
+    /// вести прямо сюда, а не «в настройки, там разберётесь».
+    func openServiceTab() {
+        mainSection = .settings
+        settingsTab = "service"
+        hotkeyNotice = nil
         refresh(force: true)
+    }
+
+    @objc private func openServiceSectionFromPanel(_ sender: NSButton) {
+        openServiceTab()
     }
 
     /// Автозапуск диктовки. Включение поднимает службу сразу — ждать входа в
@@ -1874,8 +1899,6 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             content = makeStatsSectionView()
         case .dictionary:
             content = makeDictionarySectionView()
-        case .service:
-            content = makeServiceSectionView()
         case .settings:
             content = makeSettingsSectionView()
         }
@@ -2157,10 +2180,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     @objc private func serviceStatusPrimaryClicked(_ sender: Any?) {
         switch currentServiceStatus() {
         case .needsPermission:
-            // Разрешения — состояние службы, и живут они в разделе «Служба».
+            // Разрешения — состояние службы, и живут они во вкладке «Служба».
             // Подвал сайдбара ведёт ровно туда, где ответ.
-            mainSection = .service
-            refresh(force: true)
+            openServiceTab()
         case .failed:
             settings.agentEnabled = true
             _ = settings.refreshFromDisk()
@@ -2173,8 +2195,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
     @objc private func serviceStatusSecondaryClicked(_ sender: Any?) {
-        mainSection = .service
-        refresh(force: true)
+        openServiceTab()
     }
 
     /// Поповер попросил открыть раздел в уже запущенном окне.
@@ -2708,6 +2729,20 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let chart = SDComparisonBarChart(buckets: summary.buckets,
                                          peakIndex: summary.peakBucketIndex,
                                          peakText: peakText)
+        // Подпись столбика под курсором: период, число слов и — если прошлый
+        // период у этого столбика непустой — его число. Легенда обещает два
+        // ряда, значит и плашка обязана называть оба, иначе серый сегмент
+        // остаётся без единого числа во всём разделе.
+        chart.calloutFormatter = { [language] bucket in
+            let words = formattedUsageInteger(bucket.words)
+            var text = "\(bucket.calloutLabel): \(words)"
+            if bucket.previousWords > 0 {
+                let previous = formattedUsageInteger(bucket.previousWords)
+                text += localizedText(" · было \(previous)", " · was \(previous)",
+                                      language: language)
+            }
+            return text
+        }
         chart.translatesAutoresizingMaskIntoConstraints = false
         chart.heightAnchor.constraint(equalToConstant: 168).isActive = true
 
@@ -3897,83 +3932,25 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// Разрешения, модель, измерения и обслуживание. Ни одного переключателя
     /// предпочтений: всё здесь — ответ на вопрос «что там со службой», и
     /// приходят сюда из подвала сайдбара или из «Приложения».
-    private func makeServiceSectionView() -> NSView {
-        let root = PaperBackgroundView()
-        root.fill = SD.C.settingsPaper
-        let header = makeSectionHeader(title: MainWindowSection.service.title(language),
-                                       accessory: nil)
+    // MARK: Вкладка «Служба» — работает ли всё это сейчас
 
-        let content = NSStackView()
-        content.orientation = .vertical
-        content.alignment = .leading
-        content.spacing = 18
-        content.edgeInsets = NSEdgeInsets(top: 20, left: 22, bottom: 20, right: 22)
-        content.translatesAutoresizingMaskIntoConstraints = false
+    /// Разрешения, модель, измерения и обслуживание. Ни одного переключателя:
+    /// строка вкладок обещает предпочтения, и обещание снимается словами —
+    /// подписью сверху, а не заголовком раздела. Отдельным разделом сайдбара
+    /// это жило ровно один релиз: сайдбар — про данные (Сегодня, История,
+    /// Статистика, Словарь), а состояние службы данными не является.
+    private func addServiceTabRows(to root: NSStackView) {
+        let caption = panelLabel(
+            t("Состояние диктовки на этом Mac. Здесь нечего настраивать — только увидеть и починить.",
+              "How dictation is doing on this Mac. Nothing to configure here — only to see and to fix."),
+            size: 11.5, color: SD.C.subtle)
+        caption.preferredMaxLayoutWidth = 640
+        root.addArrangedSubview(caption)
 
-        addServicePermissionsGroup(to: content)
-        addServiceModelGroup(to: content)
-        addServiceMeasurementsGroup(to: content)
-        addServiceMaintenanceGroup(to: content)
-
-        let paneWidth = MAIN_WINDOW_SIZE.width - MAIN_WINDOW_SIDEBAR_WIDTH - 1
-        let contentInset = -(content.edgeInsets.left + content.edgeInsets.right)
-        for view in content.arrangedSubviews {
-            view.widthAnchor.constraint(equalTo: content.widthAnchor,
-                                        constant: contentInset).isActive = true
-        }
-
-        let documentView = SDFlippedView()
-        documentView.addSubview(content)
-        documentView.translatesAutoresizingMaskIntoConstraints = false
-        // Столько же проходов, сколько у вкладок настроек, и по той же
-        // причине: перенос подписи виден только с третьего.
-        let widthPin = content.widthAnchor.constraint(equalToConstant: paneWidth)
-        widthPin.isActive = true
-        content.frame = NSRect(x: 0, y: 0, width: paneWidth,
-                               height: MAIN_WINDOW_SIZE.height * 3)
-        for _ in 0..<4 {
-            content.layoutSubtreeIfNeeded()
-            _ = content.fittingSize
-        }
-        content.layoutSubtreeIfNeeded()
-        let contentHeight = max(404, ceil(content.fittingSize.height))
-        widthPin.isActive = false
-
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
-            content.topAnchor.constraint(equalTo: documentView.topAnchor),
-            content.heightAnchor.constraint(equalToConstant: contentHeight),
-            documentView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-        ])
-
-        let scroll = NSScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.verticalScroller?.controlSize = .small
-        // Окно с fullSizeContentView: скролл сам добавил бы сверху отступ
-        // высотой с тайтлбар, чтобы содержимое не уезжало под кнопки окна.
-        // Кнопки лежат над сайдбаром, а не над этой панелью, так что отступ
-        // здесь — просто пустая полоса над первой строкой.
-        scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsetsZero
-        scroll.documentView = documentView
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
-
-        header.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(header)
-        root.addSubview(scroll)
-        NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.topAnchor.constraint(equalTo: root.topAnchor),
-            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
-            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-        ])
-        return root
+        addServicePermissionsGroup(to: root)
+        addServiceModelGroup(to: root)
+        addServiceMeasurementsGroup(to: root)
+        addServiceMaintenanceGroup(to: root)
     }
 
     private func addServicePermissionsGroup(to root: NSStackView) {
@@ -3995,10 +3972,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                                      size: 12, weight: .medium,
                                      color: row.diagnosis == .granted ? SD.C.positive : SD.C.graphite)
             }
+            let dot = SDStatusDot(shape: row.diagnosis == .granted ? .round : .square,
+                                  color: row.diagnosis == .granted ? SD.C.positive : SD.C.danger)
             rows.append(SDRowView(title: copy.name,
                                   subtitle: copy.why,
                                   control: control,
-                                  style: .card))
+                                  style: .card,
+                                  leading: dot))
         }
 
         let fix = NSButton(title: t("Проверить и починить", "Check and repair"),
@@ -4871,6 +4851,38 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
             exported += 1
         }
     }
+
+    // Отдельным кадром — «доступно обновление»: у вкладки «Приложение»
+    // появляется точка, и это единственное место, где она вообще бывает.
+    panel.updateState = .available(DictorRelease(tagName: "v1.8.0",
+                                                 version: "1.8.0",
+                                                 body: "",
+                                                 htmlURL: ""))
+    panel.settingsTab = "app"
+    for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                     ("dark", NSAppearance.Name.darkAqua)] {
+        window.appearance = NSAppearance(named: appearanceName)
+        let view = panel.makeSettingsContentView()
+        let height = DictorControlPanelApp.settingsContentHeight(for: view, width: size.width)
+        window.setContentSize(NSSize(width: size.width, height: height))
+        view.frame = NSRect(origin: .zero, size: NSSize(width: size.width, height: height))
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SettingsPreviewExportError(message: "no bitmap rep for update-badge-\(suffix)")
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw SettingsPreviewExportError(message: "PNG encode failed for update-badge-\(suffix)")
+        }
+        try png.write(to: directory.appendingPathComponent("settings-app-update-\(suffix).png"),
+                      options: .atomic)
+        exported += 1
+    }
+    panel.updateState = .notChecked
+
     window.contentView = nil
     guard exported > 0 else {
         throw SettingsPreviewExportError(message: "nothing exported")
@@ -5061,6 +5073,55 @@ func exportHistoryPanelPreviews(to directory: URL,
         try png.write(to: directory.appendingPathComponent("stats-year-\(suffix).png"),
                       options: .atomic)
         exported += 1
+    }
+
+    // Отдельным кадром — график под курсором. Наведение это состояние вида,
+    // и увидеть его надо картинкой: подпись столбика и есть та шкала,
+    // которой у графика нет по оси Y.
+    // Месяц и год — разные ветки подписи: у дней она из даты, у месяцев
+    // года на оси метки нет вовсе, и подпись под курсором единственная.
+    for (period, periodName) in [(StatsPeriod.month, "month"), (StatsPeriod.year, "year")] {
+    panel.statsPeriod = period
+    for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                     ("dark", NSAppearance.Name.darkAqua)] {
+        window.appearance = NSAppearance(named: appearanceName)
+        let view = panel.makeMainWindowView()
+        view.frame = NSRect(origin: .zero, size: tallSize)
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+
+        func findChart(_ v: NSView) -> SDComparisonBarChart? {
+            if let chart = v as? SDComparisonBarChart { return chart }
+            for sub in v.subviews {
+                if let found = findChart(sub) { return found }
+            }
+            return nil
+        }
+        guard let chart = findChart(view) else {
+            throw SettingsPreviewExportError(message: "no chart for stats-hover-\(periodName)-\(suffix)")
+        }
+        let point = NSPoint(x: chart.bounds.width * 0.62, y: chart.bounds.midY)
+        let move = NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: chart.convert(point, to: nil),
+            modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            eventNumber: 0, clickCount: 0, pressure: 0)!
+        chart.mouseMoved(with: move)
+
+        view.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SettingsPreviewExportError(message: "no bitmap rep for stats-hover-\(periodName)-\(suffix)")
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw SettingsPreviewExportError(message: "PNG encode failed for stats-hover-\(periodName)-\(suffix)")
+        }
+        try png.write(to: directory.appendingPathComponent("stats-hover-\(periodName)-\(suffix).png"),
+                      options: .atomic)
+        exported += 1
+    }
     }
     window.contentView = nil
     guard exported > 0 else {

@@ -17,11 +17,6 @@ enum MainWindowSection: String, CaseIterable {
     case history
     case stats
     case dictionary
-    /// Состояние службы: разрешения, модель, измерения, обслуживание. Не
-    /// вкладка настроек — здесь нечего переключать, а вкладка «Модель» без
-    /// единой настройки и «Продвинутые» с плитками измерений были симптомом
-    /// одной ошибки: состояние лежало среди предпочтений.
-    case service
     case settings
 
     func title(_ language: InterfaceLanguage) -> String {
@@ -30,7 +25,6 @@ enum MainWindowSection: String, CaseIterable {
         case .history: return localizedText("История", "History", language: language)
         case .stats: return localizedText("Статистика", "Statistics", language: language)
         case .dictionary: return localizedText("Словарь", "Dictionary", language: language)
-        case .service: return localizedText("Служба", "Service", language: language)
         case .settings: return localizedText("Настройки", "Settings", language: language)
         }
     }
@@ -42,7 +36,6 @@ enum MainWindowSection: String, CaseIterable {
         case .history: return "≡"
         case .stats: return "▨"
         case .dictionary: return "Aa"
-        case .service: return "◉"
         case .settings: return "⚙"
         }
     }

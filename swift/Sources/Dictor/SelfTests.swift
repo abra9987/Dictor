@@ -55,6 +55,8 @@ enum DictorSelfTest {
             return runSuite("service-status", testServiceStatusHold)
         case "quit-state":
             return runSuite("quit-state", testQuitLeavesServiceEnabled)
+        case "chart-hover":
+            return runSuite("chart-hover", testStatsChartHover)
         case "search-clear":
             return runSuite("search-clear", testHistorySearchClearButton)
         case "today-actions":
@@ -132,6 +134,7 @@ enum DictorSelfTest {
         try testSpeechModelStartupStatus()
         try testServiceStatusHold()
         try testQuitLeavesServiceEnabled()
+        try testStatsChartHover()
         try testHistorySearchClearButton()
         try testTodayRecentRowActions()
         try testFloatingCapsuleGeometry()
@@ -210,9 +213,40 @@ enum DictorSelfTest {
             }
             // И наоборот: вкладка без единой строки — пустой экран, который
             // человек откроет и закроет. Вкладка «Модель» такой и была.
+            // Исключение объявляется в самом списке вкладок и с причиной:
+            // «Служба» показывает состояние, и настройкам там взяться неоткуда.
             for tab in SETTINGS_TABS {
-                try expect(byTab[tab.id]?.isEmpty == false, equals: true,
-                           "tab «\(tab.id)» has no settings rows in the catalog")
+                let hasRows = byTab[tab.id]?.isEmpty == false
+                if let why = tab.holdsNoSettings {
+                    try expect(hasRows, equals: false,
+                               "tab «\(tab.id)» is declared settings-free (\(why)) "
+                               + "but the catalog puts rows in it")
+                } else {
+                    try expect(hasRows, equals: true,
+                               "tab «\(tab.id)» has no settings rows in the catalog")
+                }
+            }
+            // Вкладка без настроек обязана объяснить себя человеку, а не
+            // только реестру: строка вкладок обещает предпочтения, и без
+            // подписи сверху обещание остаётся невыполненным.
+            for tab in SETTINGS_TABS where tab.holdsNoSettings != nil {
+                panel.settingsTab = tab.id
+                let view = panel.makeSettingsContentView()
+                view.frame = NSRect(x: 0, y: 0, width: width,
+                                    height: DictorControlPanelApp.settingsContentHeight(
+                                        for: view, width: width))
+                view.layoutSubtreeIfNeeded()
+                var captions: [String] = []
+                func collect(_ v: NSView) {
+                    if let label = v as? NSTextField, !label.stringValue.isEmpty {
+                        captions.append(label.stringValue)
+                    }
+                    v.subviews.forEach(collect)
+                }
+                collect(view)
+                try expect(captions.contains { $0.contains("нечего настраивать") },
+                           equals: true,
+                           "tab «\(tab.id)» holds no settings and must say so on screen")
             }
 
             for (tab, expectations) in byTab.sorted(by: { $0.key < $1.key }) {
@@ -5447,6 +5481,64 @@ enum DictorSelfTest {
                        agentAlreadyRunning: true),
                    equals: false,
                    "a running service must not be started twice")
+    }
+
+    /// Наведение на график. Столбик без подписи оси и без шкалы Y сообщает
+    /// ровно одно — «выше соседнего»; число под курсором и есть та шкала.
+    /// Тест держит достижимость: за годом столбики уходят в три пикселя, и
+    /// колонка обязана ловить курсор целиком, включая зазор и пустоту над
+    /// коротким столбиком, — иначе часть чисел не увидеть вовсе.
+    private static func testStatsChartHover() throws {
+        try MainActor.assumeIsolated {
+            let buckets = (0..<30).map { index in
+                StatsBucket(label: "день \(index + 1)",
+                            words: index == 7 ? 46 : index,
+                            previousWords: index % 4,
+                            axisLabel: nil)
+            }
+            let chart = SDComparisonBarChart(buckets: buckets, peakIndex: 7, peakText: "46")
+            chart.frame = NSRect(x: 0, y: 0, width: 700, height: 168)
+            chart.layoutSubtreeIfNeeded()
+
+            // Каждый столбик достижим мышью хотя бы в одной точке.
+            var reachable = Set<Int>()
+            for step in 0..<700 {
+                if let index = chart.bucketIndex(at: NSPoint(x: CGFloat(step) + 0.5, y: 84)) {
+                    reachable.insert(index)
+                }
+            }
+            try expect(reachable.count, equals: buckets.count,
+                       "every bucket must be hoverable; \(buckets.count - reachable.count) "
+                       + "of \(buckets.count) cannot be pointed at")
+
+            // Соседние столбики различимы: попадание не съезжает на один и
+            // тот же индекс по всей ширине.
+            try expect(chart.bucketIndex(at: NSPoint(x: 5, y: 84)), equals: 0,
+                       "the leftmost pixel must hit the first bucket")
+            try expect(chart.bucketIndex(at: NSPoint(x: 695, y: 84)),
+                       equals: buckets.count - 1,
+                       "the rightmost pixel must hit the last bucket")
+
+            // Пустой столбик тоже отзывается: ноль — это ответ, а не промах.
+            let zeroIndex = 0
+            let zeroX = (700.0 / CGFloat(buckets.count)) * (CGFloat(zeroIndex) + 0.5)
+            try expect(chart.bucketIndex(at: NSPoint(x: zeroX, y: 84)), equals: zeroIndex,
+                       "a bucket with zero words must still be hoverable")
+
+            // Подпись под курсором — про этот столбик, а не про пик.
+            chart.calloutFormatter = { "\($0.label): \($0.words)" }
+            let hoverX = (700.0 / CGFloat(buckets.count)) * 3.5
+            let move = NSEvent.mouseEvent(
+                with: .mouseMoved, location: NSPoint(x: hoverX, y: 84), modifierFlags: [],
+                timestamp: 0, windowNumber: 0, context: nil,
+                eventNumber: 0, clickCount: 0, pressure: 0)!
+            chart.mouseMoved(with: move)
+            try expect(chart.hoveredIndex, equals: 3,
+                       "moving the mouse over the fourth column must select it")
+            chart.mouseExited(with: move)
+            try expect(chart.hoveredIndex, equals: nil,
+                       "leaving the chart must hand the callout back to the peak")
+        }
     }
 
     private static func expect<T: Equatable>(

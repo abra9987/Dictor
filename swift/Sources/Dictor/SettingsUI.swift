@@ -88,7 +88,8 @@ final class SDRowView: NSView, SettingsRowProviding {
          control: NSView,
          hairline: Bool = true,
          verticalPadding: CGFloat? = nil,
-         style: SDRowStyle = .plain) {
+         style: SDRowStyle = .plain,
+         leading: NSView? = nil) {
         self.hairline = hairline && style == .plain
         self.style = style
         self.rowTitle = title
@@ -128,10 +129,25 @@ final class SDRowView: NSView, SettingsRowProviding {
         // и стек растягивает строку произвольно.
         let squeeze = heightAnchor.constraint(equalToConstant: 0)
         squeeze.priority = .defaultLow
+        // Маркер состояния слева — не контрол: он ничего не делает, поэтому
+        // и не участвует в hitTest самотеста. Его место — перед заголовком,
+        // как в макете «Службы».
+        var textLeading: CGFloat = style.leadingInset
+        if let leading {
+            leading.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(leading)
+            NSLayoutConstraint.activate([
+                leading.leadingAnchor.constraint(equalTo: leadingAnchor,
+                                                 constant: style.leadingInset),
+                leading.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            textLeading += 7 + 12
+        }
+
         NSLayoutConstraint.activate([
             squeeze,
             textStack.leadingAnchor.constraint(equalTo: leadingAnchor,
-                                               constant: style.leadingInset),
+                                               constant: textLeading),
             textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             textStack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor,
                                            constant: verticalPadding),
@@ -178,6 +194,42 @@ final class SDRowView: NSView, SettingsRowProviding {
     }
 
     override var isFlipped: Bool { true }
+}
+
+/// Маркер состояния 7×7 слева от строки. Форма отличает состояния помимо
+/// цвета: выданное разрешение — круг, отозванное — скруглённый квадрат.
+/// Цветом одним обходиться нельзя, и дело не только в дальтонизме: в списке
+/// из трёх строк форма считывается быстрее оттенка.
+final class SDStatusDot: NSView {
+    enum Shape { case round, square }
+
+    private let shape: Shape
+    private let color: NSColor
+
+    init(shape: Shape, color: NSColor) {
+        self.shape = shape
+        self.color = color
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 7),
+            heightAnchor.constraint(equalToConstant: 7),
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 7, height: 7) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        switch shape {
+        case .round:
+            NSBezierPath(ovalIn: bounds).fill()
+        case .square:
+            NSBezierPath(roundedRect: bounds, xRadius: 1.5, yRadius: 1.5).fill()
+        }
+    }
 }
 
 // MARK: - Группа настроек (заголовок + карточка со строками)
@@ -334,6 +386,36 @@ final class SDAdvancedRowView: NSView, SettingsRowProviding {
 final class SDTabButton: NSButton {
     var isActiveTab = false {
         didSet { restyle() }
+    }
+
+    /// Точка у ярлыка — новость, а не состояние: её ставит доступное
+    /// обновление. Состояние («разрешение отозвано») зовёт человека подвалом
+    /// сайдбара и баннером, где он в него и упирается; точка бережётся для
+    /// того, чего он иначе не заметит вовсе.
+    var showsBadge = false {
+        didSet {
+            guard showsBadge != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    static let badgeSize: CGFloat = 6
+    static let badgeGap: CGFloat = 6
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard showsBadge else { return }
+        // Заголовок кнопка центрирует сама, поэтому точку ставим от его
+        // правого края, а не от края кнопки: иначе при разной длине названий
+        // она гуляла бы то вплотную к тексту, то далеко от него.
+        let titleWidth = title.size(withAttributes: [.font: font ?? .systemFont(ofSize: 12.5)]).width
+        let size = SDTabButton.badgeSize
+        let rect = NSRect(x: bounds.midX + titleWidth / 2 + SDTabButton.badgeGap,
+                          y: bounds.midY - size / 2,
+                          width: size, height: size)
+        SD.C.voice.setFill()
+        NSBezierPath(ovalIn: rect).fill()
     }
 
     /// Активная вкладка приподнята над полосой: белая карточка с мягкой

@@ -34,6 +34,23 @@ struct StatsBucket {
     let previousWords: Int
     /// Подпись оси рисуется не у каждого столбика (макет: только месяцы).
     let axisLabel: String?
+    /// Что сказать про столбик под курсором. Отдельно от `label`: там у
+    /// недель и месяцев пустая строка, потому что на оси они не подписаны, —
+    /// а называть период, глядя на который человек спрашивает «сколько?»,
+    /// нужно всегда. Заполняется там же, где известны даты.
+    let calloutLabel: String
+
+    init(label: String,
+         words: Int,
+         previousWords: Int,
+         axisLabel: String?,
+         calloutLabel: String? = nil) {
+        self.label = label
+        self.words = words
+        self.previousWords = previousWords
+        self.axisLabel = axisLabel
+        self.calloutLabel = calloutLabel ?? label
+    }
 }
 
 struct StatsSummary {
@@ -276,6 +293,13 @@ enum StatsCalculator {
             return total
         }
 
+        // Подпись под курсором называет период словами: у столбика недели и
+        // месяца на оси метки нет вовсе, а спрашивают о нём именно наведением.
+        let dayFormatter = DateFormatter()
+        dayFormatter.calendar = calendar
+        dayFormatter.locale = Locale(identifier: language == .russian ? "ru_RU" : "en_US")
+        dayFormatter.dateFormat = "d MMMM"
+
         switch period {
         case .week, .month:
             // По дням.
@@ -295,13 +319,15 @@ enum StatsCalculator {
                     approximateWordCount(characters: $0.characterCount)
                 } ?? 0
                 let label = formatter.string(from: cursor)
+                dayFormatter.locale = formatter.locale
                 buckets.append(StatsBucket(label: label,
                                            words: dayWords,
                                            previousWords: previousWords,
                                            axisLabel: period == .week
                                                ? label
                                                : (calendar.component(.day, from: cursor) % 7 == 1
-                                                   ? label : nil)))
+                                                   ? label : nil),
+                                           calloutLabel: dayFormatter.string(from: cursor)))
                 guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
                 cursor = next
                 index += 1
@@ -357,9 +383,11 @@ enum StatsCalculator {
                         .addingTimeInterval(-1) ?? previousMonth
                     previousWords = words(dayRange: (previousMonth, previousEnd))
                 }
+                dayFormatter.dateFormat = "LLLL"
                 buckets.append(StatsBucket(label: "", words: current,
                                            previousWords: previousWords,
-                                           axisLabel: formatter.string(from: cursor)))
+                                           axisLabel: formatter.string(from: cursor),
+                                           calloutLabel: dayFormatter.string(from: cursor)))
                 guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
                 cursor = next
                 index += 1
@@ -511,6 +539,20 @@ final class SDComparisonBarChart: NSView {
     private let buckets: [StatsBucket]
     private let peakIndex: Int?
     private let peakText: String?
+    /// Столбик под курсором. Пока его нет, плашку носит пик — иначе график
+    /// молчит о своей шкале: без подписей у оси Y высота столбика сама по
+    /// себе не значит ничего, и «пик — 46» отвечал ровно на один вопрос из
+    /// тридцати.
+    private(set) var hoveredIndex: Int? {
+        didSet {
+            guard hoveredIndex != oldValue else { return }
+            needsDisplay = true
+        }
+    }
+
+    /// Подпись столбика для плашки. Локаль берётся из окна: график живёт в
+    /// разделе «Статистика», а не в настройках, и своего языка не знает.
+    var calloutFormatter: ((StatsBucket) -> String)?
 
     init(buckets: [StatsBucket], peakIndex: Int?, peakText: String?) {
         self.buckets = buckets
@@ -522,6 +564,35 @@ final class SDComparisonBarChart: NSView {
     required init?(coder: NSCoder) { nil }
 
     override var isFlipped: Bool { false }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        hoveredIndex = bucketIndex(at: point)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredIndex = nil
+    }
+
+    /// Столбик по горизонтали: попадать нужно в колонку целиком, включая
+    /// зазор и пустое место над коротким столбиком, — целиться мышью в
+    /// трёхпиксельную полоску года никто не станет.
+    func bucketIndex(at point: NSPoint) -> Int? {
+        guard !buckets.isEmpty, bounds.width > 0 else { return nil }
+        let step = bounds.width / CGFloat(buckets.count)
+        let index = Int(point.x / step)
+        guard buckets.indices.contains(index) else { return nil }
+        return index
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard !buckets.isEmpty else { return }
@@ -536,14 +607,24 @@ final class SDComparisonBarChart: NSView {
         let peakStack = max(1, buckets.map { $0.words + $0.previousWords }.max() ?? 1)
         _ = peak
 
+        // Плашку носит столбик под курсором, а пока курсора нет — пик.
+        let calloutIndex = hoveredIndex ?? peakIndex
         for (index, bucket) in buckets.enumerated() {
             let x = CGFloat(index) * (columnWidth + gap)
             let currentHeight = plotHeight * CGFloat(bucket.words) / CGFloat(peakStack)
             let previousHeight = plotHeight * CGFloat(bucket.previousWords) / CGFloat(peakStack)
 
+            // Пустой столбик под курсором тоже отзывается: подложка говорит,
+            // что попал именно сюда и что здесь ноль, а не промах мышью.
+            if index == hoveredIndex {
+                SD.C.rowHairline.setFill()
+                NSRect(x: x, y: axisHeight, width: columnWidth,
+                       height: plotHeight).fill()
+            }
+
             if currentHeight > 0.5 {
                 let rect = NSRect(x: x, y: axisHeight, width: columnWidth, height: currentHeight)
-                (index == peakIndex ? SD.C.voice : SD.C.voice.withAlphaComponent(0.85)).setFill()
+                (index == calloutIndex ? SD.C.voice : SD.C.voice.withAlphaComponent(0.85)).setFill()
                 roundedTop(rect).fill()
             }
             if previousHeight > 0.5 {
@@ -570,16 +651,31 @@ final class SDComparisonBarChart: NSView {
                           withAttributes: attributes)
             }
 
-            if index == peakIndex, let peakText {
+            // Плашка пикового столбика показывала одно число на весь график.
+            // Под курсором она показывает число этого столбика и его период:
+            // высота без шкалы сама по себе не сообщает ничего.
+            let calloutString: String?
+            if index == hoveredIndex {
+                calloutString = calloutFormatter?(bucket) ?? "\(bucket.words)"
+            } else if index == peakIndex, hoveredIndex == nil {
+                calloutString = peakText
+            } else {
+                calloutString = nil
+            }
+            if let calloutString {
                 let attributes: [NSAttributedString.Key: Any] = [
                     .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .semibold),
                     .foregroundColor: SD.C.pillSelectedText,
                 ]
-                let text = peakText as NSString
+                let text = calloutString as NSString
                 let size = text.size(withAttributes: attributes)
+                // Плашка живёт в полосе, отведённой ей над графиком, а не над
+                // своим столбиком: у пустого столбика «над» — это у самой оси,
+                // и число терялось внизу, а при движении мыши прыгало по
+                // высоте вслед за соседями.
                 let pill = NSRect(x: min(max(0, x + columnWidth / 2 - size.width / 2 - 8),
                                          bounds.width - size.width - 16),
-                                  y: axisHeight + currentHeight + previousHeight + 6,
+                                  y: axisHeight + plotHeight + 2,
                                   width: size.width + 16,
                                   height: 18)
                 SD.C.pillSelectedFill.setFill()
