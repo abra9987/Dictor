@@ -1542,6 +1542,25 @@ enum DictorSelfTest {
                    "log import should preserve the first day's characters")
         try expect(imported.last?.characterCount, equals: 30,
                    "log import should ignore empty transcripts")
+
+        // Панель рисует семь завершённых дней плюс сегодняшний. Пик считается
+        // по всему набору: в рекордный день доля обязана остаться единицей,
+        // иначе бар вырастает выше отведённых ему 22 pt и лезет на соседей.
+        let recordToday = dictationUsageBarFractions([100, 200, 0, 400, 150, 300, 250, 4_000])
+        try expect(recordToday.count, equals: 8,
+                   "week bars should keep one column per drawn day")
+        try expect(recordToday.max(), equals: Optional<CGFloat>(1),
+                   "a record-breaking today should cap the bar at the block height")
+        try expect(recordToday.last, equals: Optional<CGFloat>(1),
+                   "the record day itself should be the tallest bar")
+        try expect(recordToday.first, equals: Optional<CGFloat>(0.025),
+                   "quieter days should scale against the same peak")
+        try expect(dictationUsageBarFractions([0, 0, 0]),
+                   equals: [CGFloat(0), 0, 0],
+                   "a silent week should not divide by zero")
+        try expect(dictationUsageBarFractions([-50, 100]),
+                   equals: [CGFloat(0), 1],
+                   "corrupted negative counts should clamp to an empty bar")
     }
 
     private static func testAudioLevelMetering() throws {

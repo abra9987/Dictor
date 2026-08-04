@@ -5756,9 +5756,8 @@ extension DictorApp: QuickPanelDelegate {
         let week = lastSevenCompletedDictationUsage(settings.dailyDictationUsage,
                                                     referenceDate: Date(),
                                                     calendar: calendar)
-        let maxCharacters = max(1, week.days.map { $0.usage.characterCount }.max() ?? 1)
-        var weekBars = week.days.map { CGFloat($0.usage.characterCount) / CGFloat(maxCharacters) }
-        weekBars.append(CGFloat(today?.characterCount ?? 0) / CGFloat(maxCharacters))
+        let weekBars = dictationUsageBarFractions(
+            week.days.map { $0.usage.characterCount } + [today?.characterCount ?? 0])
 
         return QuickPanelState(
             enabled: !isDictationPaused,

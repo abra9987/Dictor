@@ -990,6 +990,17 @@ func lastSevenCompletedDictationUsage(_ stats: [DailyDictationUsage],
     return DictationUsageWeekSnapshot(days: days)
 }
 
+/// Нормализует дневные объёмы в доли [0…1] для мини-баров панели.
+/// Пик берётся по всему набору, который рисуется, — включая сегодняшний
+/// день. Считать пик только по завершённым дням нельзя: в рекордный день
+/// сегодняшняя доля вылезает за единицу, и бар вырастает выше своего блока.
+func dictationUsageBarFractions(_ characters: [Int]) -> [CGFloat] {
+    let peak = max(1, characters.map { max(0, $0) }.max() ?? 1)
+    return characters.map { value in
+        min(1, max(0, CGFloat(max(0, value)) / CGFloat(peak)))
+    }
+}
+
 func importedDailyDictationUsage(from logText: String,
                                  fileCreatedAt: Date,
                                  calendar: Calendar) -> [DailyDictationUsage] {

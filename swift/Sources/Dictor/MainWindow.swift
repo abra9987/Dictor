@@ -1472,7 +1472,7 @@ struct TodaySummary {
         // Спарклайн: последние 7 дней, самый свежий — справа (макет: 7 баров).
         let weekCharacters = (0..<7).map { characters(daysAgo: 6 - $0) }
         let peak = max(1, weekCharacters.max() ?? 1)
-        let dayBars = weekCharacters.map { CGFloat($0) / CGFloat(peak) }
+        let dayBars = dictationUsageBarFractions(weekCharacters)
 
         // «Сэкономлено» считаем как в поповере: 40 слов/мин на клавиатуре
         // минус реально потраченное время речи.

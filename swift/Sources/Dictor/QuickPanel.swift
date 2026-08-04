@@ -885,7 +885,10 @@ final class QuickPanelStatBars: NSView {
         let gap: CGFloat = 2
         SD.C.voice.withAlphaComponent(0.6).setFill()
         for (index, value) in values.enumerated() {
-            let height = max(2, value * bounds.height)
+            // Доля обязана лежать в [0…1], но верхнюю кромку держим здесь же:
+            // рекордный день не должен рисовать бар поверх соседних строк.
+            let fraction = min(1, max(0, value.isFinite ? value : 0))
+            let height = min(bounds.height, max(2, fraction * bounds.height))
             // Бары растут от нижней кромки (align-items:end в макете).
             let rect = NSRect(x: CGFloat(index) * (barWidth + gap),
                               y: 0,
@@ -953,7 +956,12 @@ func exportQuickPanelPreviews(to directory: URL,
             historyKeepingEnabled: true,
             todayCharacters: 7192,
             todayAudioSeconds: 810,
-            weekBars: [0.3, 0.55, 0.4, 0.8, 0.65, 1.0, 0.5],
+            // Бары считаем боевой функцией из сырых символов, как живая
+            // панель: семь завершённых дней плюс сегодняшний, и сегодня —
+            // рекорд. Готовые доли в фикстуре скрывали перекос нормировки,
+            // из-за которого рекордный бар вырастал выше своего блока.
+            weekBars: dictationUsageBarFractions(
+                [2_100, 3_900, 2_800, 5_600, 4_600, 7_000, 3_500, 7_192]),
             interfaceLanguage: language,
             availableUpdateVersion: offered,
             // Своя версия, а не зашитая: на витрине она была вечной 1.1.2.
