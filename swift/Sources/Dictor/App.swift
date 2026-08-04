@@ -591,6 +591,10 @@ func exportRecordingHUDAnimationFrames(to directory: URL,
                 / CGFloat(framesPerSecond)
             view.revealProgress = max(0, min(1, reveal))
             view.mode = mode
+            // Таймер записи идёт вместе с кадрами. Без этого он стоял на
+            // 0:00 всю анимацию: капсула показывала, что она умеет считать
+            // время, и тут же доказывала обратное.
+            view.recordingElapsed = max(0, time - recordingStart)
             view.transcribingElapsedOverride = transcribingElapsed
             view.level = level
             view.phase = phase
