@@ -198,9 +198,12 @@ func serviceStatusPresentation(_ kind: ServiceStatusKind,
         // Неразрывный пробел между числом и единицей: в подвале сайдбара
         // строка не помещалась, и «мс» уезжало на вторую строку в
         // одиночестве — число отдельно, единица отдельно.
+        // В английской строке к числу и единице привязано ещё и latency:
+        // без этого вторую строку занимало одно слово «latency», а разрыв
+        // должен приходиться на точку-разделитель, а не внутри величины.
         let detail = latency.map {
             t("Parakeet · локально · отклик \($0)\u{00A0}мс",
-              "Parakeet · on-device · \($0)\u{00A0}ms latency")
+              "Parakeet · on-device · \($0)\u{00A0}ms\u{00A0}latency")
         } ?? t("Parakeet · локально", "Parakeet · on-device")
         return .init(title: t("Готово к диктовке", "Ready to dictate"), subtitle: detail)
 

@@ -92,13 +92,17 @@ if launchArguments.first == "--export-onboarding-preview" {
     }
 }
 if launchArguments.first == "--export-update-preview" {
-    guard launchArguments.count == 2 else {
-        fputs("usage: Dictor --export-update-preview <directory>\n", stderr)
+    guard launchArguments.count == 2 || launchArguments.count == 3 else {
+        fputs("usage: Dictor --export-update-preview <directory> [ru|en]\n", stderr)
         exit(EXIT_FAILURE)
     }
     do {
+        let updateLanguage: InterfaceLanguage = launchArguments.count > 2
+            ? (launchArguments[2].lowercased().hasPrefix("en") ? .english : .russian)
+            : .russian
         try exportUpdateWindowPreviews(to: URL(fileURLWithPath: launchArguments[1],
-                                               isDirectory: true))
+                                               isDirectory: true),
+                                       language: updateLanguage)
         exit(EXIT_SUCCESS)
     } catch {
         fputs("update preview export failed: \(error.localizedDescription)\n", stderr)

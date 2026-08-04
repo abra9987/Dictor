@@ -14,7 +14,7 @@ subscription, no cloud, works on a plane.
 ![License](https://img.shields.io/badge/license-MIT-1C1B19?style=flat-square)
 ![Swift](https://img.shields.io/badge/Swift-AppKit-1C1B19?style=flat-square)
 
-![The recording capsule](docs/screenshots/capsule.gif)
+![The recording capsule](docs/screenshots/en/capsule.gif)
 
 </div>
 
@@ -51,7 +51,7 @@ version exists. Turn that off and the app makes no network calls at all.
 
 **Today** — the day at a glance, and the last few dictations.
 
-![Today](docs/screenshots/today-light.png)
+![Today](docs/screenshots/en/today-light.png)
 
 <details>
 <summary><b>More screens</b></summary>
@@ -60,34 +60,34 @@ version exists. Turn that off and the app makes no network calls at all.
 ones you keep coming back to, or send a misheard word straight to the
 dictionary.
 
-![History](docs/screenshots/history-light.png)
+![History](docs/screenshots/en/history-light.png)
 
 **Statistics** — words spoken, time saved, a habit calendar, time-of-day
 patterns, quarters and years. Exports to CSV. No targets, no streak-shaming.
 
-![Statistics](docs/screenshots/stats-light.png)
+![Statistics](docs/screenshots/en/stats-light.png)
 
 **Dictionary** — replacements for names and terms the model keeps mishearing.
 
-![Dictionary](docs/screenshots/dictionary-light.png)
+![Dictionary](docs/screenshots/en/dictionary-light.png)
 
-**Settings** — seven tabs inside the window, no separate preferences panel.
+**Settings** — six tabs inside the window, no separate preferences panel.
 
-![Settings](docs/screenshots/settings-light.png)
+![Settings](docs/screenshots/en/settings-light.png)
 
 **The menu-bar panel** — service toggle, language, microphone, recent
 dictations, today's numbers.
 
-![Menu bar panel](docs/screenshots/popover.png)
+![Menu bar panel](docs/screenshots/en/popover.png)
 
 **Updates** — the app tells you itself, in its own window, and installs on one
 click after checking the archive against its checksum and signature.
 
-![Update window](docs/screenshots/update-window.png)
+![Update window](docs/screenshots/en/update-window.png)
 
 **Dark theme** — everywhere.
 
-![Dark theme](docs/screenshots/today-dark.png)
+![Dark theme](docs/screenshots/en/today-dark.png)
 
 </details>
 
@@ -162,8 +162,8 @@ Screens are verified by rendering them, not by eye:
 swift/.build/debug/Dictor --export-history-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-settings-preview   <dir>
 swift/.build/debug/Dictor --export-onboarding-preview <dir>
-swift/.build/debug/Dictor --export-update-preview     <dir>
-swift/.build/debug/Dictor --export-popover-preview    <dir>
+swift/.build/debug/Dictor --export-update-preview     <dir> [ru|en]
+swift/.build/debug/Dictor --export-popover-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-status-preview     <dir>
 swift/.build/debug/Dictor --export-capsule-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-hud-animation      <dir> [ru|en]

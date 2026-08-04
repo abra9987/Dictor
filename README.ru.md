@@ -14,7 +14,7 @@
 ![Лицензия](https://img.shields.io/badge/лицензия-MIT-1C1B19?style=flat-square)
 ![Swift](https://img.shields.io/badge/Swift-AppKit-1C1B19?style=flat-square)
 
-![Капсула записи](docs/screenshots/capsule.gif)
+![Капсула записи](docs/screenshots/ru/capsule.gif)
 
 </div>
 
@@ -50,7 +50,7 @@ Dictor делает это на машине. Аудио её не покида�
 
 **Сегодня** — день целиком и последние диктовки.
 
-![Сегодня](docs/screenshots/today-light.png)
+![Сегодня](docs/screenshots/ru/today-light.png)
 
 <details>
 <summary>Остальные экраны</summary>
@@ -58,33 +58,33 @@ Dictor делает это на машине. Аудио её не покида�
 **История** — три колонки: поиск по всему архиву, результаты с подсветкой
 совпадений, полный текст с копированием и закреплением.
 
-![История](docs/screenshots/history-light.png)
+![История](docs/screenshots/ru/history-light.png)
 
 **Статистика** — периоды, сравнение с прошлым, календарь привычки, время суток,
 кварталы и выгрузка в CSV.
 
-![Статистика](docs/screenshots/stats-light.png)
+![Статистика](docs/screenshots/ru/stats-light.png)
 
 **Словарь** — свои автозамены поверх двух встроенных наборов.
 
-![Словарь](docs/screenshots/dictionary-light.png)
+![Словарь](docs/screenshots/ru/dictionary-light.png)
 
-**Настройки** — семь вкладок внутри окна, без отдельных панелей.
+**Настройки** — шесть вкладок внутри окна, без отдельных панелей.
 
-![Настройки](docs/screenshots/settings-light.png)
+![Настройки](docs/screenshots/ru/settings-light.png)
 
 **Панель меню-бара** — состояние службы, алфавит вывода, микрофон, последние
 диктовки и статистика дня.
 
-![Панель](docs/screenshots/popover.png)
+![Панель](docs/screenshots/ru/popover.png)
 
 **Окно обновления** — что нового, загрузка, проверка и установка в один клик.
 
-![Обновление](docs/screenshots/update-window.png)
+![Обновление](docs/screenshots/ru/update-window.png)
 
 **Тёмная тема** — везде.
 
-![Тёмная тема](docs/screenshots/today-dark.png)
+![Тёмная тема](docs/screenshots/ru/today-dark.png)
 
 </details>
 
@@ -159,7 +159,7 @@ swift/.build/debug/Dictor --export-settings-preview   <dir>          # 14 PNG
 swift/.build/debug/Dictor --export-history-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-onboarding-preview <dir>
 swift/.build/debug/Dictor --export-popover-preview    <dir> [ru|en]
-swift/.build/debug/Dictor --export-update-preview     <dir>
+swift/.build/debug/Dictor --export-update-preview     <dir> [ru|en]
 swift/.build/debug/Dictor --export-status-preview     <dir>
 swift/.build/debug/Dictor --export-capsule-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-hud-animation      <dir> [ru|en]

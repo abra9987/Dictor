@@ -229,12 +229,13 @@ final class UpdateAvailableWindow: NSWindow {
 /// Рендер окна обновления в PNG — иначе «готово» держится на воображении.
 /// Снимаем оба состояния: предложение и ход установки, в обеих темах.
 @MainActor
-func exportUpdateWindowPreviews(to directory: URL) throws {
+// Язык параметром: снимки для английского README должны показывать
+// английское окно, а не русское. Образец заметок и подпись прогресса
+// переводятся вместе с окном — иначе английский снимок наполовину русский.
+func exportUpdateWindowPreviews(to directory: URL,
+                                language: InterfaceLanguage = .russian) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let release = DictorRelease(
-        tagName: "v1.1.2",
-        version: "1.1.2",
-        body: """
+    let russianBody = """
         Слово из «Истории» — сразу в словарь. Выделите неправильно услышанное \
         слово в тексте диктовки, и оно подставится в диалог автозамены.
 
@@ -242,17 +243,33 @@ func exportUpdateWindowPreviews(to directory: URL) throws {
         ⌘Q в окне делает то же самое.
 
         Обновление больше не оставляет машину без службы диктовки.
-        """,
+        """
+    let englishBody = """
+        A word from History goes straight to the dictionary. Select the \
+        misheard word in a dictation and it lands in the replacement dialog.
+
+        «Quit» closes Dictor entirely, not just the menu bar icon. ⌘Q in the \
+        window does the same.
+
+        Updating no longer leaves the machine without the dictation service.
+        """
+    let release = DictorRelease(
+        tagName: "v1.1.2",
+        version: "1.1.2",
+        body: localizedText(russianBody, englishBody, language: language),
         htmlURL: UPDATE_CHANNEL_PAGE.absoluteString)
 
     var exported = 0
     for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                      ("dark", NSAppearance.Name.darkAqua)] {
+        let installingPhase = localizedText("Скачиваю и проверяю архив…",
+                                            "Downloading and verifying the archive…",
+                                            language: language)
         for (state, phase) in [("offer", String?.none),
-                               ("installing", .some("Скачиваю и проверяю архив…"))] {
+                               ("installing", .some(installingPhase))] {
             let window = UpdateAvailableWindow(release: release,
                                                currentVersion: "1.1.1",
-                                               language: .russian)
+                                               language: language)
             window.appearance = NSAppearance(named: appearanceName)
             window.colorSpace = .sRGB
             if let phase { window.showProgress(phase) }
