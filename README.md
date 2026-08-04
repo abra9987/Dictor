@@ -19,12 +19,13 @@ subscription, no cloud, works on a plane.
 </div>
 
 **Origin.** Dictor is a fork of [Parakey](https://github.com/rcourtman/parakey)
-by Richard Courtman, MIT licensed — 34 commits made between 18 and 22 July 2026,
-which gave it a working push-to-talk loop. Everything that makes Dictor its own
-product was written after that: the interface and its design system, the
-background service, history, statistics, the vocabulary, the update channel.
-That part is 137 commits since 23 July 2026, by one author. GitHub's contributor
-list names everyone whose commits are in the history, the forked base included.
+by Richard Courtman, MIT licensed, which got the core right: push-to-talk
+dictation recognised entirely on the machine. That base is imported here as a
+single commit, and the copyright notice it carries is preserved in
+[LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Everything after it — the
+interface and its design system, the background service, history, statistics,
+the vocabulary, the update channel — was written for Dictor by one author, from
+23 July 2026 onward.
 
 ## Why
 
