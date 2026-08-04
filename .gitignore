@@ -3,5 +3,6 @@
 swift/.build/
 dist/
 *.xcuserstate
+.claude/
 
 scripts/release.env

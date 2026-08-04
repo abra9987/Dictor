@@ -18,6 +18,14 @@ subscription, no cloud, works on a plane.
 
 </div>
 
+**Origin.** Dictor is a fork of [Parakey](https://github.com/rcourtman/parakey)
+by Richard Courtman, MIT licensed — 34 commits made between 18 and 22 July 2026,
+which gave it a working push-to-talk loop. Everything that makes Dictor its own
+product was written after that: the interface and its design system, the
+background service, history, statistics, the vocabulary, the update channel.
+That part is 137 commits since 23 July 2026, by one author. GitHub's contributor
+list names everyone whose commits are in the history, the forked base included.
+
 ## Why
 
 Dictation apps ask you to trust a company with your voice. Most upload every

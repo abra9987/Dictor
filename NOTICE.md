@@ -1,8 +1,8 @@
 # Notices
 
 Dictor is a personal fork. The upstream attribution below is preserved because
-the MIT license requires it — this file and `LICENSE` are the only places in the
-project where upstream names appear.
+the MIT license requires it. The same origin is stated in the README, so that a
+reader sees it without opening this file.
 
 # Attribution
 
