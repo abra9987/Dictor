@@ -111,6 +111,16 @@ done
 [[ -n "$MOUNT_POINT" && -d "$MOUNT_POINT" ]] || fail "Не удалось смонтировать временный образ."
 MOUNTED_NAME="$(basename "$MOUNT_POINT")"
 
+# Finder узнаёт о новом томе не мгновенно: сразу после attach `disk "Dictor"`
+# для него ещё не существует (-1728, «Не удается получить disk»), через
+# секунду-две — уже да. Ждём его, а не удачного стечения обстоятельств.
+for _ in $(seq 1 20); do
+    if [[ "$(osascript -e "tell application \"Finder\" to exists disk \"$MOUNTED_NAME\"" 2>/dev/null)" == "true" ]]; then
+        break
+    fi
+    sleep 0.5
+done
+
 # --- Оформление окна --------------------------------------------------------
 
 say "Расставляем окно Finder..."
