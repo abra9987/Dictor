@@ -183,9 +183,10 @@ let SETTINGS_CATALOG: [SettingsCatalogEntry] = [
           exposure: .settingsRow(tab: "look", title: "Цвет волны", toggleTest: false),
           why: "Один цвет для записи и бренда — рядом с фоном."),
     .init(property: "floatingCapsuleEnabled",
-          exposure: .settingsRow(tab: "look", title: "Плавающая капсула", toggleTest: true),
-          why: "Своя группа, а не соседняя строка: настройки капсулы записи на "
-               + "плавающую не действуют, и соседство в карточке обещало бы обратное."),
+          exposure: .settingsRow(tab: "look", title: "Постоянная капсула", toggleTest: true),
+          why: "Своя группа, а не соседняя строка: из настроек капсулы записи на "
+               + "постоянную действует только размер, и соседство в карточке обещало "
+               + "бы все."),
     .init(property: "showInDock",
           exposure: .settingsRow(tab: "look", title: "Значок в Dock", toggleTest: true),
           why: "Присутствие на рабочем столе — тоже «что видно», рядом с плавающей капсулой."),

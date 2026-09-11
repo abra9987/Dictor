@@ -5099,9 +5099,38 @@ enum DictorSelfTest {
             // которая при уже доказанном idle < hover почти не могла упасть.
             try expect(hover < recording, equals: true,
                        "recording is the widest state: \(hover) vs \(recording)")
-            try expect(FloatingCapsuleMetrics.height(for: .idle)
-                        < FloatingCapsuleMetrics.height(for: .recording), equals: true,
+            try expect(view.geometry.height(for: .idle)
+                        < view.geometry.height(for: .recording), equals: true,
                        "the capsule grows from rest to recording, never shrinks")
+
+            // Размер — общий с капсулой у курсора: в записи высоты совпадают
+            // число в число, Large — макет 6c как есть, и ширина следует за
+            // размером, а не остаётся от прежнего.
+            let large = FloatingCapsuleGeometry(size: .large)
+            try expect([large.idleHeight, large.hoverHeight, large.recordingHeight],
+                       equals: [30, 40, 44],
+                       "Large keeps the mockup 6c heights")
+            for size in RecordingHUDSize.allCases {
+                let geometry = FloatingCapsuleGeometry(size: size)
+                try expect(geometry.recordingHeight, equals: size.capsuleHeight,
+                           "recording height must match the cursor capsule for \(size.rawValue)")
+                try expect(geometry.idleHeight < geometry.hoverHeight
+                            && geometry.hoverHeight < geometry.recordingHeight, equals: true,
+                           "states must grow rest → hover → recording for \(size.rawValue)")
+                for pointSize in [geometry.hotkeyFontSize, geometry.dictateFontSize,
+                                  geometry.historyFontSize, geometry.timerFontSize,
+                                  geometry.hintFontSize] {
+                    try expect(pointSize >= 10, equals: true,
+                               "no capsule text may drop below 10 pt for \(size.rawValue)")
+                }
+            }
+            view.geometry = FloatingCapsuleGeometry(size: .compact)
+            let compactRecording = view.capsuleWidth(for: .recording)
+            try expect(compactRecording < recording, equals: true,
+                       "a compact capsule must be narrower than the large one: \(compactRecording) vs \(recording)")
+            try expect(view.windowSize(for: .recording).height,
+                       equals: RecordingHUDSize.compact.capsuleHeight + FloatingCapsuleMetrics.shadowInset * 2,
+                       "the window follows the geometry height")
         }
     }
 

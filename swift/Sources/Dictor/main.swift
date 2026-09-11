@@ -124,17 +124,23 @@ if launchArguments.first == "--export-status-preview" {
     }
 }
 if launchArguments.first == "--export-capsule-preview" {
-    guard launchArguments.count == 2 || launchArguments.count == 3 else {
-        fputs("usage: Dictor --export-capsule-preview <directory> [ru|en]\n", stderr)
+    guard (2...4).contains(launchArguments.count) else {
+        fputs("usage: Dictor --export-capsule-preview <directory> [ru|en] [compact|standard|large]\n", stderr)
         exit(EXIT_FAILURE)
     }
     do {
         let capsuleLanguage: InterfaceLanguage = launchArguments.count > 2
             ? (launchArguments[2].lowercased().hasPrefix("en") ? .english : .russian)
             : .russian
+        // Размер — тот же, что у капсулы у курсора; без аргумента — Large,
+        // то есть макет 6c как есть.
+        let capsuleSize = launchArguments.count > 3
+            ? (RecordingHUDSize(rawValue: launchArguments[3].lowercased()) ?? .large)
+            : .large
         try exportFloatingCapsulePreviews(to: URL(fileURLWithPath: launchArguments[1],
                                                   isDirectory: true),
-                                          language: capsuleLanguage)
+                                          language: capsuleLanguage,
+                                          size: capsuleSize)
         exit(EXIT_SUCCESS)
     } catch {
         fputs("capsule preview export failed: \(error.localizedDescription)\n", stderr)

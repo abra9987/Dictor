@@ -2040,6 +2040,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             return
         }
         floatingCapsule.delegate = self
+        floatingCapsule.applySize(settings.recordingHUDSize)
         let title = capsuleHotkeyTitle()
         if floatingCapsule.isVisible {
             floatingCapsule.updateHotkey(title, language: settings.interfaceLanguage)

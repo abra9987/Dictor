@@ -32,24 +32,67 @@ protocol FloatingCapsuleDelegate: AnyObject {
 }
 
 /// Метрики трёх состояний — числом в число из макета 6c.
+/// Геометрия постоянной капсулы по размеру из настроек — тому же, что у
+/// капсулы у курсора. Large — макет 6c число в число (30 / 40 / 44 pt).
+/// Standard и Compact в состоянии записи повторяют капсулу у курсора
+/// (высота 36 / 26, волна, кегль таймера — см. RecordingHUDView), покой и
+/// наведение уменьшены в той же пропорции, но шрифт не мельче 10 pt:
+/// пилюля в 18 pt с подписью в 7 pt была бы верна арифметически и
+/// нечитаема на деле.
+///
+/// До 1.9.2 размер был один: человек ставил «Compact», капсула у курсора
+/// уменьшалась, а постоянная — нет, хотя это одна и та же капсула.
+struct FloatingCapsuleGeometry: Equatable {
+    let size: RecordingHUDSize
+
+    init(size: RecordingHUDSize) {
+        self.size = size
+    }
+
+    private func pick(_ compact: CGFloat, _ standard: CGFloat, _ large: CGFloat) -> CGFloat {
+        switch size {
+        case .compact: return compact
+        case .standard: return standard
+        case .large: return large
+        }
+    }
+
+    // Запись — число в число с капсулой у курсора.
+    var recordingHeight: CGFloat { size.capsuleHeight }
+    var recordingWaveHeight: CGFloat { pick(12, 18, 20) }
+    var recordingPadding: CGFloat { pick(10, 14, 16) }
+    var recordingGap: CGFloat { pick(8, 10, 12) }
+    var timerFontSize: CGFloat { pick(10, 12, 13) }
+    var hintFontSize: CGFloat { pick(10, 11, 11.5) }
+
+    // Покой. Compact упирается в 26 pt записи сверху: покой и наведение
+    // обязаны остаться ниже, иначе капсула при старте записи сжималась бы.
+    var idleHeight: CGFloat { pick(20, 26, 30) }
+    var idleWaveHeight: CGFloat { pick(8, 11, 13) }
+    var idlePadding: CGFloat { pick(9, 11, 13) }
+    var idleGap: CGFloat { pick(7, 8, 9) }
+    var hotkeyFontSize: CGFloat { pick(10, 10.5, 11.5) }
+
+    // Наведение.
+    var hoverHeight: CGFloat { pick(24, 34, 40) }
+    var hoverWaveHeight: CGFloat { pick(10, 12, 14) }
+    var hoverLeadingPadding: CGFloat { pick(10, 12, 14) }
+    var hoverTrailingPadding: CGFloat { pick(6, 7, 8) }
+    var hoverGap: CGFloat { pick(7, 8, 10) }
+    var dictateFontSize: CGFloat { pick(10.5, 11.5, 12.5) }
+    var historyFontSize: CGFloat { pick(10, 11, 12) }
+    var ellipsisFontSize: CGFloat { pick(11, 12, 13) }
+
+    func height(for state: FloatingCapsuleState) -> CGFloat {
+        switch state {
+        case .idle: return idleHeight
+        case .hover: return hoverHeight
+        case .recording: return recordingHeight
+        }
+    }
+}
+
 enum FloatingCapsuleMetrics {
-    static let idleHeight: CGFloat = 30
-    static let hoverHeight: CGFloat = 40
-    static let recordingHeight: CGFloat = 44
-
-    static let idlePadding: CGFloat = 13
-    static let hoverLeadingPadding: CGFloat = 14
-    static let hoverTrailingPadding: CGFloat = 8
-    static let recordingPadding: CGFloat = 16
-
-    static let idleGap: CGFloat = 9
-    static let hoverGap: CGFloat = 10
-    static let recordingGap: CGFloat = 12
-
-    static let idleWaveHeight: CGFloat = 13
-    static let hoverWaveHeight: CGFloat = 14
-    static let recordingWaveHeight: CGFloat = 20
-
     /// Запас вокруг капсулы внутри окна: тень рисуется своей, а не системной,
     /// иначе её радиус и смещение из макета задать нечем.
     static let shadowInset: CGFloat = 26
@@ -59,14 +102,6 @@ enum FloatingCapsuleMetrics {
     static let snapDistance: CGFloat = 48
     /// …и встаёт на таком отступе от него.
     static let snapMargin: CGFloat = 16
-
-    static func height(for state: FloatingCapsuleState) -> CGFloat {
-        switch state {
-        case .idle: return idleHeight
-        case .hover: return hoverHeight
-        case .recording: return recordingHeight
-        }
-    }
 
     /// Держим капсулу в пределах видимой области экрана. Упираться в край
     /// должна сама капсула, а не прозрачное поле под тень вокруг неё, —
@@ -130,33 +165,47 @@ final class FloatingCapsuleView: NSView {
 
     /// Ширина капсулы для состояния — считается по содержимому, как в макете
     /// («width: max-content»).
+    /// Размер — из той же настройки, что у капсулы у курсора. По умолчанию
+    /// Large: это макет 6c как есть, и таким его видят экспорт и тесты, пока
+    /// контроллер не подставит выбранное человеком.
+    var geometry = FloatingCapsuleGeometry(size: .large) {
+        didSet { if geometry != oldValue { needsDisplay = true } }
+    }
+
+    private var hotkeyFont: NSFont { .systemFont(ofSize: geometry.hotkeyFontSize) }
+    private var dictateFont: NSFont { .systemFont(ofSize: geometry.dictateFontSize, weight: .medium) }
+    private var historyFont: NSFont { .systemFont(ofSize: geometry.historyFontSize) }
+    private var ellipsisFont: NSFont { .systemFont(ofSize: geometry.ellipsisFontSize) }
+    private var hintFont: NSFont { .systemFont(ofSize: geometry.hintFontSize) }
+    private var timerFont: NSFont { SD.timerFont(size: geometry.timerFontSize) }
+
     func capsuleWidth(for state: FloatingCapsuleState) -> CGFloat {
-        let m = FloatingCapsuleMetrics.self
+        let g = geometry
         switch state {
         case .idle:
-            let wave = waveWidth(bars: 5, height: m.idleWaveHeight)
-            let text = measure(hotkeyTitle, font: .systemFont(ofSize: 11.5))
-            return m.idlePadding * 2 + wave + m.idleGap + text
+            let wave = waveWidth(bars: 5, height: g.idleWaveHeight)
+            let text = measure(hotkeyTitle, font: hotkeyFont)
+            return g.idlePadding * 2 + wave + g.idleGap + text
         case .hover:
-            let wave = waveWidth(bars: 5, height: m.hoverWaveHeight)
-            let dictate = measure(dictateTitle, font: .systemFont(ofSize: 12.5, weight: .medium))
-            let history = measure(historyTitle, font: .systemFont(ofSize: 12))
-            let ellipsis = measure("⋯", font: .systemFont(ofSize: 13))
-            return m.hoverLeadingPadding + wave + m.hoverGap + dictate + m.hoverGap
-                + 1 + m.hoverGap + history + m.hoverGap + ellipsis + 6 + m.hoverTrailingPadding
+            let wave = waveWidth(bars: 5, height: g.hoverWaveHeight)
+            let dictate = measure(dictateTitle, font: dictateFont)
+            let history = measure(historyTitle, font: historyFont)
+            let ellipsis = measure("⋯", font: ellipsisFont)
+            return g.hoverLeadingPadding + wave + g.hoverGap + dictate + g.hoverGap
+                + 1 + g.hoverGap + history + g.hoverGap + ellipsis + 6 + g.hoverTrailingPadding
         case .recording:
-            let wave = waveWidth(bars: 7, height: m.recordingWaveHeight)
-            let timer = measure(timerText, font: SD.timerFont(size: 13))
-            let hint = measure(cancelHint, font: .systemFont(ofSize: 11.5))
-            return m.recordingPadding * 2 + wave + m.recordingGap + timer
-                + m.recordingGap + 1 + m.recordingGap + hint
+            let wave = waveWidth(bars: 7, height: g.recordingWaveHeight)
+            let timer = measure(timerText, font: timerFont)
+            let hint = measure(cancelHint, font: hintFont)
+            return g.recordingPadding * 2 + wave + g.recordingGap + timer
+                + g.recordingGap + 1 + g.recordingGap + hint
         }
     }
 
     func windowSize(for state: FloatingCapsuleState) -> NSSize {
         let inset = FloatingCapsuleMetrics.shadowInset * 2
         return NSSize(width: capsuleWidth(for: state) + inset,
-                      height: FloatingCapsuleMetrics.height(for: state) + inset)
+                      height: geometry.height(for: state) + inset)
     }
 
     private var dictateTitle: String { localizedText("Диктовать", "Dictate", language: language) }
@@ -274,60 +323,57 @@ final class FloatingCapsuleView: NSView {
     }
 
     private func drawIdle(in rect: NSRect) {
-        let m = FloatingCapsuleMetrics.self
-        var x = rect.minX + m.idlePadding
-        x += drawWave(at: x, in: rect, bars: 5, height: m.idleWaveHeight,
+        let g = geometry
+        var x = rect.minX + g.idlePadding
+        x += drawWave(at: x, in: rect, bars: 5, height: g.idleWaveHeight,
                       color: NSColor(hex: 0xF2F1EE, alpha: 0.55), live: false)
-        x += m.idleGap
+        x += g.idleGap
         draw(hotkeyTitle, at: x, in: rect,
-             font: .systemFont(ofSize: 11.5),
+             font: hotkeyFont,
              color: NSColor(hex: 0xF2F1EE, alpha: 0.75))
     }
 
     private func drawHover(in rect: NSRect) {
-        let m = FloatingCapsuleMetrics.self
-        var x = rect.minX + m.hoverLeadingPadding
-        x += drawWave(at: x, in: rect, bars: 5, height: m.hoverWaveHeight,
+        let g = geometry
+        var x = rect.minX + g.hoverLeadingPadding
+        x += drawWave(at: x, in: rect, bars: 5, height: g.hoverWaveHeight,
                       color: SD.C.voiceDark, live: false)
-        x += m.hoverGap
+        x += g.hoverGap
 
-        let dictateFont = NSFont.systemFont(ofSize: 12.5, weight: .medium)
         let dictateWidth = draw(dictateTitle, at: x, in: rect, font: dictateFont,
                                 color: NSColor(hex: 0xF2F1EE))
         dictateRect = NSRect(x: rect.minX, y: rect.minY,
-                             width: x + dictateWidth - rect.minX + m.hoverGap / 2,
+                             width: x + dictateWidth - rect.minX + g.hoverGap / 2,
                              height: rect.height)
-        x += dictateWidth + m.hoverGap
+        x += dictateWidth + g.hoverGap
 
         drawDivider(at: x, in: rect)
-        x += 1 + m.hoverGap
+        x += 1 + g.hoverGap
 
-        let historyFont = NSFont.systemFont(ofSize: 12)
         let historyWidth = draw(historyTitle, at: x, in: rect, font: historyFont,
                                 color: NSColor(hex: 0xA3A09A))
-        historyRect = NSRect(x: x - m.hoverGap / 2, y: rect.minY,
-                             width: historyWidth + m.hoverGap, height: rect.height)
-        x += historyWidth + m.hoverGap
+        historyRect = NSRect(x: x - g.hoverGap / 2, y: rect.minY,
+                             width: historyWidth + g.hoverGap, height: rect.height)
+        x += historyWidth + g.hoverGap
 
-        let ellipsisFont = NSFont.systemFont(ofSize: 13)
         let ellipsisWidth = draw("⋯", at: x, in: rect, font: ellipsisFont,
                                  color: NSColor(hex: 0xA3A09A))
-        menuRect = NSRect(x: x - m.hoverGap / 2, y: rect.minY,
-                          width: ellipsisWidth + m.hoverGap + 6, height: rect.height)
+        menuRect = NSRect(x: x - g.hoverGap / 2, y: rect.minY,
+                          width: ellipsisWidth + g.hoverGap + 6, height: rect.height)
     }
 
     private func drawRecording(in rect: NSRect) {
-        let m = FloatingCapsuleMetrics.self
-        var x = rect.minX + m.recordingPadding
-        x += drawWave(at: x, in: rect, bars: 7, height: m.recordingWaveHeight,
+        let g = geometry
+        var x = rect.minX + g.recordingPadding
+        x += drawWave(at: x, in: rect, bars: 7, height: g.recordingWaveHeight,
                       color: SD.C.voiceDark, live: true)
-        x += m.recordingGap
-        x += draw(timerText, at: x, in: rect, font: SD.timerFont(size: 13),
+        x += g.recordingGap
+        x += draw(timerText, at: x, in: rect, font: timerFont,
                   color: NSColor(hex: 0xF2F1EE))
-        x += m.recordingGap
+        x += g.recordingGap
         drawDivider(at: x, in: rect)
-        x += 1 + m.recordingGap
-        draw(cancelHint, at: x, in: rect, font: .systemFont(ofSize: 11.5),
+        x += 1 + g.recordingGap
+        draw(cancelHint, at: x, in: rect, font: hintFont,
              color: NSColor(hex: 0xA3A09A))
     }
 
@@ -476,7 +522,8 @@ enum FloatingCapsuleAction {
 /// и во время диктовки, а сверять с макетом надо все.
 @MainActor
 func exportFloatingCapsulePreviews(to directory: URL,
-                                   language: InterfaceLanguage = .russian) throws {
+                                   language: InterfaceLanguage = .russian,
+                                   size: RecordingHUDSize = .large) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let states: [(String, FloatingCapsuleState)] = [
         ("1-idle", .idle), ("2-hover", .hover), ("3-recording", .recording),
@@ -485,6 +532,7 @@ func exportFloatingCapsulePreviews(to directory: URL,
     for (name, state) in states {
         let view = FloatingCapsuleView(frame: .zero)
         view.language = language
+        view.geometry = FloatingCapsuleGeometry(size: size)
         view.hotkeyTitle = language == .english ? "⌘ ⌥" : "⌘ ⌥"
         view.state = state
         view.level = 0.72
@@ -501,7 +549,9 @@ func exportFloatingCapsulePreviews(to directory: URL,
         guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { continue }
         host.cacheDisplay(in: host.bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else { continue }
-        try png.write(to: directory.appendingPathComponent("capsule-\(name).png"))
+        // Large — имена как прежде: на них ссылаются документация и гифка.
+        let prefix = size == .large ? "capsule-" : "capsule-\(size.rawValue)-"
+        try png.write(to: directory.appendingPathComponent("\(prefix)\(name).png"))
         exported += 1
     }
     print("FLOATING_CAPSULE_PREVIEW exported \(exported) files to \(directory.path)")
@@ -517,7 +567,18 @@ final class FloatingCapsuleController {
     private var view: FloatingCapsuleView?
     private(set) var state: FloatingCapsuleState = .idle
     private var isHovered = false
+    /// Размер — общий с капсулой у курсора: одна настройка, одна геометрия.
+    private var size: RecordingHUDSize = .standard
     private let settings = Settings.shared
+
+    func applySize(_ newSize: RecordingHUDSize) {
+        guard newSize != size else { return }
+        size = newSize
+        guard let view else { return }
+        view.geometry = FloatingCapsuleGeometry(size: newSize)
+        applyState(state, animated: false)
+        clampIntoScreen()
+    }
 
     var isVisible: Bool { panel?.isVisible == true }
 
@@ -554,6 +615,7 @@ final class FloatingCapsuleController {
     private func makePanel() -> NSPanel {
         let view = FloatingCapsuleView(frame: NSRect(origin: .zero,
                                                      size: NSSize(width: 200, height: 82)))
+        view.geometry = FloatingCapsuleGeometry(size: size)
         let panel = NSPanel(contentRect: view.frame,
                             styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered,

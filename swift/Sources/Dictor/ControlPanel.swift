@@ -3854,8 +3854,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         }
         let showRow = SDRowView(
             title: t("Показывать капсулу", "Show the capsule"),
-            subtitle: t("Волна и таймер на экране, пока идёт диктовка",
-                        "Wave and timer on screen while dictation runs"),
+            subtitle: t("Волна и таймер рядом с курсором, пока идёт диктовка",
+                        "Wave and timer beside the cursor while dictation runs"),
             control: hudToggle,
             style: .card
         )
@@ -3970,11 +3970,11 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             self?.settings.floatingCapsuleEnabled = enabled
         }
         let floatingRow = SDRowView(
-            title: t("Плавающая капсула", "Floating capsule"),
-            subtitle: t("Постоянная капсула: перетаскивается, прилипает к краям, помнит "
-                        + "место. Вид фиксированный — настройки выше на неё не действуют",
-                        "A permanent capsule: drag it, it sticks to the edges and remembers "
-                        + "its place. Its look is fixed — the settings above don't apply"),
+            title: t("Постоянная капсула", "Permanent capsule"),
+            subtitle: t("Всегда на экране: перетаскивается, прилипает к краям, помнит "
+                        + "место, при записи растёт сама. Размер — тот же, что выбран выше",
+                        "Always on screen: drag it, it sticks to the edges, remembers "
+                        + "its place and grows while recording. Size follows the choice above"),
             control: capsuleToggle,
             style: .card
         )
