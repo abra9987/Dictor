@@ -79,6 +79,9 @@ let MAX_CORRECTION_SYNC_PATH_BYTES = 4096
 let MAX_INPUT_DEVICE_PREFERENCE_BYTES = 512
 let DIAGNOSTICS_LOG_MAX_BYTES = 128 * 1024
 let DIAGNOSTICS_LOG_MAX_LINES = 40
+/// Кому уходит «Сообщить о проблеме». Письмо открывается в почтовой
+/// программе человека с уже приложенным архивом; отправляет его он сам.
+let PROBLEM_REPORT_RECIPIENT = "gumerovraul@gmail.com"
 let DIAGNOSTICS_LOG_MAX_LINE_CHARACTERS = 4096
 // История хранится «как в Wispr Flow»: архив практически не
 // обрезается (10 000 записей ≈ годы диктовки, ~2 МБ JSON).

@@ -169,8 +169,69 @@ enum SD {
         static let shimmerCycleSeconds: TimeInterval = 1.1
     }
 
+    // MARK: - Шрифты
+
+    /// Шрифт таймера проходит пробу CoreText, прежде чем попасть в отрисовку.
+    ///
+    /// 2026-09-10, macOS 26.3.1: `monospacedSystemFont` отдавал объект, а
+    /// CoreText при вёрстке таймера бросал NSInvalidArgumentException
+    /// («attempt to insert nil object from objects[0]») — тринадцать
+    /// одинаковых отчётов о сбое, служба умирала посреди записи, а в логе
+    /// это выглядело как обычный перезапуск. Проба ловит исключение один
+    /// раз, подставляет запасной шрифт и оставляет след в логе и в
+    /// диагностике: без него причина видна только в краш-репорте.
+    @MainActor private static var probedFonts: [String: NSFont] = [:]
+    /// Что подменили и почему — для «Копировать диагностику».
+    @MainActor private(set) static var fontFallbackNotes: [String] = []
+
+    @MainActor
     static func timerFont(size: CGFloat) -> NSFont {
-        NSFont.monospacedSystemFont(ofSize: size, weight: .semibold)
+        probedFont(key: "timer \(String(format: "%g", size))",
+                   primary: NSFont.monospacedSystemFont(ofSize: size, weight: .semibold),
+                   fallback: NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold))
+    }
+
+    @MainActor
+    private static func probedFont(key: String,
+                                   primary: @autoclosure () -> NSFont,
+                                   fallback: @autoclosure () -> NSFont) -> NSFont {
+        if let cached = probedFonts[key] { return cached }
+        let candidate = primary()
+        guard let failure = textLayoutFailure(font: candidate) else {
+            probedFonts[key] = candidate
+            return candidate
+        }
+        var substitute = fallback()
+        if let secondFailure = textLayoutFailure(font: substitute) {
+            log("font probe: fallback \(describe(substitute)) rejected too (\(secondFailure))")
+            substitute = NSFont.systemFont(ofSize: candidate.pointSize)
+        }
+        let note = "\(key): \(describe(candidate)) rejected by CoreText — \(failure); using \(describe(substitute))"
+        log("font probe: \(note)")
+        fontFallbackNotes.append(note)
+        probedFonts[key] = substitute
+        return substitute
+    }
+
+    /// nil — шрифт верстается. Строка — причина, с которой CoreText его
+    /// отверг. Проба идёт тем же путём, что и капсула: NSAttributedString со
+    /// шрифтом и цветом, `size()`.
+    static func textLayoutFailure(font: NSFont) -> String? {
+        do {
+            try withObjCExceptionsAsErrors {
+                let probe = NSAttributedString(string: "0:00 Esc",
+                                               attributes: [.font: font,
+                                                            .foregroundColor: NSColor.white])
+                _ = probe.size()
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    static func describe(_ font: NSFont) -> String {
+        "\(font.fontName) \(String(format: "%g", font.pointSize)) pt"
     }
 
     static func captionFont(size: CGFloat) -> NSFont {

@@ -54,6 +54,18 @@ log holds at most 30 MB and rotates away on its own.
 Nothing in this comes from the app. It reports nothing, and adding a way for it
 to do so would contradict the reason it exists.
 
+## Reporting a problem
+
+"Report a Problem…" (in the menu-bar menu and in Settings) packs three things
+into a zip archive: the diagnostics report described above, the tail of the
+app's own log (no dictated text, by construction), and any crash reports for
+Dictor found in `~/Library/Logs/DiagnosticReports`. It then opens a new
+message in your mail app with the archive attached and the recipient filled
+in. Nothing is uploaded by the app itself: the message goes out only if you
+press Send, and you can open the archive and read every file before you do.
+If no mail account is configured, the system share sheet is offered instead,
+and failing that the archive is simply shown in Finder.
+
 ## macOS permissions
 
 - **Microphone** records speech while dictation is active.

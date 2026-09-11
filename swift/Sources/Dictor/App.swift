@@ -257,12 +257,12 @@ final class RecordingHUDView: NSView {
             layout.primaryText = attributed(timerText(),
                                             font: SD.timerFont(size: timerFontSize),
                                             color: SD.C.capsuleText)
-            width += ceil(layout.primaryText?.size().width ?? 0)
+            width += ceil(measuredSize(layout.primaryText).width)
             if showsEscHint {
                 layout.secondaryText = attributed(t("Esc — отменить", "Esc to cancel"),
                                                   font: SD.captionFont(size: captionFontSize),
                                                   color: SD.C.capsuleSecondaryText)
-                width += gap + 1 + gap + ceil(layout.secondaryText?.size().width ?? 0)
+                width += gap + 1 + gap + ceil(measuredSize(layout.secondaryText).width)
             }
         case .transcribing:
             layout.wave = true
@@ -270,7 +270,7 @@ final class RecordingHUDView: NSView {
             layout.primaryText = attributed(t("Распознаю…", "Transcribing…"),
                                             font: SD.labelFont(size: labelFontSize),
                                             color: SD.C.capsuleText)
-            width += ceil(layout.primaryText?.size().width ?? 0)
+            width += ceil(measuredSize(layout.primaryText).width)
         case .inserted:
             layout.check = true
             width += checkDiameter + 8
@@ -278,7 +278,7 @@ final class RecordingHUDView: NSView {
             layout.primaryText = attributed(t("Вставлено · \(words)", "Inserted · \(words)"),
                                             font: SD.labelFont(size: labelFontSize),
                                             color: SD.C.capsuleText)
-            width += ceil(layout.primaryText?.size().width ?? 0)
+            width += ceil(measuredSize(layout.primaryText).width)
         case .error:
             layout.wave = true
             width += waveSize.width + gap
@@ -286,7 +286,7 @@ final class RecordingHUDView: NSView {
             layout.primaryText = attributed(message,
                                             font: SD.labelFont(size: labelFontSize),
                                             color: accentColor())
-            width += ceil(layout.primaryText?.size().width ?? 0)
+            width += ceil(measuredSize(layout.primaryText).width)
         }
         width += padding
         layout.totalWidth = width
@@ -319,8 +319,8 @@ final class RecordingHUDView: NSView {
         }
 
         if let primary = layout.primaryText {
-            let size = primary.size()
-            primary.draw(at: NSPoint(x: x, y: capsuleRect.midY - size.height / 2))
+            let size = measuredSize(primary)
+            drawText(primary, at: NSPoint(x: x, y: capsuleRect.midY - size.height / 2))
             x += ceil(size.width)
         }
 
@@ -333,8 +333,8 @@ final class RecordingHUDView: NSView {
             SD.C.capsuleDivider.setFill()
             divider.fill()
             x += 1 + gap
-            let size = secondary.size()
-            secondary.draw(at: NSPoint(x: x, y: capsuleRect.midY - size.height / 2))
+            let size = measuredSize(secondary)
+            drawText(secondary, at: NSPoint(x: x, y: capsuleRect.midY - size.height / 2))
         }
     }
 
@@ -450,8 +450,54 @@ final class RecordingHUDView: NSView {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 
+    /// CoreText отверг текст капсулы: один раз в лог, дальше капсула рисуется
+    /// системным шрифтом. Страховка поверх пробы `SD.timerFont`: та ловит
+    /// шрифт до отрисовки, эта — исключение внутри неё, если оно всё же
+    /// случилось. Без неё исключение доходит до `abort()` и служба умирает
+    /// посреди записи (macOS 26.3.1, 2026-09-10).
+    private var textLayoutFallbackActive = false
+
     private func attributed(_ text: String, font: NSFont, color: NSColor) -> NSAttributedString {
-        NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+        let resolved = textLayoutFallbackActive
+            ? NSFont.systemFont(ofSize: font.pointSize, weight: .medium)
+            : font
+        return NSAttributedString(string: text, attributes: [.font: resolved, .foregroundColor: color])
+    }
+
+    private func measuredSize(_ text: NSAttributedString?) -> NSSize {
+        guard let text else { return .zero }
+        var size = NSSize.zero
+        do {
+            try withObjCExceptionsAsErrors { size = text.size() }
+        } catch {
+            noteTextLayoutFailure(error, in: text)
+            // Оценка вместо вёрстки: ширина по числу знаков, высота по кеглю.
+            let pointSize = attributedFont(of: text)?.pointSize ?? 12
+            size = NSSize(width: CGFloat(text.length) * pointSize * 0.62,
+                          height: pointSize * 1.25)
+        }
+        return size
+    }
+
+    private func drawText(_ text: NSAttributedString, at point: NSPoint) {
+        do {
+            try withObjCExceptionsAsErrors { text.draw(at: point) }
+        } catch {
+            noteTextLayoutFailure(error, in: text)
+        }
+    }
+
+    private func attributedFont(of text: NSAttributedString) -> NSFont? {
+        guard text.length > 0 else { return nil }
+        return text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+    }
+
+    private func noteTextLayoutFailure(_ error: Error, in text: NSAttributedString) {
+        guard !textLayoutFallbackActive else { return }
+        textLayoutFallbackActive = true
+        let font = attributedFont(of: text).map(SD.describe) ?? "unknown font"
+        log("capsule text layout failed: \(error.localizedDescription); \(font); switching to the system font")
+        needsDisplay = true
     }
 
     private func accentColor() -> NSColor {
@@ -3868,6 +3914,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         alert.runModal()
     }
 
+    @objc private func reportProblemClicked(_ sender: NSMenuItem) {
+        showAppForModal()
+        ProblemReport.share(diagnostics: diagnosticsText(),
+                            anchor: statusItem.button,
+                            language: settings.interfaceLanguage)
+    }
+
     // MARK: - Menu
 
     private func rebuildMenu() {
@@ -4104,6 +4157,12 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         saveDiagnostics.target = self
         sub.addItem(saveDiagnostics)
 
+        let reportProblem = NSMenuItem(title: t("Сообщить о проблеме…", "Report a Problem…"),
+                                       action: #selector(reportProblemClicked(_:)),
+                                       keyEquivalent: "")
+        reportProblem.target = self
+        sub.addItem(reportProblem)
+
         let resetModel = NSMenuItem(title: isResettingSpeechModelCache
                                         ? t("Сбрасываю кэш модели речи…", "Resetting Speech Model Cache…")
                                         : t("Сбросить кэш модели речи…", "Reset Speech Model Cache…"),
@@ -4309,6 +4368,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 "Feedback sounds: \(settings.playFeedbackSounds)",
                 "Show in Dock: \(settings.showInDock)",
                 "Launch at Login: \(launchAtLoginText)",
+                "Capsule fonts: \(SD.fontFallbackNotes.isEmpty ? "as designed" : SD.fontFallbackNotes.joined(separator: " | "))",
             ],
             updateLines: [
                 "Update notifications: \(settings.checkForUpdates)",
@@ -4320,7 +4380,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             ],
             microphoneLines: ["Selected: \(inputLabel)"] + availableInputLines,
             logPath: (Logger.shared.fileURL.path as NSString).abbreviatingWithTildeInPath,
-            recentLogLines: logLines
+            recentLogLines: logLines,
+            crashReportLines: crashReportSummaryLines(
+                fileNames: dictorCrashReportURLs().map(\.lastPathComponent))
         )
         return diagnosticsReportText(from: snapshot)
     }

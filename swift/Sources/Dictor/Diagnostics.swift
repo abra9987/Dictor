@@ -135,6 +135,11 @@ struct DiagnosticsReportSnapshot {
     let microphoneLines: [String]
     let logPath: String
     let recentLogLines: [String]
+    /// Имена отчётов о сбоях из ~/Library/Logs/DiagnosticReports — без
+    /// содержимого. 2026-09-10: тринадцать отчётов лежали рядом с логом, по
+    /// которому «служба не падала»; лог падение не видит, а имя файла с
+    /// датой — видит.
+    var crashReportLines: [String] = []
 }
 
 func diagnosticBulletLines(_ lines: [String], emptyText: String) -> String {
@@ -175,6 +180,9 @@ func diagnosticsReportText(from snapshot: DiagnosticsReportSnapshot) -> String {
 
     Microphone:
     \(diagnosticBulletLines(snapshot.microphoneLines, emptyText: "Unavailable"))
+
+    Crash reports (~/Library/Logs/DiagnosticReports):
+    \(diagnosticBulletLines(snapshot.crashReportLines, emptyText: "None found"))
 
     Recent log lines:
     \(diagnosticBulletLines(snapshot.recentLogLines, emptyText: "No recent log lines available"))
@@ -233,6 +241,35 @@ func recentDiagnosticLogLines(from url: URL = Logger.shared.fileURL,
         .map(sanitizedDiagnosticLogLine)
         .filter { !$0.isEmpty }
     return Array(sanitized.suffix(maxLines))
+}
+
+func dictorDiagnosticReportsDirectory() -> URL {
+    FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Logs/DiagnosticReports", isDirectory: true)
+}
+
+/// Отчёты о сбоях Dictor, новые первыми. Имя файла несёт дату
+/// (`Dictor-2026-09-10-231059.ips`), поэтому сортировка по имени — это
+/// сортировка по времени.
+func dictorCrashReportURLs(in directory: URL = dictorDiagnosticReportsDirectory()) -> [URL] {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    return dictorCrashReportNames(among: names).map { directory.appendingPathComponent($0) }
+}
+
+func dictorCrashReportNames(among names: [String]) -> [String] {
+    names
+        .filter { $0.hasPrefix("Dictor-") && $0.hasSuffix(".ips") }
+        .sorted(by: >)
+}
+
+func crashReportSummaryLines(fileNames: [String]) -> [String] {
+    let sorted = dictorCrashReportNames(among: fileNames)
+    guard let newest = sorted.first, let oldest = sorted.last else { return [] }
+    var lines = ["Total: \(sorted.count)", "Newest: \(newest)"]
+    if sorted.count > 1 {
+        lines.append("Oldest: \(oldest)")
+    }
+    return lines
 }
 
 func sanitizedDiagnosticLogLine(_ line: String) -> String {

@@ -168,9 +168,36 @@ final class FloatingCapsuleView: NSView {
         String(format: "%d:%02d", elapsedSeconds / 60, elapsedSeconds % 60)
     }
 
+    /// CoreText отверг текст капсулы: один раз в лог, дальше — системный
+    /// шрифт. Та же страховка, что у RecordingHUDView: необработанное
+    /// исключение из вёрстки роняло службу посреди записи (macOS 26.3.1).
+    private var textLayoutFallbackActive = false
+
+    private func resolvedFont(_ font: NSFont) -> NSFont {
+        textLayoutFallbackActive
+            ? NSFont.systemFont(ofSize: font.pointSize, weight: .medium)
+            : font
+    }
+
+    private func noteTextLayoutFailure(_ error: Error, font: NSFont) {
+        guard !textLayoutFallbackActive else { return }
+        textLayoutFallbackActive = true
+        log("floating capsule text layout failed: \(error.localizedDescription); \(SD.describe(font)); switching to the system font")
+        needsDisplay = true
+    }
+
     private func measure(_ text: String, font: NSFont) -> CGFloat {
         guard !text.isEmpty else { return 0 }
-        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        var width: CGFloat = 0
+        do {
+            try withObjCExceptionsAsErrors {
+                width = (text as NSString).size(withAttributes: [.font: resolvedFont(font)]).width
+            }
+        } catch {
+            noteTextLayoutFailure(error, font: font)
+            width = CGFloat(text.count) * font.pointSize * 0.62
+        }
+        return ceil(width)
     }
 
     private func waveWidth(bars: Int, height: CGFloat) -> CGFloat {
@@ -308,11 +335,21 @@ final class FloatingCapsuleView: NSView {
     private func draw(_ text: String, at x: CGFloat, in rect: NSRect,
                       font: NSFont, color: NSColor) -> CGFloat {
         guard !text.isEmpty else { return 0 }
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-        let size = (text as NSString).size(withAttributes: attributes)
-        let origin = NSPoint(x: x, y: rect.midY - size.height / 2)
-        (text as NSString).draw(at: origin, withAttributes: attributes)
-        return ceil(size.width)
+        let attributes: [NSAttributedString.Key: Any] = [.font: resolvedFont(font),
+                                                         .foregroundColor: color]
+        var width: CGFloat = 0
+        do {
+            try withObjCExceptionsAsErrors {
+                let size = (text as NSString).size(withAttributes: attributes)
+                let origin = NSPoint(x: x, y: rect.midY - size.height / 2)
+                (text as NSString).draw(at: origin, withAttributes: attributes)
+                width = size.width
+            }
+        } catch {
+            noteTextLayoutFailure(error, font: font)
+            width = CGFloat(text.count) * font.pointSize * 0.62
+        }
+        return ceil(width)
     }
 
     private func drawDivider(at x: CGFloat, in rect: NSRect) {

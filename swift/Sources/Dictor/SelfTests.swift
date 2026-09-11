@@ -659,6 +659,73 @@ enum DictorSelfTest {
         }
         try expect(hardlinkRejected, equals: true,
                    "diagnostic log tail should reject hard-linked files")
+
+        // Отчёты о сбоях: только Dictor-*.ips, новые первыми; сводка короткая —
+        // счётчик, самый свежий и самый старый.
+        let crashDir = root.appendingPathComponent("DiagnosticReports", isDirectory: true)
+        try fm.createDirectory(at: crashDir, withIntermediateDirectories: true)
+        for name in ["Dictor-2026-09-10-002425.ips", "Other-2026-09-10-000001.ips",
+                     "Dictor-2026-09-10-231059.ips", "Dictor-2026-09-03-100849.ips", "notes.txt"] {
+            try Data("{}".utf8).write(to: crashDir.appendingPathComponent(name))
+        }
+        try expect(
+            dictorCrashReportURLs(in: crashDir).map(\.lastPathComponent),
+            equals: ["Dictor-2026-09-10-231059.ips",
+                     "Dictor-2026-09-10-002425.ips",
+                     "Dictor-2026-09-03-100849.ips"],
+            "crash report listing should keep only Dictor reports, newest first"
+        )
+        try expect(
+            crashReportSummaryLines(fileNames: ["Dictor-2026-09-03-100849.ips",
+                                                "Dictor-2026-09-10-231059.ips"]),
+            equals: ["Total: 2",
+                     "Newest: Dictor-2026-09-10-231059.ips",
+                     "Oldest: Dictor-2026-09-03-100849.ips"],
+            "crash report summary should name the count and the range"
+        )
+        try expect(crashReportSummaryLines(fileNames: []), equals: [],
+                   "no crash reports should yield no summary lines")
+        try expect(crashReportSummaryLines(fileNames: ["Dictor-2026-09-10-231059.ips"]),
+                   equals: ["Total: 1", "Newest: Dictor-2026-09-10-231059.ips"],
+                   "a single crash report should not repeat itself as the oldest")
+        try expect(report.contains("Crash reports (~/Library/Logs/DiagnosticReports):"),
+                   equals: true,
+                   "diagnostics report should carry the crash report section")
+
+        // Проба шрифта: системный шрифт верстается; описание — имя и кегль.
+        try expect(SD.textLayoutFailure(font: NSFont.systemFont(ofSize: 12)), equals: nil,
+                   "the system font must pass the CoreText probe")
+        try expect(SD.describe(NSFont.systemFont(ofSize: 12)).hasSuffix(" 12 pt"), equals: true,
+                   "font description should end with the point size")
+        try expect(ProblemReport.archiveStamp(for: Date(timeIntervalSince1970: 0)).count,
+                   equals: "1970-01-01-0000".count,
+                   "archive stamp should be yyyy-MM-dd-HHmm")
+
+        // Архив «Сообщить о проблеме» собирается целиком: диагностика, хвост
+        // журнала, и всё это распаковывается тем же ditto, что и пакует.
+        let archive = try ProblemReport.build(diagnostics: "probe diagnostics 7C1E")
+        try expect(fm.fileExists(atPath: archive.url.path), equals: true,
+                   "problem report archive should exist")
+        let unpacked = root.appendingPathComponent("unpacked", isDirectory: true)
+        let unzip = Process()
+        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        unzip.arguments = ["-x", "-k", archive.url.path, unpacked.path]
+        unzip.environment = systemToolProcessEnvironment()
+        try unzip.run()
+        unzip.waitUntilExit()
+        try expect(unzip.terminationStatus, equals: 0, "problem report archive should unpack")
+        let folder = try fm.contentsOfDirectory(atPath: unpacked.path)
+            .first { $0.hasPrefix("Dictor-report-") }
+        guard let folder else { throw SelfTestFailure.failed("problem report folder missing") }
+        let unpackedFolder = unpacked.appendingPathComponent(folder)
+        try expect(
+            try String(contentsOf: unpackedFolder.appendingPathComponent("diagnostics.txt"),
+                       encoding: .utf8),
+            equals: "probe diagnostics 7C1E",
+            "problem report should carry the diagnostics text verbatim")
+        try expect(fm.fileExists(atPath: unpackedFolder.appendingPathComponent("Dictor.log").path),
+                   equals: true,
+                   "problem report should carry the log tail")
     }
 
     private static func testHotkey() throws {

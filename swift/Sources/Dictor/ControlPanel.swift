@@ -1203,6 +1203,54 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         openServiceTab()
     }
 
+    @objc private func reportProblemFromPanel(_ sender: NSButton) {
+        ProblemReport.share(diagnostics: panelDiagnosticsText(),
+                            anchor: sender,
+                            language: settings.interfaceLanguage)
+    }
+
+    /// Окно — отдельный процесс, полного отчёта службы у него нет. Зато есть
+    /// то, что служба публикует на диск, и настройки, которые к сбою
+    /// относятся чаще всего: капсула, режим клавиши, приглушение.
+    private func panelDiagnosticsText() -> String {
+        var lines = [
+            "Dictor diagnostics (control panel)",
+            "Generated: \(ISO8601DateFormatter().string(from: Date()))",
+            "App version: \(currentBundleVersion()) (\(currentBundleBuild()))",
+            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "",
+            "Service:",
+        ]
+        if let state = AgentRuntimeStateStore.read() {
+            lines += [
+                "- Status: \(state.status) — \(state.detail)",
+                "- Ready: \(state.isReady), recording: \(state.isRecording), transcribing: \(state.isTranscribing)",
+                "- Speech model ready: \(state.speechModelReady)",
+                "- Missing permissions: \(state.missingPermissions.isEmpty ? "none" : state.missingPermissions.joined(separator: ", "))",
+                "- Hotkey: \(state.hotkeyName), trigger: \(state.triggerMode)",
+            ]
+        } else {
+            lines.append("- State file unavailable (service not running?)")
+        }
+        lines += [
+            "",
+            "Settings:",
+            "- Capsule size: \(settings.recordingHUDSize.rawValue)",
+            "- Show capsule: \(settings.showRecordingWaveform)",
+            "- Trigger mode: \(settings.triggerMode.rawValue)",
+            "- Mute while recording: \(settings.muteWhileRecording)",
+            "- Interface language: \(settings.interfaceLanguage.rawValue)",
+            "",
+            "Crash reports (~/Library/Logs/DiagnosticReports):",
+        ]
+        let crashLines = crashReportSummaryLines(
+            fileNames: dictorCrashReportURLs().map(\.lastPathComponent))
+        lines += crashLines.isEmpty ? ["- None found"] : crashLines.map { "- \($0)" }
+        lines.append("")
+        lines.append("Privacy: transcript text and text-correction contents are not included.")
+        return lines.joined(separator: "\n")
+    }
+
     /// Автозапуск диктовки. Включение поднимает службу сразу — ждать входа в
     /// систему, чтобы проверить, что тумблер сработал, никто не станет.
     /// Выключение только снимает автозапуск: живую службу не трогаем, иначе
@@ -1325,6 +1373,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
         // Состояние службы вкладкой не является: переключать там нечего.
         // Дверь оставляем здесь, где человек ищет «а где всё остальное».
+        // Кнопка «пожаловаться» живёт рядом с диагностикой: человек, у
+        // которого что-то сломалось, ищет её именно здесь, а не в меню-баре.
         root.addArrangedSubview(settingsGroup(nil, rows: [SDRowView(
             title: t("Разрешения, модель, измерения и диагностика",
                      "Permissions, model, measurements and diagnostics"),
@@ -1332,6 +1382,15 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                         "That is state, not preferences — it lives in the Service section"),
             control: panelButton(t("Открыть «Службу»", "Open Service"),
                                  action: #selector(openServiceSectionFromPanel(_:))),
+            style: .card
+        ), SDRowView(
+            title: t("Сообщить о проблеме", "Report a problem"),
+            subtitle: t("Соберёт журнал и отчёты о сбоях в архив и откроет письмо. "
+                        + "Ничего не уходит без вашего «Отправить»",
+                        "Packs the log and crash reports into an archive and opens an email. "
+                        + "Nothing leaves until you press Send"),
+            control: panelButton(t("Собрать архив…", "Build archive…"),
+                                 action: #selector(reportProblemFromPanel(_:))),
             style: .card
         )]))
     }
