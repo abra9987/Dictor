@@ -1230,8 +1230,34 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             style: .card
         )
 
+        // Встроенные наборы названий собраны по диктовкам одного человека.
+        // Чужой словарь — готовый список слов, на которых модель ошибается у
+        // других, и узнать о них больше неоткуда: приложение о себе молчит.
+        let shareRow = SDRowView(
+            title: t("Поделиться словарём", "Share the dictionary"),
+            subtitle: count == 0
+                ? t("Пока нечем — словарь пуст",
+                    "Nothing to share yet — the dictionary is empty")
+                : t("Откроет письмо автору с файлом словаря: так встроенный набор "
+                    + "пополняется словами, на которых модель ошибается. "
+                    + "Ничего не уходит без вашего «Отправить»",
+                    "Opens an email to the author with the dictionary file: that is how "
+                    + "the built-in set learns the words the model gets wrong. "
+                    + "Nothing leaves until you press Send"),
+            control: panelButton(t("Открыть письмо…", "Open email…"),
+                                 action: #selector(shareDictionaryFromPanel(_:)),
+                                 enabled: count > 0),
+            style: .card
+        )
+
         root.addArrangedSubview(settingsGroup(t("Свой словарь", "Your dictionary"),
-                                              rows: [listRow, syncRow, transferRow]))
+                                              rows: [listRow, syncRow, transferRow, shareRow]))
+    }
+
+    @objc private func shareDictionaryFromPanel(_ sender: NSButton) {
+        DictionaryShare.share(corrections: settings.transcriptCorrections,
+                              anchor: sender,
+                              language: settings.interfaceLanguage)
     }
 
     @objc private func openDictionarySectionFromPanel(_ sender: NSButton) {

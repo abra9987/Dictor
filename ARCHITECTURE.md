@@ -179,6 +179,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `Statistics.swift` | what the Statistics section shows |
 | `UpdateCheck.swift`, `UpdateWindow.swift` | the updater |
 | `ModelIntegrity.swift` | per-file SHA-256 verification of the model, cache paths, disk space |
+| `ProblemReport.swift`, `DictionaryShare.swift` | the two things a person can choose to email: a diagnostics archive and their dictionary |
 | `Permissions.swift`, `PermissionsDoctor.swift` | the three macOS permissions and the three reasons a granted one still gets asked for |
 | `InstallLocation.swift` | moving the app into Applications, quarantine |
 | `ServiceStatus.swift`, `FloatingCapsule.swift`, `QuickPanel.swift` | service state, the floating capsule, the menu-bar popover |

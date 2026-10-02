@@ -319,6 +319,46 @@ enum DictorSelfTest {
                 }
             }
 
+            // «Поделиться словарём» — действие, а не настройка, и в реестр не
+            // входит. Но кнопка, до которой не дотянуться, — тот же дефект,
+            // поэтому проверяется здесь же и в обоих состояниях: с пустым
+            // словарём она приглушена, с непустым обязана принимать нажатие.
+            let savedCorrections = settings.transcriptCorrections
+            defer { settings.transcriptCorrections = savedCorrections }
+            let shareStates: [(corrections: [TranscriptCorrection], enabled: Bool)] = [
+                ([], false),
+                ([TranscriptCorrection(source: "проба", replacement: "Probe")], true),
+            ]
+            for state in shareStates {
+                settings.transcriptCorrections = state.corrections
+                panel.settingsTab = "text"
+                let view = panel.makeSettingsContentView()
+                view.frame = NSRect(x: 0, y: 0, width: width,
+                                    height: DictorControlPanelApp.settingsContentHeight(
+                                        for: view, width: width))
+                view.layoutSubtreeIfNeeded()
+                guard let row = rows(in: view).first(where: {
+                    $0.rowTitle == "Поделиться словарём"
+                }), let button = row.control as? NSButton else {
+                    throw SelfTestFailure.failed(
+                        "the «Поделиться словарём» row with its button is missing from the text tab")
+                }
+                let centre = button.convert(NSPoint(x: button.bounds.midX,
+                                                    y: button.bounds.midY),
+                                            to: view)
+                let hit = view.hitTest(centre)
+                try expect(hit === button || (hit?.isDescendant(of: button) ?? false),
+                           equals: true,
+                           "a click in the middle of «Поделиться словарём» lands on "
+                           + (hit.map { "\(type(of: $0))" } ?? "nothing"))
+                try expect(button.isEnabled, equals: state.enabled,
+                           "the share button should be enabled only for a non-empty dictionary")
+                let receiver = button.target as? NSObject
+                try expect(button.action.map { receiver?.responds(to: $0) == true } ?? false,
+                           equals: true,
+                           "the share button has no receiver for its action")
+            }
+
             // Порядок и подписи полного списка языков: каждый язык модели
             // достижим из попапа ровно один раз — новый case в enum не может
             // молча выпасть из окна.
@@ -2483,6 +2523,53 @@ enum DictorSelfTest {
             equals: [],
             "replace with an empty file should empty the dictionary"
         )
+
+        try testDictionaryShare()
+    }
+
+    /// «Поделиться словарём»: файл собирается тем же форматом, что экспорт, и
+    /// читается обычным импортом — иначе присланное пришлось бы разбирать
+    /// руками. В письме — число записей и ни одной самой записи: тело письма
+    /// человек видит до отправки, но словарь в нём дублировать незачем.
+    private static func testDictionaryShare() throws {
+        let fm = FileManager.default
+        let shared = try DictionaryShare.build(
+            corrections: [
+                TranscriptCorrection(source: "  клауд   код ", replacement: "Claude Code"),
+                TranscriptCorrection(source: "клауд код", replacement: "Claude Code"),
+                TranscriptCorrection(source: "тазбар", replacement: "Taskbar"),
+                TranscriptCorrection(source: "", replacement: "ignored"),
+            ],
+            now: Date(timeIntervalSince1970: 0))
+        defer { try? fm.removeItem(at: shared.url.deletingLastPathComponent()) }
+
+        try expect(shared.correctionCount, equals: 2,
+                   "the shared file should count normalized corrections, not raw entries")
+        try expect(shared.url.pathExtension, equals: CORRECTIONS_FILE_EXTENSION,
+                   "the shared file should open with the ordinary dictionary import")
+        try expect(shared.url.lastPathComponent.hasPrefix("Dictor-dictionary-"), equals: true,
+                   "the shared file name should say what it is")
+        try expect(
+            try TranscriptCorrectionsTransfer.read(from: shared.url),
+            equals: [TranscriptCorrection(source: "клауд код", replacement: "Claude Code"),
+                     TranscriptCorrection(source: "тазбар", replacement: "Taskbar")],
+            "the shared file should round-trip through the import reader")
+
+        for language in [InterfaceLanguage.russian, .english] {
+            let body = DictionaryShare.messageBody(file: shared, language: language)
+            try expect(body.contains("Dictor \(currentBundleVersion())"), equals: true,
+                       "the share message should name the app version")
+            try expect(body.contains("Claude Code") || body.contains("тазбар"), equals: false,
+                       "the share message should not repeat dictionary entries")
+        }
+        try expect(
+            DictionaryShare.messageBody(file: shared, language: .russian).contains("2 автозамены"),
+            equals: true,
+            "the Russian share message should say how many corrections are attached")
+        try expect(
+            DictionaryShare.messageBody(file: shared, language: .english).contains("2 corrections"),
+            equals: true,
+            "the English share message should say how many corrections are attached")
     }
 
     private static func testFillerWordRemoval() throws {

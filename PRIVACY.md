@@ -66,6 +66,17 @@ press Send, and you can open the archive and read every file before you do.
 If no mail account is configured, the system share sheet is offered instead,
 and failing that the archive is simply shown in Finder.
 
+## Sharing your dictionary
+
+"Share the dictionary" (Settings → Text) writes your own corrections — what the
+model hears and what the text should say — into one file, the same file Export
+produces, and opens a new message in your mail app with it attached and the
+recipient filled in. The built-in sets are not included, and the file holds no
+dictated text. As with a problem report, nothing is sent by the app: the
+message goes out only if you press Send, and the file can be opened and read
+first. Corrections can contain names you taught the app, so look before you
+send.
+
 ## macOS permissions
 
 - **Microphone** records speech while dictation is active.

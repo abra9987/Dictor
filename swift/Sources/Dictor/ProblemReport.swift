@@ -119,7 +119,7 @@ enum ProblemReport {
             archive = try build(diagnostics: diagnostics)
         } catch {
             log("problem report failed: \(error.localizedDescription)")
-            showAlert(
+            MailHandoff.showAlert(
                 title: localizedText("Не удалось собрать отчёт", "The report couldn't be built",
                                      language: language),
                 detail: error.localizedDescription)
@@ -127,16 +127,46 @@ enum ProblemReport {
         }
         log("problem report built: \(archive.crashReportCount) crash report(s), \(archive.logLineCount) log lines")
 
-        let subject = "Dictor \(currentBundleVersion()) — "
-            + localizedText("отчёт о проблеме", "problem report", language: language)
-        let items: [Any] = [messageBody(archive: archive, language: language), archive.url]
+        MailHandoff.present(
+            subject: "Dictor \(currentBundleVersion()) — "
+                + localizedText("отчёт о проблеме", "problem report", language: language),
+            body: messageBody(archive: archive, language: language),
+            attachment: archive.url,
+            anchor: anchor,
+            logLabel: "problem report",
+            finderTitle: localizedText("Архив готов", "The archive is ready", language: language),
+            finderDetail: localizedText(
+                "Почта не настроена. Архив подсвечен в Finder — приложите его к сообщению для \(PROBLEM_REPORT_RECIPIENT).",
+                "No mail account is set up. The archive is selected in Finder — attach it to a message for \(PROBLEM_REPORT_RECIPIENT).",
+                language: language))
+    }
+}
+
+// MARK: - Письмо с вложением
+//
+// Общий хвост «Сообщить о проблеме» и «Поделиться словарём»: файл собран,
+// осталось отдать его человеку так, чтобы отправка осталась его действием.
+// Три ступени — письмо, системная панель «Поделиться», Finder — потому что
+// почтовая программа настроена не у всех, а кнопка, которая ничего не
+// открыла, читается как сломанная.
+
+@MainActor
+enum MailHandoff {
+    static func present(subject: String,
+                        body: String,
+                        attachment: URL,
+                        anchor: NSView?,
+                        logLabel: String,
+                        finderTitle: String,
+                        finderDetail: String) {
+        let items: [Any] = [body, attachment]
 
         if let mail = NSSharingService(named: .composeEmail) {
             mail.recipients = [PROBLEM_REPORT_RECIPIENT]
             mail.subject = subject
             if mail.canPerform(withItems: items) {
                 mail.perform(withItems: items)
-                log("problem report: mail compose opened")
+                log("\(logLabel): mail compose opened")
                 return
             }
         }
@@ -144,22 +174,16 @@ enum ProblemReport {
         if let anchor {
             let picker = NSSharingServicePicker(items: items)
             picker.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
-            log("problem report: share picker shown (no mail account)")
+            log("\(logLabel): share picker shown (no mail account)")
             return
         }
 
-        NSWorkspace.shared.activateFileViewerSelecting([archive.url])
-        log("problem report: archive revealed in Finder")
-        showAlert(
-            title: localizedText("Архив готов", "The archive is ready", language: language),
-            detail: localizedText(
-                "Почта не настроена. Архив подсвечен в Finder — приложите его к сообщению для \(PROBLEM_REPORT_RECIPIENT).",
-                "No mail account is set up. The archive is selected in Finder — attach it to a message for \(PROBLEM_REPORT_RECIPIENT).",
-                language: language))
+        NSWorkspace.shared.activateFileViewerSelecting([attachment])
+        log("\(logLabel): file revealed in Finder")
+        showAlert(title: finderTitle, detail: finderDetail)
     }
 
-    @MainActor
-    private static func showAlert(title: String, detail: String) {
+    static func showAlert(title: String, detail: String) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .informational
