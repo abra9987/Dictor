@@ -98,7 +98,7 @@ While the service runs on the previous model, `SpeechModelUpdater` fetches the
 current one in the background — **as files only**. Preparing a model for the
 Neural Engine takes tens of seconds and must not happen next to a live
 dictation, so the switch itself is an ordinary service restart, taken once
-dictation has been quiet for two minutes and the audio input is closed. It is
+dictation has been quiet for two minutes. It is
 the same path the service walks after every app update, which is the point:
 no new state to get wrong. Swapping the model in place under a running
 dictation was considered and refused — it means two models in memory and a

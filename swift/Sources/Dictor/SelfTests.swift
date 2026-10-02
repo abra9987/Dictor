@@ -3278,11 +3278,10 @@ enum DictorSelfTest {
                    equals: .downloadCurrent,
                    "with no usable model the service downloads and waits, as on first install")
 
-        func due(ready: Bool = true, occupied: Bool = false, audio: Bool = false,
+        func due(ready: Bool = true, occupied: Bool = false,
                  quiet: TimeInterval = SPEECH_MODEL_SWITCH_QUIET_SECONDS) -> Bool {
             SpeechModelUpdater.switchIsDue(updateIsReady: ready,
                                            serviceIsOccupied: occupied,
-                                           audioInputIsOpen: audio,
                                            secondsSinceLastDictation: quiet)
         }
         try expect(due(), equals: true,
@@ -3291,8 +3290,6 @@ enum DictorSelfTest {
                    "nothing to switch to while the download is unfinished")
         try expect(due(occupied: true), equals: false,
                    "never restart the service under a recording or a transcription")
-        try expect(due(audio: true), equals: false,
-                   "an open audio input means a dictation has just ended")
         try expect(due(quiet: SPEECH_MODEL_SWITCH_QUIET_SECONDS - 1), equals: false,
                    "a pause between two phrases is not idleness")
 

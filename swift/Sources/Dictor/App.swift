@@ -1734,7 +1734,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         guard SpeechModelUpdater.switchIsDue(
             updateIsReady: speechModelUpdatePhase == .waitingForIdle,
             serviceIsOccupied: occupied,
-            audioInputIsOpen: audio.isEngineStarted,
             secondsSinceLastDictation: ProcessInfo.processInfo.systemUptime
                 - lastDictationActivityUptime) else { return }
         speechModelUpdatePhase = nil
