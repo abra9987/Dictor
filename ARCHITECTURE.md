@@ -28,7 +28,7 @@ the helper has to outlive the bundle it is overwriting.
 
 ## The path of one dictation
 
-Seven links, `App.swift` `handleRelease` being the spine:
+Eight links, `App.swift` `handleRelease` being the spine:
 
 1. **`HotkeyListener`** — a `CGEventTap` sees the key go down and up. Only the
    bound key is swallowed; its companion modifier is left to the system, because
@@ -44,16 +44,32 @@ Seven links, `App.swift` `handleRelease` being the spine:
    is transformed: model repair, then the dictionary (the user's entries, 239
    built-in spellings, 74 Latin-script restorations), then filler-word removal.
    The order is an invariant: an explicit user correction must win.
-5. **`TextInsertion`** — the text is placed in the clipboard **lazily** and
+5. **`SmartInsertion`** — two rules that fit the text to the place it lands
+   in: a dictation that continues a sentence starts lowercase and gets a space
+   if the cursor stands flush against the previous word, and a short message
+   in a chat app loses its final period. What stands before the cursor is read
+   through the Accessibility API *while the model is still transcribing*, so
+   it costs no time, and insertion waits for it 150 ms at most. No language
+   model is involved, and the rules stay silent whenever they are not sure: an
+   unreadable field, a symbol instead of a word, a first word the system
+   dictionary does not know in lowercase (a name) or one whose spelling the
+   dictionary set (Python) — the text goes in as dictated. Terminals are never
+   read. The two rules must not feed each other: a message that lost its
+   period ends in a word, so in chat apps only a comma or a dash counts as
+   continuation, and the period goes only when the dictation is the whole
+   message.
+6. **`TextInsertion`** — the text is placed in the clipboard **lazily** and
    ⌘V is synthesised. The receiving app pulls the text when it asks for it, and
    only then does the previous clipboard come back. If nobody pulls the text
    within 10 seconds, the paste never happened: the dictation stays in the
    clipboard for a manual ⌘V, Enter-after-insert is withheld, and the person
    is told — a silent rollback would leave the optimistic “Inserted” HUD as
    an unfixable lie.
-6. **`Statistics` and history** — both written before insertion, so what the
-   person sees in History is exactly what was pasted.
-7. **`DictationLatencyMetrics`** — 26 measurements of that path, one line per
+7. **`Statistics` and history** — both written before insertion and after
+   smart insertion, so what the person sees in History is exactly what was
+   pasted. The leading space and the configured suffix are glue between
+   neighbours, not part of the dictation, and are not stored.
+8. **`DictationLatencyMetrics`** — 26 measurements of that path, one line per
    dictation in `~/Library/Logs/Dictor.log`.
 
 Measured on real use: about **97% of the delay is the model itself**; everything
@@ -142,7 +158,7 @@ is written out in [docs/updates.md](docs/updates.md).
 - **`scripts/check.sh`** — static: manifests, the signing pin against the
   keychain, site markup and asset existence, and grep rules that guard defects
   this project has actually shipped. It does not compile.
-- **Self-tests** — 34 suites in `SelfTests.swift`, 31 in `all`, three excluded
+- **Self-tests** — 36 suites in `SelfTests.swift`, 33 in `all`, three excluded
   by name because they need a live machine. They exist only in DEBUG builds.
   Several assert *reachability* rather than behaviour: that a control is not
   covered by another view, that an action has a receiver, that a suite is
@@ -173,6 +189,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `AudioCapture.swift`, `AudioInputDevices.swift` | recording, conversion, device selection |
 | `TranscriptionWorker.swift` | the model |
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
+| `SmartInsertion.swift` | what stands before the cursor, and the two rules that fit the text to it |
 | `TextInsertion.swift` | clipboard and keystroke insertion |
 | `Settings.swift`, `CoreTypes.swift` | stored settings and shared types |
 | `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |

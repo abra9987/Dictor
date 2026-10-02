@@ -89,7 +89,7 @@ enum TranscriptCorrector {
     /// совпадения».
     static func apply(to text: String,
                       corrections: [TranscriptCorrection],
-                      lexicon: RussianLexicon? = nil) -> (text: String, appliedCount: Int) {
+                      lexicon: WordLexicon? = nil) -> (text: String, appliedCount: Int) {
         let compiled = CompiledRules.shared.rules(for: corrections)
         let ordered = compiled.ordered
 

@@ -289,8 +289,8 @@ final class Settings: @unchecked Sendable {
 
     /// Словарь, отличающий русское слово от названия, — или `nil`, если
     /// сопоставление по звучанию выключено либо русского словаря в системе нет.
-    var dictationTermLexicon: RussianLexicon? {
-        phoneticTermMatchingEnabled ? SystemRussianLexicon.shared : nil
+    var dictationTermLexicon: WordLexicon? {
+        phoneticTermMatchingEnabled ? SystemLexicon.russian : nil
     }
 
     /// Что уходит в правку расшифровки: слова человека плюс встроенные наборы.
@@ -352,6 +352,17 @@ final class Settings: @unchecked Sendable {
             return .appendSpace
         }
         set { defaults.set(newValue.rawValue, forKey: Self.keyPasteSuffix) }
+    }
+
+    /// Умная вставка: строчная буква и пробел в продолжении фразы, реплика
+    /// в мессенджере без точки. Включена по умолчанию — правила молчат везде,
+    /// где не уверены, а выключенной по умолчанию функции никто не находит.
+    var smartInsertionEnabled: Bool {
+        get {
+            guard defaults.object(forKey: "smart_insertion_v1") != nil else { return true }
+            return defaults.bool(forKey: "smart_insertion_v1")
+        }
+        set { defaults.set(newValue, forKey: "smart_insertion_v1") }
     }
 
     var recentTranscriptLimit: RecentTranscriptLimit {

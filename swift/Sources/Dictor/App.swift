@@ -3250,6 +3250,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 completedAt: ProcessInfo.processInfo.systemUptime
             )
         }
+        // Что стоит перед курсором, читается, пока модель распознаёт: поле на
+        // отпускании клавиши то же, в которое уйдёт текст, а время чтения
+        // целиком прячется за распознаванием.
+        let insertionContextTask = makeInsertionContextTask()
 
         let transcribingUIStartedAt = ProcessInfo.processInfo.systemUptime
         setMenuBarState(.busy)
@@ -3283,7 +3287,29 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                     if processed.removedFillerWordCount > 0 {
                         log("filler words removed: \(processed.removedFillerWordCount)")
                     }
-                    let cleaned = processed.text
+                    var cleaned = processed.text
+                    // Умная вставка правит текст до записи в «Историю»: там
+                    // обязано лежать ровно то, что ушло в поле. Пробел перед
+                    // текстом — клей, как и хвост, и в историю не идёт.
+                    var insertionLeadingSpace = false
+                    if !cleaned.isEmpty, let insertionContextTask {
+                        if let reading = await InsertionContextReader.value(
+                            of: insertionContextTask,
+                            within: InsertionContextReader.insertionWaitSeconds) {
+                            let corrections = settings.dictationTranscriptCorrections
+                            let adjusted = SmartInsertion.adjust(
+                                cleaned,
+                                context: reading.context,
+                                lexicons: .system,
+                                protectedWords: { SmartInsertion.protectedWords(in: corrections) },
+                                sentWithEnter: shouldPressEnterAfterInsertion)
+                            cleaned = adjusted.text
+                            insertionLeadingSpace = adjusted.leadingSpace
+                            log("smart insertion: \(adjusted.summary); \(reading.diagnostic)")
+                        } else {
+                            log("smart insertion: skipped, the field did not answer in time")
+                        }
+                    }
                     log("\(String(format: "%.2f", dur)) s audio → \(String(format: "%.2f", asrTiming.totalSeconds)) s → \(cleaned.count) chars")
                     if !cleaned.isEmpty {
                         let historyStartedAt = ProcessInfo.processInfo.systemUptime
@@ -3314,7 +3340,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
                         let insertionStartedAt = ProcessInfo.processInfo.systemUptime
                         let inserted = TextInserter.insert(
-                            pastedText(from: cleaned, suffix: settings.pasteSuffix)
+                            pastedText(from: cleaned,
+                                       suffix: settings.pasteSuffix,
+                                       leadingSpace: insertionLeadingSpace)
                         )
                         let insertionCompletedAt = ProcessInfo.processInfo.systemUptime
                         var enterDelaySeconds: Double?
@@ -3411,6 +3439,24 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             if !didRestartAudio {
                 scheduleAudioIdleStop(reason: "recording finished")
             }
+        }
+    }
+
+    /// Запускает чтение текста перед курсором — или не запускает, если умная
+    /// вставка выключена. Читает не главный поток: программа, которая не
+    /// отвечает на запросы универсального доступа, не должна останавливать
+    /// ни капсулу, ни перехват клавиш.
+    private func makeInsertionContextTask() -> Task<(context: InsertionContext, diagnostic: String), Never>? {
+        guard settings.smartInsertionEnabled,
+              let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let applicationPID = app.processIdentifier
+        let bundleIdentifier = app.bundleIdentifier ?? ""
+        return Task.detached(priority: .userInitiated) {
+            let reading = InsertionContextReader.read(frontmostPID: applicationPID,
+                                                      frontmostBundleIdentifier: bundleIdentifier)
+            return (InsertionContext(bundleIdentifier: reading.bundleIdentifier,
+                                     textBeforeCaret: reading.textBeforeCaret),
+                    reading.diagnostic)
         }
     }
 
@@ -4377,6 +4423,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 "Speech model: \(speechModelProfile.displayName)",
                 "Language: \(languageSettingText)",
                 "Paste behavior: \(PASTE_SUFFIX_DISPLAY[settings.pasteSuffix] ?? settings.pasteSuffix.rawValue)",
+                "Smart insertion: \(settings.smartInsertionEnabled)",
                 "Remove filler words: \(settings.removeFillerWords)",
                 "Recent transcripts: \(RECENT_TRANSCRIPT_LIMIT_DISPLAY[settings.recentTranscriptLimit] ?? settings.recentTranscriptLimit.rawValue) (\(visibleHistory.count) visible, \(history.count) archived)",
                 "Text corrections: \(settings.transcriptCorrections.count) configured",

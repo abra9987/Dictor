@@ -77,8 +77,21 @@ message goes out only if you press Send, and the file can be opened and read
 first. Corrections can contain names you taught the app, so look before you
 send.
 
+## What smart insertion reads
+
+To tell whether a dictation continues a sentence, smart insertion looks at the
+last 80 characters before the cursor in the field the text is about to go
+into, and at which app that field belongs to. It does this through the
+Accessibility permission the app already needs for inserting text. Those
+characters are used for one decision and dropped: they are not stored, not
+written to the log, and not sent anywhere. Password fields are not read, and
+neither are the common terminal apps — what stands before the cursor there is
+a prompt, not a sentence. Switch smart insertion off in Settings → Text and the
+app stops reading the field altogether.
+
 ## macOS permissions
 
 - **Microphone** records speech while dictation is active.
-- **Accessibility** inserts the resulting text into the focused field.
+- **Accessibility** inserts the resulting text into the focused field and, with
+  smart insertion on, reads the few characters before the cursor there.
 - **Input Monitoring** observes the configured global hotkey.

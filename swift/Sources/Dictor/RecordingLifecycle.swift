@@ -38,7 +38,7 @@ func processedDictationText(rawTranscript: String,
                                     corrections: [TranscriptCorrection],
                                     removeFillerWords: Bool,
                                     language: DictationLanguage = .auto,
-                                    lexicon: RussianLexicon? = nil) -> DictationTextProcessingResult {
+                                    lexicon: WordLexicon? = nil) -> DictationTextProcessingResult {
     let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
     let repaired = SpeechModelTextRepair.apply(to: trimmed, language: language)
     let corrected = TranscriptCorrector.apply(to: repaired,

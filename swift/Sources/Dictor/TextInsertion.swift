@@ -21,14 +21,20 @@ import UniformTypeIdentifiers
 // write, so dictation doesn't replace what the user had copied before
 // speaking.
 
-func pastedText(from correctedTranscript: String, suffix: PasteSuffix) -> String {
+/// `leadingSpace` — пробел от умной вставки: курсор стоял вплотную к
+/// предыдущему слову. Как и хвост, это клей между соседями, а не часть
+/// диктовки.
+func pastedText(from correctedTranscript: String,
+                suffix: PasteSuffix,
+                leadingSpace: Bool = false) -> String {
+    let text = (leadingSpace ? " " : "") + correctedTranscript
     switch suffix {
     case .appendSpace:
-        return correctedTranscript + " "
+        return text + " "
     case .none:
-        return correctedTranscript
+        return text
     case .appendNewline:
-        return correctedTranscript + "\n"
+        return text + "\n"
     }
 }
 

@@ -199,7 +199,7 @@ func runCorrectTextsTool(arguments: [String]) -> Int32 {
     let corrections = dictationCorrections(user: extra + settings.transcriptCorrections,
                                            includeBuiltInSpellings: settings.builtInSpellingsEnabled,
                                            includeLatinTermRestorations: settings.latinTermRestorationsEnabled)
-    guard let lexicon = SystemRussianLexicon.shared else {
+    guard let lexicon = SystemLexicon.russian else {
         fputs("no Russian system dictionary\n", stderr)
         return EXIT_FAILURE
     }

@@ -1098,6 +1098,24 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             control: suffixPills,
             style: .card
         ))
+
+        // Выключатель обязателен: правило само меняет сказанное, и человек,
+        // которому оно мешает в его программе, должен убрать его одним
+        // движением, а не терпеть до следующей версии.
+        let smartToggle = SDToggle()
+        smartToggle.isOn = settings.smartInsertionEnabled
+        smartToggle.onToggle = { [weak self] enabled in
+            self?.settings.smartInsertionEnabled = enabled
+        }
+        insertedRows.append(SDRowView(
+            title: t("Умная вставка", "Smart insertion"),
+            subtitle: t("Продолжение фразы — со строчной и через пробел, "
+                        + "реплика в мессенджере — без точки",
+                        "A continued sentence starts lowercase after a space, "
+                        + "a chat message drops its period"),
+            control: smartToggle,
+            style: .card
+        ))
         root.addArrangedSubview(settingsGroup(t("Когда текст вставлен", "Once the text is in"),
                                               rows: insertedRows))
 
@@ -1961,7 +1979,21 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                         "The app shows no banners — not once, not even on failure"),
             value: t("не отправляются", "never sent"))
 
-        let factsCard = SDFactCard(rows: [networkFact, audioFact, notificationsFact])
+        // Умная вставка заглядывает в чужое поле — это надо сказать там, где
+        // человек решает, насколько приложению верить, а не только в файле
+        // PRIVACY.md. Число знаков берётся из кода: разойтись они не могут.
+        let caretFact = privacyFactRow(
+            title: t("Текст перед курсором", "Text before the cursor"),
+            subtitle: settings.smartInsertionEnabled
+                ? t("Умная вставка смотрит на последние \(InsertionContextReader.tailUTF16Length) знаков перед курсором, чтобы понять, продолжается ли фраза. Они не сохраняются и не пишутся в журнал; поля с паролем не читаются",
+                    "Smart insertion looks at the last \(InsertionContextReader.tailUTF16Length) characters before the cursor to tell whether a sentence continues. They are neither stored nor logged; password fields are not read")
+                : t("Умная вставка выключена — содержимое полей приложение не читает",
+                    "Smart insertion is off — the app does not read what is in the field"),
+            value: settings.smartInsertionEnabled
+                ? t("только в памяти", "in memory only")
+                : t("не читается", "not read"))
+
+        let factsCard = SDFactCard(rows: [networkFact, audioFact, caretFact, notificationsFact])
         let factsGroup = NSStackView(views: [
             serviceGroupHeader(t("Факты, а не переключатели", "Facts, not switches")),
             factsCard,

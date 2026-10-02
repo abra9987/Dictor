@@ -147,6 +147,10 @@ let SETTINGS_CATALOG: [SettingsCatalogEntry] = [
           exposure: .settingsRow(tab: "text", title: "После текста добавлять",
                                  toggleTest: false),
           why: "Хвост вставки — последний штрих того же результата."),
+    .init(property: "smartInsertionEnabled",
+          exposure: .settingsRow(tab: "text", title: "Умная вставка", toggleTest: true),
+          why: "Подгонка текста под место вставки стоит рядом с хвостом: пробел "
+               + "перед текстом — зеркало пробела после него."),
     .init(property: "removeFillerWords",
           exposure: .settingsRow(tab: "text", title: "Убирать слова-паразиты",
                                  toggleTest: true),

@@ -31,9 +31,9 @@ import Foundation
 // Чего здесь нет: догадок о слове, которого в словаре нет. «Солюш» может быть
 // «solution», а может и не быть — без записи сопоставлять не с чем.
 
-/// Обычное ли это русское слово. Отдельный протокол — чтобы самотесты
+/// Обычное ли это слово языка. Отдельный протокол — чтобы самотесты
 /// проверяли правило на своём списке слов и не зависели от версии системы.
-protocol RussianLexicon {
+protocol WordLexicon {
     func isWord(_ word: String) -> Bool
 }
 
@@ -43,21 +43,26 @@ protocol RussianLexicon {
 /// `NSSpellChecker` — класс AppKit и вызывается с главного потока. Ответы
 /// кешируются: одна проверка стоит около 0,2 мс, а слова в диктовках
 /// повторяются.
-final class SystemRussianLexicon: RussianLexicon, @unchecked Sendable {
+final class SystemLexicon: WordLexicon, @unchecked Sendable {
     /// `nil`, если русского словаря в системе нет: сопоставление тогда
     /// выключено целиком, а не работает без защиты.
-    static let shared: SystemRussianLexicon? = {
-        let make = { () -> SystemRussianLexicon? in
+    static let russian: SystemLexicon? = make(languageCode: "ru")
+    /// Английский нужен умной вставке: она решает, можно ли писать первое
+    /// слово со строчной, и для латиницы спрашивает его.
+    static let english: SystemLexicon? = make(languageCode: "en")
+
+    private static func make(languageCode: String) -> SystemLexicon? {
+        let build = { () -> SystemLexicon? in
             let languages = NSSpellChecker.shared.availableLanguages
-            guard let language = languages.first(where: { $0 == "ru" })
-                    ?? languages.first(where: { $0.hasPrefix("ru") }) else {
-                log("phonetic matching: no Russian system dictionary, matching is off")
+            guard let language = languages.first(where: { $0 == languageCode })
+                    ?? languages.first(where: { $0.hasPrefix(languageCode) }) else {
+                log("system dictionary for «\(languageCode)» is unavailable; rules that need it stay off")
                 return nil
             }
-            return SystemRussianLexicon(language: language)
+            return SystemLexicon(language: language)
         }
-        return Thread.isMainThread ? make() : DispatchQueue.main.sync(execute: make)
-    }()
+        return Thread.isMainThread ? build() : DispatchQueue.main.sync(execute: build)
+    }
 
     private static let cacheLimit = 20_000
 
@@ -300,7 +305,7 @@ enum PhoneticTermMatcher {
     static func matches(in text: String,
                         corrections: [TranscriptCorrection],
                         occupied: [NSRange],
-                        lexicon: RussianLexicon) -> [Match] {
+                        lexicon: WordLexicon) -> [Match] {
         let keys = keys(for: corrections)
         guard !keys.isEmpty, !text.isEmpty else { return [] }
 

@@ -52,6 +52,10 @@ if CommandLine.arguments.dropFirst().first == "--correct-texts" {
     _ = NSApplication.shared
     exit(runCorrectTextsTool(arguments: Array(CommandLine.arguments.dropFirst(2))))
 }
+if CommandLine.arguments.dropFirst().first == "--probe-insertion-context" {
+    _ = NSApplication.shared
+    exit(runInsertionContextProbe(arguments: Array(CommandLine.arguments.dropFirst(2))))
+}
 if CommandLine.arguments.dropFirst().first == "--time-main-window" {
     _ = NSApplication.shared
     exit(runMainWindowTimingTool())
