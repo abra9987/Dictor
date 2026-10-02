@@ -159,6 +159,10 @@ let SETTINGS_CATALOG: [SettingsCatalogEntry] = [
     .init(property: "latinTermRestorationsEnabled",
           exposure: .settingsRow(tab: "text", title: "Названия латиницей", toggleTest: true),
           why: "Второй встроенный набор — рядом с первым, тоже без дубля."),
+    .init(property: "phoneticTermMatchingEnabled",
+          exposure: .internalState,
+          why: "Правило ещё доводится и людям не показано: тумблер появится "
+               + "вместе с ним, а до тех пор оно включается только ключом."),
     .init(property: "transcriptCorrectionsSyncFile",
           exposure: .settingsRow(tab: "text", title: "Синхронизация файлом",
                                  toggleTest: false),
@@ -231,6 +235,14 @@ let SETTINGS_CATALOG: [SettingsCatalogEntry] = [
     .init(property: "dictationTranscriptCorrections",
           exposure: .internalState,
           why: "Производное: словарь человека плюс включённые встроенные наборы."),
+    .init(property: "dictationTermLexicon",
+          exposure: .internalState,
+          why: "Производное: системный словарь русского языка, если включены "
+               + "«Созвучные варианты», иначе ничего."),
+    .init(property: "historyCache",
+          exposure: .internalState,
+          why: "Не настройка: разобранный архив истории, чтобы не разбирать "
+               + "тысячу записей при каждом обращении."),
     .init(property: "recentTranscriptEntries",
           exposure: .userData,
           why: "Архив истории: живёт в разделе «История», стирается кнопкой "

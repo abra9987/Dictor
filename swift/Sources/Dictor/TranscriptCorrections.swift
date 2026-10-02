@@ -83,13 +83,20 @@ enum TranscriptCorrector {
         let replacement: String
     }
 
-    static func apply(to text: String, corrections: [TranscriptCorrection]) -> (text: String, appliedCount: Int) {
+    /// `lexicon` включает сопоставление по звучанию (см.
+    /// `PhoneticTermMatcher`): без словаря, отличающего русское слово от
+    /// названия, оно не работает вовсе, поэтому `nil` — это «только точные
+    /// совпадения».
+    static func apply(to text: String,
+                      corrections: [TranscriptCorrection],
+                      lexicon: RussianLexicon? = nil) -> (text: String, appliedCount: Int) {
         // Предел шире пользовательского: сюда приходит и встроенный
         // набор написаний, который в настройках не хранится.
-        let active = normalizedTranscriptCorrections(
+        let ordered = normalizedTranscriptCorrections(
             corrections,
             limit: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count
                 + LatinTermRestorations.count)
+        let active = ordered
             .sorted { lhs, rhs in
                 if lhs.source.count != rhs.source.count { return lhs.source.count > rhs.source.count }
                 return lhs.source.localizedCaseInsensitiveCompare(rhs.source) == .orderedAscending
@@ -116,6 +123,18 @@ enum TranscriptCorrector {
                 }
                 guard splitMatchAllowed(text[found]) else { return }
                 matches.append(Match(range: range, replacement: correction.replacement))
+            }
+        }
+
+        // Созвучные варианты — после точных и только на свободных местах:
+        // точное совпадение всегда сильнее догадки по звучанию. Записи идут в
+        // исходном порядке, чтобы при равной близости побеждало слово человека.
+        if let lexicon {
+            for found in PhoneticTermMatcher.matches(in: text,
+                                                     corrections: ordered,
+                                                     occupied: matches.map(\.range),
+                                                     lexicon: lexicon) {
+                matches.append(Match(range: found.range, replacement: found.replacement))
             }
         }
 
@@ -165,6 +184,7 @@ enum TranscriptCorrector {
         "мной", "мною", "него", "нему", "неё", "нее", "этой", "этом", "этот",
         "этих", "того", "тому", "чего", "кого", "кому", "свой", "своя", "свои",
         "было", "была", "были", "есть", "если", "тоже", "даже",
+        "уж", "аж", "ах", "ох", "ух", "эх",
     ]
 
     /// Можно ли считать найденное названием, если внутри него разрыв.

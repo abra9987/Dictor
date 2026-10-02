@@ -266,6 +266,26 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "latin_term_restorations_v1") }
     }
 
+    /// Созвучные варианты: «линктын», «лингтына» и «линкит ин» находят запись
+    /// «линкедин → LinkedIn» сами.
+    ///
+    /// Выключено по умолчанию, и тумблера в настройках пока нет: на истории
+    /// из 1118 диктовок прототип правила дал 122 срабатывания без единого
+    /// ложного, а перенесённый в приложение код — 64, и расхождение не
+    /// разобрано. Правило, которое само переписывает текст, не уходит людям,
+    /// пока не сходится со своей проверкой. Включается ключом
+    /// `phonetic_term_matching_v1` для доводки.
+    var phoneticTermMatchingEnabled: Bool {
+        get { defaults.bool(forKey: "phonetic_term_matching_v1") }
+        set { defaults.set(newValue, forKey: "phonetic_term_matching_v1") }
+    }
+
+    /// Словарь, отличающий русское слово от названия, — или `nil`, если
+    /// сопоставление по звучанию выключено либо русского словаря в системе нет.
+    var dictationTermLexicon: RussianLexicon? {
+        phoneticTermMatchingEnabled ? SystemRussianLexicon.shared : nil
+    }
+
     /// Что уходит в правку расшифровки: слова человека плюс встроенные наборы.
     var dictationTranscriptCorrections: [TranscriptCorrection] {
         dictationCorrections(user: transcriptCorrections,

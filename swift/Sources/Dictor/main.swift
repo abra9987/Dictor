@@ -48,6 +48,14 @@ if CommandLine.arguments.dropFirst().first == "--transcribe-file" {
     }
     dispatchMain()
 }
+if CommandLine.arguments.dropFirst().first == "--correct-texts" {
+    _ = NSApplication.shared
+    exit(runCorrectTextsTool(arguments: Array(CommandLine.arguments.dropFirst(2))))
+}
+if CommandLine.arguments.dropFirst().first == "--time-main-window" {
+    _ = NSApplication.shared
+    exit(runMainWindowTimingTool())
+}
 #endif
 
 let app = NSApplication.shared

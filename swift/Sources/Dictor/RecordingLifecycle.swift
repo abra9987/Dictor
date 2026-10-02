@@ -37,10 +37,13 @@ struct DictationTextProcessingResult: Equatable {
 func processedDictationText(rawTranscript: String,
                                     corrections: [TranscriptCorrection],
                                     removeFillerWords: Bool,
-                                    language: DictationLanguage = .auto) -> DictationTextProcessingResult {
+                                    language: DictationLanguage = .auto,
+                                    lexicon: RussianLexicon? = nil) -> DictationTextProcessingResult {
     let trimmed = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
     let repaired = SpeechModelTextRepair.apply(to: trimmed, language: language)
-    let corrected = TranscriptCorrector.apply(to: repaired, corrections: corrections)
+    let corrected = TranscriptCorrector.apply(to: repaired,
+                                              corrections: corrections,
+                                              lexicon: lexicon)
 
     guard removeFillerWords else {
         return DictationTextProcessingResult(text: corrected.text,

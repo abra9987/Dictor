@@ -1558,7 +1558,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 let processed = processedDictationText(rawTranscript: transcription.text,
                                                        corrections: settings.dictationTranscriptCorrections,
                                                        removeFillerWords: settings.removeFillerWords,
-                                                       language: settings.dictationLanguage)
+                                                       language: settings.dictationLanguage,
+                                                       lexicon: settings.dictationTermLexicon)
                 if !processed.text.isEmpty {
                     addToHistory(
                         processed.text,
@@ -3258,7 +3259,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                     let processed = processedDictationText(rawTranscript: transcription.text,
                                                            corrections: settings.dictationTranscriptCorrections,
                                                            removeFillerWords: settings.removeFillerWords,
-                                                           language: settings.dictationLanguage)
+                                                           language: settings.dictationLanguage,
+                                                           lexicon: settings.dictationTermLexicon)
                     let postprocessingCompletedAt = ProcessInfo.processInfo.systemUptime
                     if processed.appliedCorrectionCount > 0 {
                         log("transcript corrections applied: \(processed.appliedCorrectionCount)")
@@ -3445,7 +3447,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                     let processed = processedDictationText(rawTranscript: transcription.text,
                                                            corrections: settings.dictationTranscriptCorrections,
                                                            removeFillerWords: settings.removeFillerWords,
-                                                           language: settings.dictationLanguage)
+                                                           language: settings.dictationLanguage,
+                                                           lexicon: settings.dictationTermLexicon)
                     if !processed.text.isEmpty {
                         addToHistory(
                             processed.text,
