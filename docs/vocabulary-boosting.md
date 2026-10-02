@@ -12,7 +12,8 @@ FluidAudio умеет **CTC vocabulary boosting** (`Documentation/ASR/CustomVoca
 по акустическому совпадению, а не по замене в готовом тексте. Звучит как прямое
 решение задачи «имена и названия должны выходить правильно».
 
-Для нашей модели — Parakeet TDT 0.6B v3 — доступен только вариант с **отдельным
+Для нашей модели — Parakeet Ultra, та же архитектура, что у Parakeet TDT 0.6B
+v3, — доступен только вариант с **отдельным
 CTC-энкодером** `FluidInference/parakeet-ctc-110m-coreml`: +103 МБ на диск,
 ~+64 МБ памяти и второй проход по всему звуку.
 
@@ -21,7 +22,7 @@ CTC-энкодером** `FluidInference/parakeet-ctc-110m-coreml`: +103 МБ н
 Словарь токенизатора этой модели — 1024 токена, и **ни одного кириллического**:
 
 ```bash
-curl -sS https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml/resolve/main/tokenizer.json \
+curl -sSL https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml/resolve/main/tokenizer.json \
   | python3 -c "import json,sys; v=json.load(sys.stdin)['model']['vocab']; \
       print('токенов:', len(v), '· кириллических:', sum(1 for t in v if any('Ѐ'<=c<='ӿ' for c in t)))"
 # токенов: 1024 · кириллических: 0
@@ -71,4 +72,6 @@ GitHub  -> [39, 87, 540]               ← латиница токенизиру
   описано в библиотеке как вход для такого biasing, но потребителя у него нет
   ни в одной версии.
 
-Проверено на ревизии FluidAudio `313feb4b` (июнь 2026) и на теге `v0.15.5`.
+Проверено на ревизии FluidAudio `313feb4b` (июнь 2026) и на теге `v0.15.5`;
+перепроверено 1 октября 2026 на `v0.17.4` — словарь CTC-модели по-прежнему без
+кириллицы, и для моделей семейства v3 другого пути в библиотеке не появилось.

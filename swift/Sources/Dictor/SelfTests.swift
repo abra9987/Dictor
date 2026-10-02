@@ -592,7 +592,7 @@ enum DictorSelfTest {
                 memoryLines: ["Resident: 100 MB"],
                 permissionLines: ["Microphone: granted", "Accessibility: granted", "Input Monitoring: granted"],
                 settingLines: [
-                    "Speech model: Multilingual (Parakeet TDT v3)",
+                    "Speech model: Multilingual (Parakeet Ultra)",
                     "Language: Auto-detect",
                     "Recent transcripts: Last 5 (1 in memory)",
                     "Text corrections: 1 configured",
@@ -610,7 +610,7 @@ enum DictorSelfTest {
                    "diagnostics report should not include text correction contents")
         try expect(report.contains("Text corrections: 1 configured"), equals: true,
                    "diagnostics report should include correction counts")
-        try expect(report.contains("Speech model: Multilingual (Parakeet TDT v3)"), equals: true,
+        try expect(report.contains("Speech model: Multilingual (Parakeet Ultra)"), equals: true,
                    "diagnostics report should include the speech model")
         try expect(report.contains("Recent log lines:"), equals: true,
                    "diagnostics report should include the recent log section")
@@ -1085,27 +1085,38 @@ enum DictorSelfTest {
 
         try expect(
             productionSpeechModelProfile(rawValue: nil),
-            equals: .multilingualV3,
+            equals: .multilingualUltra,
             "missing speech model setting should use the production default"
         )
         try expect(
-            productionSpeechModelProfile(rawValue: SpeechModelProfile.multilingualV3.rawValue),
-            equals: .multilingualV3,
-            "stored v3 speech model should remain valid"
+            productionSpeechModelProfile(rawValue: SpeechModelProfile.multilingualUltra.rawValue),
+            equals: .multilingualUltra,
+            "stored Ultra speech model should remain valid"
+        )
+        // Сохранённая «multilingual_v3» лежит в настройках у каждого, кто
+        // хоть раз выбирал модель до перехода: она обязана читаться и
+        // переезжать, а не сбрасывать человека на экран выбора.
+        try expect(
+            productionSpeechModelProfile(rawValue: "multilingual_v3"),
+            equals: .multilingualUltra,
+            "stored v3 speech model setting should migrate to Ultra"
         )
         try expect(
             productionSpeechModelProfile(rawValue: SpeechModelProfile.englishUnified.rawValue),
-            equals: .multilingualV3,
-            "deprecated Unified speech model setting should migrate back to v3"
+            equals: .multilingualUltra,
+            "deprecated Unified speech model setting should migrate to Ultra"
         )
         try expect(
             productionSpeechModelProfile(rawValue: "unknown_model"),
-            equals: .multilingualV3,
-            "unknown speech model setting should migrate back to v3"
+            equals: .multilingualUltra,
+            "unknown speech model setting should migrate to Ultra"
         )
+        try expect(SpeechModelProfile.multilingualV3.productionProfile,
+                   equals: .multilingualUltra,
+                   "a deprecated profile must resolve to the model that is actually loaded")
 
         try expect(
-            speechModelSetupRowState(profile: .multilingualV3,
+            speechModelSetupRowState(profile: .multilingualUltra,
                                      isSpeechModelReady: false,
                                      isStartupInProgress: true,
                                      startupStatusTitle: "Downloading speech model… 50%",
@@ -1116,7 +1127,7 @@ enum DictorSelfTest {
             "setup checklist should show speech model progress"
         )
         try expect(
-            speechModelSetupRowState(profile: .multilingualV3,
+            speechModelSetupRowState(profile: .multilingualUltra,
                                      isSpeechModelReady: false,
                                      isStartupInProgress: false,
                                      startupStatusTitle: "Loading speech model…",
@@ -1127,12 +1138,12 @@ enum DictorSelfTest {
             "setup checklist should offer retry for speech model failures"
         )
         try expect(
-            speechModelSetupRowState(profile: .multilingualV3,
+            speechModelSetupRowState(profile: .multilingualUltra,
                                      isSpeechModelReady: true,
                                      isStartupInProgress: false,
                                      startupStatusTitle: "Loading speech model…",
                                      failure: nil),
-            equals: SetupChecklistRowState(detail: "Parakeet TDT v3 is loaded locally.",
+            equals: SetupChecklistRowState(detail: "Parakeet Ultra is loaded locally.",
                                            status: "Ready",
                                            buttonTitle: nil),
             "setup checklist should show the speech model when ready"
@@ -2731,29 +2742,29 @@ enum DictorSelfTest {
             equals: nil,
             "compile phase should show indeterminate model progress"
         )
-        let requiredBytes = speechModelDownloadRequiredBytes(for: .multilingualV3,
+        let requiredBytes = speechModelDownloadRequiredBytes(for: .multilingualUltra,
                                                              headroomBytes: 100)
         try expect(
             requiredBytes,
-            equals: 460 * 1024 * 1024 + 100,
+            equals: 603 * 1024 * 1024 + 100,
             "speech model download requirement should include model estimate plus headroom"
         )
         try expect(
-            speechModelDiskSpaceFailureDetail(profile: .multilingualV3,
+            speechModelDiskSpaceFailureDetail(profile: .multilingualUltra,
                                               availableBytes: requiredBytes - 1,
                                               requiredBytes: requiredBytes)?.contains("Free some disk space"),
             equals: true,
             "low disk-space failures should explain how to recover"
         )
         try expect(
-            speechModelDiskSpaceFailureDetail(profile: .multilingualV3,
+            speechModelDiskSpaceFailureDetail(profile: .multilingualUltra,
                                               availableBytes: requiredBytes,
                                               requiredBytes: requiredBytes),
             equals: nil,
             "disk-space check should pass once required space is available"
         )
         try expect(
-            speechModelDiskSpaceFailureDetail(profile: .multilingualV3,
+            speechModelDiskSpaceFailureDetail(profile: .multilingualUltra,
                                               availableBytes: nil,
                                               requiredBytes: requiredBytes),
             equals: nil,
@@ -2872,9 +2883,22 @@ enum DictorSelfTest {
         try expect(rejectedSymlinkHashRead, equals: true,
                    "model integrity hashing should not follow leaf symlinks")
 
-        let localParakeetV3Cache = speechModelCacheDirectory(for: .multilingualV3)
-        if fm.fileExists(atPath: localParakeetV3Cache.path) {
-            try ModelIntegrity.verifyParakeetV3Model(at: localParakeetV3Cache)
+        // Манифест обязан называть веса и граф каждой из четырёх моделей и
+        // словарь: пустой или обрезанный список прошёл бы компиляцию и
+        // сломал бы загрузку у каждого, у кого кеша ещё нет.
+        let manifestPaths = Set(ModelIntegrity.parakeetUltraManifestPaths)
+        for model in ["Decoder", "Encoder", "JointDecisionv3", "Preprocessor"] {
+            for file in ["coremldata.bin", "model.mil", "weights/weight.bin"] {
+                try expect(manifestPaths.contains("\(model).mlmodelc/\(file)"), equals: true,
+                           "model manifest must pin \(model).mlmodelc/\(file)")
+            }
+        }
+        try expect(manifestPaths.contains("parakeet_vocab.json"), equals: true,
+                   "model manifest must pin the vocabulary")
+
+        let localParakeetUltraCache = speechModelCacheDirectory(for: .multilingualUltra)
+        if fm.fileExists(atPath: localParakeetUltraCache.path) {
+            try ModelIntegrity.verifyParakeetUltraModel(at: localParakeetUltraCache)
         }
     }
 
@@ -2952,16 +2976,16 @@ enum DictorSelfTest {
             "speech model cache reset should reject symlinked parent directories before deletion"
         )
         try expect(
-            isSafeSpeechModelCacheDirectory(speechModelCacheDirectory(for: .multilingualV3)),
+            isSafeSpeechModelCacheDirectory(speechModelCacheDirectory(for: .multilingualUltra)),
             equals: true,
-            "FluidAudio v3 cache path should remain inside FluidAudio Application Support"
+            "FluidAudio model cache path should remain inside FluidAudio Application Support"
         )
-        let defaultV3Cache = speechModelCacheDirectory(for: .multilingualV3)
-        if fm.fileExists(atPath: defaultV3Cache.path) {
+        let defaultModelCache = speechModelCacheDirectory(for: .multilingualUltra)
+        if fm.fileExists(atPath: defaultModelCache.path) {
             try expect(
-                isExistingSpeechModelCacheDirectorySafeForRemoval(defaultV3Cache),
+                isExistingSpeechModelCacheDirectorySafeForRemoval(defaultModelCache),
                 equals: true,
-                "existing FluidAudio v3 cache path should remain removable"
+                "existing FluidAudio model cache path should remain removable"
             )
         }
     }

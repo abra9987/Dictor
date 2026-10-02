@@ -20,7 +20,8 @@ import UniformTypeIdentifiers
 // used exactly as the user typed it.
 
 enum SpeechModelTextRepair {
-    /// Parakeet TDT v3 emits `<unk>` for Cyrillic "ё" in Russian text.
+    /// Parakeet TDT v3 and Ultra, which shares its vocabulary, emit `<unk>`
+    /// for Cyrillic "ё" in Russian text.
     /// For Russian and auto-detect (the app's default audience) the
     /// token is replaced with "ё"/"Ё". For every other language the
     /// token is genuinely unknown and is removed entirely so a stray

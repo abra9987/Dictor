@@ -93,7 +93,7 @@ Dictor делает это на машине. Аудио её не покида�
 - **Одна клавиша, любое приложение.** Удерживайте сочетание в сообщении, письме,
   редакторе кода — текст встанет под курсор. Удержание или переключение, на
   выбор.
-- **Распознавание на устройстве.** NVIDIA Parakeet TDT v3 через CoreML на Apple
+- **Распознавание на устройстве.** Parakeet Ultra через CoreML на Apple
   Neural Engine: около полусекунды обработки на полминуты речи.
 - **Русский и английский сразу**, плюс ещё 16 языков, с автоопределением.
 - **История, отвечающая на вопрос «что я сказал?»** — до 10 000 диктовок, поиск
@@ -180,5 +180,5 @@ swift/.build/debug/Dictor --export-hud-animation      <dir> [ru|en]
 
 Основано на открытом проекте Richard Courtman под лицензией MIT — атрибуция в
 [LICENSE](LICENSE) и [NOTICE.md](NOTICE.md). Распознавание —
-[FluidAudio](https://github.com/FluidInference/FluidAudio) и модель NVIDIA
-Parakeet TDT.
+[FluidAudio](https://github.com/FluidInference/FluidAudio) и модель Parakeet
+Ultra: дообученная в Moondream NVIDIA Parakeet TDT v3.

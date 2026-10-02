@@ -41,6 +41,26 @@ if security find-identity -v -p codesigning 2>/dev/null | grep -q '"Dictor Dev"'
     }
 fi
 
+# Манифестов два: Package@swift-6.2.swift отключает бинарный модуль FluidAudio,
+# Package.swift собирает на тулчейнах постарше. Какой из них возьмёт SwiftPM,
+# решает версия Swift, поэтому разъехавшаяся ревизия означала бы, что CI и
+# выпускаемая сборка проверяют разные зависимости, — и молча.
+manifest_revision() {
+    sed -n 's/.*revision: "\([0-9a-f]\{40\}\)".*/\1/p' "$1"
+}
+rev_base="$(manifest_revision swift/Package.swift)"
+rev_62="$(manifest_revision 'swift/Package@swift-6.2.swift')"
+rev_resolved="$(sed -n 's/.*"revision" : "\([0-9a-f]\{40\}\)".*/\1/p' swift/Package.resolved)"
+[[ -n "$rev_base" && "$rev_base" == "$rev_62" && "$rev_base" == "$rev_resolved" ]] || {
+    printf 'FluidAudio revision differs between manifests:\n  Package.swift            %s\n  Package@swift-6.2.swift  %s\n  Package.resolved         %s\n' \
+        "$rev_base" "$rev_62" "$rev_resolved" >&2
+    exit 1
+}
+grep -q 'traits: \[\]' 'swift/Package@swift-6.2.swift' || {
+    printf 'Package@swift-6.2.swift no longer opts out of the bundled binary module\n' >&2
+    exit 1
+}
+
 grep -q 'Restarting the build natively for Apple Silicon' scripts/build-app.sh
 grep -q 'validate_output_app_path "$OUTPUT_APP"' scripts/build-app.sh
 

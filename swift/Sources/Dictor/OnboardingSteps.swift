@@ -440,7 +440,7 @@ final class OnboardingModelStepView: OnboardingStepView {
         card.cornerRadius = 14
 
         let name = NSTextField(labelWithString:
-            t("Parakeet TDT v3 · русский и английский", "Parakeet TDT v3 · Russian and English"))
+            t("Parakeet Ultra · русский и английский", "Parakeet Ultra · Russian and English"))
         name.font = .systemFont(ofSize: 14, weight: .semibold)
         name.textColor = SD.C.ink
 
@@ -452,7 +452,7 @@ final class OnboardingModelStepView: OnboardingStepView {
         top.alignment = .lastBaseline
         top.translatesAutoresizingMaskIntoConstraints = false
 
-        let size = NSTextField(labelWithString: t("~460 МБ · один раз", "~460 MB · once"))
+        let size = NSTextField(labelWithString: t("~630 МБ · один раз", "~630 MB · once"))
         size.font = .systemFont(ofSize: 12)
         size.textColor = SD.C.subtle
         stateLabel.font = .systemFont(ofSize: 12)
@@ -486,8 +486,8 @@ final class OnboardingModelStepView: OnboardingStepView {
         aside.cornerRadius = 11
         aside.translatesAutoresizingMaskIntoConstraints = false
         let asideText = NSTextField(wrappingLabelWithString:
-            t("Модель ложится в Application Support и остаётся там навсегда. Обновления приложения её не перекачивают.",
-              "The model goes into Application Support and stays there. App updates do not re-download it."))
+            t("Модель ложится в Application Support и остаётся там. Заново она скачивается, только когда меняется сама модель.",
+              "The model goes into Application Support and stays there. It is downloaded again only when the model itself changes."))
         asideText.font = .systemFont(ofSize: 12.5)
         asideText.textColor = SD.C.graphite
         asideText.translatesAutoresizingMaskIntoConstraints = false

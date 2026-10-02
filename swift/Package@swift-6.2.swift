@@ -1,4 +1,19 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
+//
+// Манифест для Swift 6.2 и новее. Отличается от Package.swift одним:
+// зависимость подключается с `traits: []`.
+//
+// FluidAudio тянет готовый бинарный модуль нормализации текста для своих
+// синтезаторов речи — статическую библиотеку на Rust без исходников в
+// пакете. Dictor речь не синтезирует, а приложению, которое обещает работать
+// целиком на устройстве, непрозрачный бинарник в составе ни к чему. Отключить
+// его можно только трейтом, а трейты SwiftPM соблюдает начиная с 6.2: на 6.1
+// синтаксис принимается, но модуль всё равно линкуется. Поэтому манифестов
+// два, и SwiftPM сам берёт этот там, где он работает; Package.swift остаётся
+// для тулчейнов постарше, в том числе для CI.
+//
+// Ревизия FluidAudio в обоих файлах обязана совпадать — за этим следит
+// scripts/check.sh.
 //
 // Dictor — a Swift push-to-talk dictation app
 // for macOS Apple Silicon. Native AppKit / AVFoundation, FluidAudio
@@ -22,7 +37,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio.git",
-                 revision: "21493f8dac5a97e65742e6ff26f42f164c2fda0f"),
+                 revision: "21493f8dac5a97e65742e6ff26f42f164c2fda0f",
+                 traits: []),
     ],
     targets: [
         // A separate target only because SwiftPM cannot mix languages

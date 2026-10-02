@@ -577,15 +577,17 @@ let DICTATION_LANGUAGE_DISPLAY: [DictationLanguage: String] = [
 ]
 
 enum SpeechModelProfile: String, CaseIterable {
+    case multilingualUltra = "multilingual_ultra"
+    // Прежние варианты. Оставлены только затем, чтобы сохранённая настройка
+    // читалась и переезжала на поддерживаемую модель: v3 был моделью по
+    // умолчанию до перехода на Ultra, Unified — ещё раньше.
     case multilingualV3 = "multilingual_v3"
-    // Deprecated production option. Kept only so old saved preferences
-    // can be read and migrated back to the supported v3 model.
     case englishUnified = "english_unified"
 
-    static let productionDefault: SpeechModelProfile = .multilingualV3
+    static let productionDefault: SpeechModelProfile = .multilingualUltra
 
     var isProductionSupported: Bool {
-        self == .multilingualV3
+        self == .multilingualUltra
     }
 
     var productionProfile: SpeechModelProfile {
@@ -594,8 +596,10 @@ enum SpeechModelProfile: String, CaseIterable {
 
     var displayName: String {
         switch self {
+        case .multilingualUltra:
+            return "Multilingual (Parakeet Ultra)"
         case .multilingualV3:
-            return "Multilingual (Parakeet TDT v3)"
+            return "Multilingual (Parakeet TDT v3, deprecated)"
         case .englishUnified:
             return "English optimized (Parakeet Unified, deprecated)"
         }
@@ -603,6 +607,8 @@ enum SpeechModelProfile: String, CaseIterable {
 
     var shortName: String {
         switch self {
+        case .multilingualUltra:
+            return "Parakeet Ultra"
         case .multilingualV3:
             return "Parakeet TDT v3"
         case .englishUnified:
@@ -612,8 +618,10 @@ enum SpeechModelProfile: String, CaseIterable {
 
     var aboutModelText: String {
         switch self {
+        case .multilingualUltra:
+            return "FluidAudio · Parakeet Ultra multilingual (CoreML / ANE)"
         case .multilingualV3:
-            return "FluidAudio · Parakeet TDT v3 multilingual (CoreML / ANE)"
+            return "FluidAudio · Parakeet TDT v3 multilingual (deprecated)"
         case .englishUnified:
             return "FluidAudio · Parakeet Unified English (deprecated)"
         }
@@ -623,24 +631,22 @@ enum SpeechModelProfile: String, CaseIterable {
         "\(shortName) is loaded locally."
     }
 
+    /// Загружается всегда поддерживаемая модель, какой бы профиль ни был
+    /// сохранён, поэтому и сбрасывается её кеш, а не кеш названного профиля.
     var cacheResetDetail: String {
-        switch self {
-        case .multilingualV3:
-            return "Dictor will delete the local Parakeet TDT v3 model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
-        case .englishUnified:
-            return "Dictor will delete the local Parakeet TDT v3 model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
-        }
+        "Dictor will delete the local \(Self.productionDefault.shortName) model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
     }
 
-    /// Реальная модель на диске — 461 МБ. Раньше здесь стояло 700 МБ, текст
-    /// говорил «500-700 MB», а строка Needed: под ним (оценка + запас на
-    /// подготовку CoreML) — 1,2 ГБ: три числа расходились втрое.
+    /// Реальная модель на диске — 632 МБ (603 МиБ): энкодер Ultra хранится в
+    /// int8, а не в 6-битной палитре, как у v3, у которой было 461 МиБ.
+    /// Оценка, текст и строка Needed: под ним обязаны называть одно и то же
+    /// число — однажды они расходились втрое.
     var estimatedDownloadBytes: Int64 {
-        460 * 1024 * 1024
+        603 * 1024 * 1024
     }
 
     var downloadSizeText: String {
-        "about 460 MB"
+        "about 630 MB"
     }
 }
 

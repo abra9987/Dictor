@@ -4087,9 +4087,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let profile = SpeechModelProfile.productionDefault
         let card = SDModelCard(
             title: profile.shortName + " · " + t("используется", "in use"),
-            detail: t("~460 МБ · русский, английский и ещё 16 языков · Neural Engine. "
+            detail: t("~630 МБ · русский, английский и ещё 16 языков · Neural Engine. "
                       + "Работает целиком на этом Mac; скачивается с huggingface.co при установке.",
-                      "~460 MB · Russian, English and 16 more · Neural Engine. "
+                      "~630 MB · Russian, English and 16 more · Neural Engine. "
                       + "Runs entirely on this Mac; downloads from huggingface.co at setup."),
             active: true,
             actionTitle: nil,

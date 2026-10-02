@@ -1013,7 +1013,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// секунды после запуска. Раньше это время выглядело как «Остановлена».
     private var verifiedModelFiles: Int?
     private var totalModelFiles: Int?
-    private var lastDownloadPhase: DownloadUtils.DownloadPhase?
+    private var lastDownloadPhase: DownloadPhase?
     private var startupFailure: StartupFailure?
     private var didTouchAudioEngine = false
     private var permissionReadinessTimer: Timer?
@@ -1631,7 +1631,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         publishAgentState()
     }
 
-    private func updateSpeechModelStartupProgress(_ progress: DownloadUtils.DownloadProgress) {
+    private func updateSpeechModelStartupProgress(_ progress: DownloadProgress) {
         guard startupTask != nil, !isTerminating else { return }
         let next = speechModelStartupStatusTitle(progress)
         let nextProgressFraction = speechModelStartupProgressValue(progress)

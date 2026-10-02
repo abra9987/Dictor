@@ -38,7 +38,7 @@ Seven links, `App.swift` `handleRelease` being the spine:
    fires on an audio thread, and main-actor entry would trap under Swift 6
    strict concurrency.
 3. **`TranscriptionWorker`** — an actor holding FluidAudio's `AsrManager` with
-   NVIDIA Parakeet TDT v3 running through CoreML on the Neural Engine. One
+   Parakeet Ultra running through CoreML on the Neural Engine. One
    `[Float]` in, one string out; there is no streaming.
 4. **`RecordingLifecycle.processedDictationText`** — the single place where text
    is transformed: model repair, then the dictionary (the user's entries, 239
@@ -127,7 +127,7 @@ and the "text wasn't inserted" banner.
 | Settings, history, statistics, dictionary | `~/Library/Preferences/com.raul.dictor.plist` |
 | Service status for the window, panel PID, dictionary sync file | `~/Library/Application Support/Dictor/` |
 | Log | `~/Library/Logs/Dictor.log`; launchd captures the same stream into `~/Library/Logs/Dictor-agent.launchd.log` |
-| Speech model (~460 MB, downloaded once) | `~/Library/Application Support/FluidAudio/Models/` |
+| Speech model (~630 MB, downloaded once) | `~/Library/Application Support/FluidAudio/Models/` |
 | Audio | nowhere after the text exists; during recording, a crash-recovery journal that is deleted as soon as the dictation is handled |
 
 ## Updates

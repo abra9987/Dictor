@@ -95,7 +95,7 @@ click after checking the archive against its checksum and signature.
 
 - **One key, any app.** Hold the shortcut in a message, an email, a code
   editor — the text lands at the cursor. Press-and-hold or toggle, your choice.
-- **On-device recognition.** NVIDIA Parakeet TDT v3 through CoreML on the Apple
+- **On-device recognition.** Parakeet Ultra through CoreML on the Apple
   Neural Engine: about half a second of processing for half a minute of speech.
 - **Russian and English out of the box**, plus 16 more, with automatic language
   detection.
@@ -180,6 +180,6 @@ enforces, publishes it and tags the commit. See
 Built on the open-source project by Richard Courtman, MIT licensed. The
 attribution lives in [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). Speech
 recognition uses [FluidAudio](https://github.com/FluidInference/FluidAudio) and
-NVIDIA's Parakeet TDT model.
+Parakeet Ultra — Moondream's post-training of NVIDIA's Parakeet TDT v3 model.
 
 Русская версия этого файла — [README.ru.md](README.ru.md).

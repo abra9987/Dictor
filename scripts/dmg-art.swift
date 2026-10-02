@@ -195,7 +195,7 @@ func drawBackground() {
          lineHeight: 16)
 
     // Подвал.
-    draw("Apple Silicon · macOS 14 или новее · при первом запуске скачает модель ~460 МБ",
+    draw("Apple Silicon · macOS 14 или новее · при первом запуске скачает модель ~630 МБ",
          in: CGRect(x: 0, y: Art.height - Art.safeBottom - 18, width: Art.width, height: 18),
          font: .systemFont(ofSize: 11, weight: .regular),
          color: Art.subtle)

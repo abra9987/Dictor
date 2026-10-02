@@ -181,7 +181,7 @@ final class OnboardingPageView: NSView {
                 : t("осталось \(missing)", "\(missing) to go")
         case .model:
             guard state == .current, let fraction = snapshot.downloadFraction else {
-                return t("~460 МБ", "~460 MB")
+                return t("~630 МБ", "~630 MB")
             }
             return "\(Int((fraction * 100).rounded()))%"
         case .practice:

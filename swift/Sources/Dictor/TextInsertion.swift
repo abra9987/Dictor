@@ -32,7 +32,7 @@ func pastedText(from correctedTranscript: String, suffix: PasteSuffix) -> String
     }
 }
 
-func speechModelStartupStatusTitle(_ progress: DownloadUtils.DownloadProgress) -> String {
+func speechModelStartupStatusTitle(_ progress: DownloadProgress) -> String {
     switch progress.phase {
     case .listing:
         return "Checking speech model files…"
@@ -46,7 +46,7 @@ func speechModelStartupStatusTitle(_ progress: DownloadUtils.DownloadProgress) -
     }
 }
 
-func speechModelStartupProgressValue(_ progress: DownloadUtils.DownloadProgress) -> Double? {
+func speechModelStartupProgressValue(_ progress: DownloadProgress) -> Double? {
     switch progress.phase {
     case .downloading(_, let totalFiles):
         guard totalFiles > 0 else { return nil }

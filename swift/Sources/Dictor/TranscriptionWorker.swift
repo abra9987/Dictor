@@ -27,7 +27,7 @@ import UniformTypeIdentifiers
 // call instead of corrupting ANE state.
 
 enum LoadedSpeechEngine {
-    case parakeetV3(AsrManager)
+    case parakeet(AsrManager)
 }
 
 struct TranscriptionWorkerResult: Sendable {
@@ -65,7 +65,7 @@ actor TranscriptionWorker {
     /// двух секунд, и без неё окно всё это время утверждало, что служба
     /// остановлена.
     func load(profile requestedProfile: SpeechModelProfile,
-              progressHandler: DownloadUtils.ProgressHandler? = nil,
+              progressHandler: ProgressHandler? = nil,
               verificationProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws {
         let profile = requestedProfile.productionProfile
         if requestedProfile != profile {
@@ -86,34 +86,39 @@ actor TranscriptionWorker {
             log("ASR: downloading + verifying + loading \(profile.shortName) CoreML weights…")
         }
         let t0 = Date()
-        engine = .parakeetV3(try await loadParakeetV3(progressHandler: progressHandler,
-                                                      verificationProgress: verificationProgress))
+        engine = .parakeet(try await loadParakeetUltra(progressHandler: progressHandler,
+                                                       verificationProgress: verificationProgress))
         loadedProfile = profile
         ready = true
         log("ASR: \(profile.shortName) ready in \(String(format: "%.2f", Date().timeIntervalSince(t0))) s")
     }
 
-    private func loadParakeetV3(progressHandler: DownloadUtils.ProgressHandler?,
-                                verificationProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> AsrManager {
-        if !speechModelCacheExists(for: .multilingualV3) {
-            try assertSufficientDiskSpaceForSpeechModelDownload(profile: .multilingualV3)
+    /// Ultra — та же архитектура, словарь и окно, что у v3, поэтому весь
+    /// путь распознавания общий; отличаются только веса. Энкодер у неё в
+    /// int8: у 6-битного энкодера v3 при определённом правом контексте
+    /// портились токены, и исправленный вариант для v3 так и остался
+    /// необязательным.
+    private func loadParakeetUltra(progressHandler: ProgressHandler?,
+                                   verificationProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> AsrManager {
+        if !speechModelCacheExists(for: .multilingualUltra) {
+            try assertSufficientDiskSpaceForSpeechModelDownload(profile: .multilingualUltra)
         }
-        var modelDirectory = try await AsrModels.download(version: .v3,
+        var modelDirectory = try await AsrModels.download(version: .ultra,
                                                           progressHandler: progressHandler)
         do {
-            try ModelIntegrity.verifyParakeetV3Model(at: modelDirectory,
-                                                     onProgress: verificationProgress)
+            try ModelIntegrity.verifyParakeetUltraModel(at: modelDirectory,
+                                                        onProgress: verificationProgress)
         } catch {
             log("ASR: model integrity check failed; redownloading once: \(error.localizedDescription)")
-            try assertSufficientDiskSpaceForSpeechModelDownload(profile: .multilingualV3)
+            try assertSufficientDiskSpaceForSpeechModelDownload(profile: .multilingualUltra)
             modelDirectory = try await AsrModels.download(force: true,
-                                                          version: .v3,
+                                                          version: .ultra,
                                                           progressHandler: progressHandler)
-            try ModelIntegrity.verifyParakeetV3Model(at: modelDirectory,
-                                                     onProgress: verificationProgress)
+            try ModelIntegrity.verifyParakeetUltraModel(at: modelDirectory,
+                                                        onProgress: verificationProgress)
         }
         let models = try await AsrModels.load(from: modelDirectory,
-                                              version: .v3,
+                                              version: .ultra,
                                               progressHandler: progressHandler)
         return AsrManager(config: .default, models: models)
     }
@@ -131,7 +136,7 @@ actor TranscriptionWorker {
         inFlight = true
         defer { inFlight = false }
         switch engine {
-        case .parakeetV3(let asr):
+        case .parakeet(let asr):
             let decoderPreparationStartedAt = ProcessInfo.processInfo.systemUptime
             var state = try TdtDecoderState()
             let fluidCallStartedAt = ProcessInfo.processInfo.systemUptime
