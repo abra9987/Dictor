@@ -108,11 +108,13 @@ enum TranscriptCorrector {
             regex.enumerateMatches(in: text, range: fullRange) { match, _, _ in
                 guard let range = match?.range, range.location != NSNotFound else { return }
                 guard !matches.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) else { return }
+                guard let found = Range(range, in: text) else { return }
                 // Уже написанное правильно пропускаем: замена «SQL» на «SQL»
                 // ничего не меняет, но попадает в счётчик правок.
-                if let found = Range(range, in: text), text[found] == correction.replacement {
+                if text[found] == correction.replacement {
                     return
                 }
+                guard splitMatchAllowed(text[found]) else { return }
                 matches.append(Match(range: range, replacement: correction.replacement))
             }
         }
@@ -132,9 +134,56 @@ enum TranscriptCorrector {
             .map { NSRegularExpression.escapedPattern(for: String($0)) }
         guard !parts.isEmpty else { return nil }
         if russianInflectionAllowed(for: correction), let last = parts.last {
-            parts[parts.count - 1] = inflectedWordPattern(for: last)
+            parts[parts.count - 1] = inflectedWordPattern(for: last,
+                                                          splitTolerant: parts.count == 1)
         }
         return #"(?<![\p{L}\p{N}_])"# + parts.joined(separator: #"\s+"#) + #"(?![\p{L}\p{N}_])"#
+    }
+
+    /// Разрыв, который модель ставит внутри названия: пробел или дефис.
+    static let SPLIT_SEPARATORS: Set<Character> = [" ", "-"]
+
+    /// Короткие служебные слова. Кусок разорванного названия, совпавший с
+    /// одним из них, означает, что перед нами скорее обычная фраза, чем
+    /// название: «графа на» складывается в «графана», «нам пай» — в «нампай»,
+    /// «но ушен» — в «ноушен».
+    ///
+    /// Список закрыт по той же причине, что и окончания: всё, что он
+    /// пропускает и что запрещает, можно перечислить и проверить самотестом
+    /// `latin-terms`. Содержательных слов здесь нет нарочно — «пик», «код»,
+    /// «бук» и есть половинки названий, ради которых правило существует.
+    static let RUSSIAN_SPLIT_BLOCKERS: Set<String> = [
+        "на", "не", "ни", "но", "да", "до", "по", "за", "из", "от", "об", "во",
+        "со", "ко", "же", "бы", "ли", "то", "ты", "вы", "мы", "он", "их", "им",
+        "её", "ее", "его", "ему", "нам", "вам", "нас", "вас", "мне", "мой",
+        "моя", "моё", "мои", "наш", "ваш", "так", "там", "тут", "как", "что",
+        "кто", "где", "для", "при", "под", "над", "без", "про", "или", "уже",
+        "ещё", "еще", "все", "всё", "вся", "это", "эта", "эти", "тот", "той",
+        "том", "тем", "она", "оно", "они", "был", "нет", "вот", "ну", "чем",
+        "сам", "ним", "ней", "нём", "нем", "них", "раз", "два", "три",
+        "нами", "вами", "ними", "меня", "тебя", "себя", "тебе", "себе",
+        "мной", "мною", "него", "нему", "неё", "нее", "этой", "этом", "этот",
+        "этих", "того", "тому", "чего", "кого", "кому", "свой", "своя", "свои",
+        "было", "была", "были", "есть", "если", "тоже", "даже",
+    ]
+
+    /// Можно ли считать найденное названием, если внутри него разрыв.
+    ///
+    /// Модель слышит «Anthropic» верно, а записывает то «антро пик», то «ан
+    /// тропик»: границу слова в незнакомом названии она ставит где придётся.
+    /// Заводить в словаре по записи на каждый вариант разрыва бессмысленно —
+    /// их столько же, сколько букв. Поэтому разрыв разрешён где угодно, а
+    /// ложные срабатывания отсекают два правила: кусок не короче двух букв
+    /// («у бунту» — не Ubuntu) и ни один кусок не служебное слово.
+    ///
+    /// Совпадение без разрыва проходит всегда: для него правила те же, что и
+    /// раньше.
+    static func splitMatchAllowed(_ matched: Substring) -> Bool {
+        guard matched.contains(where: { SPLIT_SEPARATORS.contains($0) }) else { return true }
+        let pieces = matched.split(whereSeparator: { SPLIT_SEPARATORS.contains($0) })
+        return pieces.allSatisfy { piece in
+            piece.count >= 2 && !RUSSIAN_SPLIT_BLOCKERS.contains(piece.lowercased())
+        }
     }
 
     /// Русские окончания, которые разрешено проглотить вместе с названием.
@@ -170,12 +219,23 @@ enum TranscriptCorrector {
     /// Хвост слова, к которому можно приписать окончание. Слово на -а/-я само
     /// стоит в именительном падеже («джира», «фигма»), поэтому основа — без
     /// последней буквы, и «в джире» находится наравне с «джира».
-    private static func inflectedWordPattern(for escapedWord: String) -> String {
+    ///
+    /// `splitTolerant` разрешает разрыв между любыми двумя буквами основы —
+    /// только для записи из одного слова: в записи из нескольких слов пробел
+    /// уже несёт смысл. Окончание от основы не отрывается никогда. Слово здесь
+    /// целиком кириллическое (иначе правило окончаний к нему не применяется),
+    /// поэтому экранирование его не меняет и резать можно по буквам.
+    private static func inflectedWordPattern(for escapedWord: String,
+                                             splitTolerant: Bool) -> String {
         let endings = RUSSIAN_CASE_ENDINGS.joined(separator: "|")
-        guard let last = escapedWord.last, last == "а" || last == "я" else {
-            return escapedWord + "(?:" + endings + ")?"
+        func stemPattern(_ stem: String) -> String {
+            guard splitTolerant else { return stem }
+            return stem.map(String.init).joined(separator: "[ -]?")
         }
-        return String(escapedWord.dropLast()) + "(?:" + endings + ")"
+        guard let last = escapedWord.last, last == "а" || last == "я" else {
+            return stemPattern(escapedWord) + "(?:" + endings + ")?"
+        }
+        return stemPattern(String(escapedWord.dropLast())) + "(?:" + endings + ")"
     }
 }
 

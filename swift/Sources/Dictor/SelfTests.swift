@@ -4969,6 +4969,62 @@ enum DictorSelfTest {
         try expect(run("докерище какое-то"), equals: "докерище какое-то",
                    "a derived word is not a case form")
 
+        // Разрыв внутри названия. Модель слышит незнакомое имя верно, а границу
+        // слова ставит где придётся: одна и та же запись словаря обязана
+        // покрывать все варианты, иначе человек заводит их по одному.
+        try expect(run("спросил у антро пик"), equals: "спросил у Anthropic",
+                   "a name split by the model is still the same name")
+        try expect(run("спросил у ан тропик"), equals: "спросил у Anthropic",
+                   "the split may fall anywhere inside the name")
+        try expect(run("лежит в гит хабе"), equals: "лежит в GitHub",
+                   "a split name keeps swallowing its case ending")
+        try expect(run("открыл чат-джипити"), equals: "открыл ChatGPT",
+                   "a hyphen is the same kind of break as a space")
+        try expect(run("Антро Пик выпустил модель"), equals: "Anthropic выпустил модель",
+                   "capitalised halves are still the split name")
+        let mineSplit = [TranscriptCorrection(source: "хетцнер", replacement: "Hetzner")]
+        try expect(run("сервер на хет цнере", user: mineSplit), equals: "сервер на Hetzner",
+                   "a manual entry gets split tolerance on the same terms as the built-in set")
+
+        // И то, чего разрыв давать не должен: обычная фраза, которая случайно
+        // складывается в название. Каждая строка — реальное столкновение,
+        // найденное перебором всех разрывов набора.
+        try expect(run("эта графа не заполнена"), equals: "эта графа не заполнена",
+                   "«графа не» is a phrase, not Grafana")
+        try expect(run("эта графа нами заполнена"), equals: "эта графа нами заполнена",
+                   "«графа нами» is a phrase, not Grafana")
+        try expect(run("дайте нам пай"), equals: "дайте нам пай",
+                   "«нам пай» is a phrase, not NumPy")
+        try expect(run("но ушен он рано"), equals: "но ушен он рано",
+                   "a function word is never half of a name")
+        try expect(run("призывал к у бунту"), equals: "призывал к у бунту",
+                   "a one-letter piece is never half of a name")
+        try expect(run("антропик, а потом"), equals: "Anthropic, а потом",
+                   "punctuation is not a break inside a name")
+        try expect(run("макбук"), equals: "MacBook", "the unsplit form must keep working")
+
+        // Запись из нескольких слов разрывов не получает: в ней пробел уже
+        // несёт смысл, и «клауд код» не должен находиться в «кла удкод».
+        let twoWords = [TranscriptCorrection(source: "клауд код", replacement: "Claude Code")]
+        try expect(run("запустил клауд код", user: twoWords), equals: "запустил Claude Code",
+                   "a multi-word entry keeps matching as written")
+        try expect(run("запустил кла удкод", user: twoWords), equals: "запустил кла удкод",
+                   "a multi-word entry must not be re-split")
+
+        // Правило разрыва закрыто так же, как окончания: ни один кусок короче
+        // двух букв и ни одно служебное слово.
+        try expect(TranscriptCorrector.splitMatchAllowed("антро пик"), equals: true,
+                   "two content halves form a split name")
+        try expect(TranscriptCorrector.splitMatchAllowed("графа на"), equals: false,
+                   "a function word blocks the split")
+        try expect(TranscriptCorrector.splitMatchAllowed("у бунту"), equals: false,
+                   "a one-letter piece blocks the split")
+        try expect(TranscriptCorrector.splitMatchAllowed("антропик"), equals: true,
+                   "an unsplit match is not subject to the split rule")
+        let longBlockers = TranscriptCorrector.RUSSIAN_SPLIT_BLOCKERS.filter { $0.count > 4 }
+        try expect(longBlockers.isEmpty, equals: true,
+                   "blockers are short function words; a content word here would hide names: \(longBlockers)")
+
         // Каждая порождаемая форма проверяется против списка русских слов —
         // тот же тест безопасности, что поймал «скалу» и «редис», только
         // теперь на всём множестве форм, а не на исходных записях.
