@@ -67,6 +67,8 @@ enum DictorSelfTest {
             return runSuite("spellings", testBuiltInSpellings)
         case "latin-terms":
             return runSuite("latin-terms", testLatinTermRestorations)
+        case "history-list":
+            return runSuite("history-list", testHistoryListVirtualization)
         case "clipboard-paste":
             return runSuite("clipboard-paste", testClipboardPasteTransaction)
         case "clipboard-paste-live":
@@ -136,6 +138,7 @@ enum DictorSelfTest {
         try testQuitLeavesServiceEnabled()
         try testStatsChartHover()
         try testHistorySearchClearButton()
+        try testHistoryListVirtualization()
         try testTodayRecentRowActions()
         try testFloatingCapsuleGeometry()
         try testBuiltInSpellings()
@@ -5211,6 +5214,89 @@ enum DictorSelfTest {
             try expect(view.windowSize(for: .recording).height,
                        equals: RecordingHUDSize.compact.capsuleHeight + FloatingCapsuleMetrics.shadowInset * 2,
                        "the window follows the geometry height")
+        }
+    }
+
+    /// Список «Истории» создаёт только видимые строки.
+    ///
+    /// Раньше он строил строку на каждую диктовку: на 1125 записях раскладка
+    /// раздела занимала 27 секунд, и столько же — каждый клик и каждая буква
+    /// в поиске, потому что окно пересобирается целиком. Заметить это на
+    /// превью было нельзя: фикстура превью — четыре записи.
+    ///
+    /// Тест держит то, что экран снимком не показывает: число созданных строк
+    /// не зависит от длины списка, а строка остаётся достижимой для мыши и
+    /// умещается в видимую область.
+    private static func testHistoryListVirtualization() throws {
+        try MainActor.assumeIsolated {
+            final class Receiver: NSObject {
+                var clickedIndex: Int?
+                @objc func clicked(_ sender: SDHistoryResultRow) { clickedIndex = sender.entryIndex }
+            }
+            let receiver = Receiver()
+            let rowCount = 5_000
+            var created = 0
+            let list = SDHistoryListView(rowCount: rowCount) { position in
+                created += 1
+                return SDHistoryResultRow(
+                    entryIndex: position,
+                    meta: "12 слов",
+                    time: "10:00",
+                    text: "Диктовка номер \(position): достаточно длинный текст, чтобы перенестись на вторую строку",
+                    highlight: "",
+                    isPinned: false,
+                    isSelected: position == 0,
+                    target: receiver,
+                    action: #selector(Receiver.clicked(_:)))
+            }
+            let size = NSSize(width: 328, height: 600)
+            let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                                  styleMask: [.titled, .fullSizeContentView],
+                                  backing: .buffered,
+                                  defer: false)
+            list.frame = NSRect(origin: .zero, size: size)
+            window.contentView = list
+            list.layoutSubtreeIfNeeded()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+
+            try expect(list.materializedRowCount > 0, equals: true,
+                       "the list must show something")
+            try expect(list.materializedRowCount < 40, equals: true,
+                       "only visible rows may exist as views, got \(list.materializedRowCount) of \(rowCount)")
+            try expect(created < 200, equals: true,
+                       "row construction must not scale with the list: \(created) rows built for \(rowCount) entries")
+
+            @MainActor
+            func firstRow(in view: NSView) -> SDHistoryResultRow? {
+                if let row = view as? SDHistoryResultRow { return row }
+                for subview in view.subviews {
+                    if let found = firstRow(in: subview) { return found }
+                }
+                return nil
+            }
+            guard let row = firstRow(in: list) else {
+                throw SelfTestFailure.failed("the list shows no row")
+            }
+            let rowFrame = row.convert(row.bounds, to: list)
+            try expect(rowFrame.maxX <= list.contentView.frame.maxX + 0.5, equals: true,
+                       "a row must fit the visible width: \(rowFrame.maxX) vs \(list.contentView.frame.maxX)")
+            try expect(rowFrame.width > 200, equals: true,
+                       "a row must take the column width, got \(rowFrame.width)")
+
+            // Достижимость: точка внутри строки обязана попадать в неё, а не в
+            // таблицу, — иначе клик достанется механизму выделения.
+            let probe = NSPoint(x: rowFrame.midX, y: rowFrame.midY)
+            var hit = list.hitTest(list.superview?.convert(probe, from: list) ?? probe)
+            var reachedRow = false
+            while let view = hit {
+                if view === row { reachedRow = true; break }
+                hit = view.superview
+            }
+            try expect(reachedRow, equals: true, "a click inside a row must land on the row")
+            NSApp.sendAction(#selector(Receiver.clicked(_:)), to: receiver, from: row)
+            try expect(receiver.clickedIndex, equals: row.entryIndex,
+                       "the row must report which entry was clicked")
         }
     }
 

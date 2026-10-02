@@ -68,6 +68,13 @@ final class Settings: @unchecked Sendable {
 
     private let defaults: UserDefaults
 
+    /// Разобранный архив истории вместе с тем, из чего он получен. Архив
+    /// читают десятки раз за одну пересборку окна и раз в 0,75 с ради
+    /// отпечатка, а разбор тысячи записей из JSON — это 12–25 мс. Сравнить
+    /// байты — memcmp, поэтому, пока они те же, отдаётся прошлый результат.
+    private let historyCacheLock = NSLock()
+    private var historyCache: (data: Data, pinned: [String], entries: [TranscriptHistoryEntry])?
+
     static let shared = Settings()
 
     init() {
@@ -405,19 +412,33 @@ final class Settings: @unchecked Sendable {
 
     var recentTranscriptEntries: [TranscriptHistoryEntry] {
         get {
-            if let data = defaults.data(forKey: Self.keyRecentTranscriptEntries),
-               let decoded = try? JSONDecoder().decode([TranscriptHistoryEntry].self, from: data) {
-                let cleaned = decoded.compactMap { entry -> TranscriptHistoryEntry? in
-                    let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { return nil }
-                    return TranscriptHistoryEntry(
-                        text: text,
-                        transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
-                        asrTiming: entry.asrTiming,
-                        createdAt: entry.createdAt
-                    )
+            if let data = defaults.data(forKey: Self.keyRecentTranscriptEntries) {
+                // Закреплённые участвуют в ограничении архива, поэтому они —
+                // такая же часть ключа, как сами байты.
+                let pinned = pinnedTranscripts
+                historyCacheLock.lock()
+                let cached = historyCache
+                historyCacheLock.unlock()
+                if let cached, cached.data == data, cached.pinned == pinned {
+                    return cached.entries
                 }
-                return limitedTranscriptHistoryArchive(cleaned, pinned: Set(pinnedTranscripts))
+                if let decoded = try? JSONDecoder().decode([TranscriptHistoryEntry].self, from: data) {
+                    let cleaned = decoded.compactMap { entry -> TranscriptHistoryEntry? in
+                        let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { return nil }
+                        return TranscriptHistoryEntry(
+                            text: text,
+                            transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
+                            asrTiming: entry.asrTiming,
+                            createdAt: entry.createdAt
+                        )
+                    }
+                    let entries = limitedTranscriptHistoryArchive(cleaned, pinned: Set(pinned))
+                    historyCacheLock.lock()
+                    historyCache = (data, pinned, entries)
+                    historyCacheLock.unlock()
+                    return entries
+                }
             }
 
             return recentTranscriptHistory.map { TranscriptHistoryEntry(text: $0) }

@@ -103,6 +103,14 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// очистки.
     var mainHistorySearch = ""
     private weak var mainHistorySearchField: NSSearchField?
+    /// Список «Истории» текущего вида — чтобы пересборка окна не сбрасывала
+    /// прокрутку: клик по сотой строке возвращал человека к первой.
+    private weak var mainHistoryListView: SDHistoryListView?
+    /// К какому списку относится запомненная прокрутка. Другой запрос или
+    /// другой фильтр — это другой список, и место в нём начинается сверху.
+    private var mainHistoryScrollContext = ""
+    /// Состояние объекта входа и момент, когда его спрашивали.
+    private var loginItemStatusReading: (status: SMAppService.Status, readAt: TimeInterval)?
     private weak var historyDetailTranscriptView: SDSelectableTranscriptView?
     /// Раздел главного окна (макет 6a): «Сегодня» открывается первым.
     var mainSection: MainWindowSection = .today
@@ -401,10 +409,33 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         // Вид пересобирается целиком, поэтому фокус и каретку поиска
         // приходится снимать до замены и возвращать после.
         let focusState = capturedSearchFocusState(in: window)
+        let historyScroll = capturedHistoryScroll()
         // Главное окно по макету 6a: сайдбар + раздел, включая настройки.
         window.title = "Dictor"
         window.contentView = makeMainWindowView()
         restoreSearchFocus(focusState, in: window)
+        restoreHistoryScroll(historyScroll, in: window)
+    }
+
+    /// Запрос и фильтр вместе определяют, какой список показан.
+    private var historyScrollContext: String {
+        "\(historyShowsPinnedOnly ? "pinned" : "all")|\(mainHistorySearch)"
+    }
+
+    private func capturedHistoryScroll() -> CGFloat? {
+        guard mainSection == .history,
+              mainHistoryScrollContext == historyScrollContext else { return nil }
+        return mainHistoryListView?.verticalOffset
+    }
+
+    private func restoreHistoryScroll(_ offset: CGFloat?, in window: NSWindow) {
+        mainHistoryScrollContext = historyScrollContext
+        guard mainSection == .history, let offset, offset > 0,
+              let list = mainHistoryListView else { return }
+        // Таблица узнаёт свою высоту только после раскладки: до неё
+        // прокручивать некуда.
+        window.contentView?.layoutSubtreeIfNeeded()
+        list.verticalOffset = offset
     }
 
     /// Было ли поле поиска в фокусе и где стояла каретка. Раньше фокус
@@ -438,6 +469,24 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     }
 
 
+    /// Состояние объекта входа, не старше пяти секунд.
+    ///
+    /// Вопрос к системе — межпроцессный вызов на 80–90 мс, а отпечаток окна
+    /// считается каждые 0,75 с на главном потоке: окно каждую секунду
+    /// замирало на десятую её часть ради значения, которое меняется раз в
+    /// жизни. Снаружи — в Системных настройках — его всё ещё могут
+    /// переключить, поэтому ответ не вечный; пять секунд опоздания здесь
+    /// не видны.
+    private func loginItemStatus() -> SMAppService.Status {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let reading = loginItemStatusReading, now - reading.readAt < 5 {
+            return reading.status
+        }
+        let status = SMAppService.mainApp.status
+        loginItemStatusReading = (status, now)
+        return status
+    }
+
     private func renderFingerprint() -> String {
         let state = AgentRuntimeStateStore.read()
         let permissions = Permission.allCases.map { Permissions.isGranted($0) ? "1" : "0" }.joined()
@@ -453,7 +502,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                           String(state?.pid ?? 0),
                           state?.speechModelReady == true ? "1" : "0"].joined(separator: "|")
         }
-        let newestHistory = settings.recentTranscriptEntries.first
+        let historyEntries = settings.recentTranscriptEntries
+        let newestHistory = historyEntries.first
         // Состояние службы — уже выдержавшее паузу (8c), а не сырое: иначе
         // созревшая пауза не доживёт до экрана. Отпечаток к этому моменту уже
         // не меняется, и refresh вышел бы на раннем `return`.
@@ -461,7 +511,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         let parts: [String] = [statusToken,
                 language.rawValue,
                 "section:\(mainSection.rawValue):\(statsPeriod.rawValue)",
-                "history:\(settings.recentTranscriptEntries.count):" +
+                "history:\(historyEntries.count):" +
                     "\(newestHistory?.createdAt?.timeIntervalSince1970 ?? 0)",
                 "search:\(mainHistorySearch)",
                 serviceOperation?.rawValue ?? "idle",
@@ -1307,7 +1357,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             style: .card
         )
 
-        let loginItemStatus = SMAppService.mainApp.status
+        let loginItemStatus = loginItemStatus()
         let loginToggle = SDToggle()
         loginToggle.isOn = loginItemStatus == .enabled || loginItemStatus == .requiresApproval
         loginToggle.onToggle = { [weak self] enabled in
@@ -1329,6 +1379,9 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 alert.addButton(withTitle: "OK")
                 alert.runModal()
             }
+            // Только что изменённое обязано быть видно сразу, а не через
+            // срок годности прошлого ответа.
+            self.loginItemStatusReading = nil
             self.refresh(force: true)
         }
         let loginSubtitle = loginItemStatus == .requiresApproval
@@ -3501,13 +3554,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         countRow.alignment = .leading
         countRow.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 6, right: 14)
 
-        let listStack = NSStackView()
-        listStack.orientation = .vertical
-        listStack.alignment = .leading
-        listStack.spacing = 3
-        listStack.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 12, right: 8)
-        listStack.translatesAutoresizingMaskIntoConstraints = false
-
+        let scroll: NSScrollView
         if entries.isEmpty {
             let empty = panelLabel(
                 mainHistorySearch.isEmpty
@@ -3518,49 +3565,45 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             wrapper.orientation = .vertical
             wrapper.alignment = .centerX
             wrapper.edgeInsets = NSEdgeInsets(top: 28, left: 12, bottom: 28, right: 12)
-            listStack.addArrangedSubview(wrapper)
-            wrapper.widthAnchor.constraint(equalTo: listStack.widthAnchor,
-                                           constant: -16).isActive = true
+            wrapper.translatesAutoresizingMaskIntoConstraints = false
+            let documentView = SDFlippedView()
+            documentView.addSubview(wrapper)
+            NSLayoutConstraint.activate([
+                wrapper.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
+                wrapper.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
+                wrapper.topAnchor.constraint(equalTo: documentView.topAnchor),
+                wrapper.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
+            ])
+            let emptyScroll = NSScrollView()
+            emptyScroll.drawsBackground = false
+            emptyScroll.automaticallyAdjustsContentInsets = false
+            emptyScroll.contentInsets = NSEdgeInsetsZero
+            emptyScroll.documentView = documentView
+            documentView.translatesAutoresizingMaskIntoConstraints = false
+            documentView.widthAnchor.constraint(equalTo: emptyScroll.widthAnchor).isActive = true
+            scroll = emptyScroll
+            mainHistoryListView = nil
+        } else {
+            let pinned = Set(settings.pinnedTranscripts)
+            let selectedIndex = selected?.0
+            let query = mainHistorySearch
+            let list = SDHistoryListView(rowCount: entries.count) { [weak self] position in
+                let (index, entry) = entries[position]
+                return SDHistoryResultRow(
+                    entryIndex: index,
+                    meta: self?.historyRowMetaText(entry) ?? "",
+                    time: self?.recentEntryTimeText(entry) ?? "",
+                    text: entry.text.replacingOccurrences(of: "\n", with: " "),
+                    highlight: query,
+                    isPinned: pinned.contains(entry.text),
+                    isSelected: index == selectedIndex,
+                    target: self,
+                    action: #selector(DictorControlPanelApp.historyResultRowClicked(_:)))
+            }
+            scroll = list
+            mainHistoryListView = list
         }
-        let pinned = Set(settings.pinnedTranscripts)
-        for (index, entry) in entries {
-            let row = SDHistoryResultRow(
-                entryIndex: index,
-                meta: historyRowMetaText(entry),
-                time: recentEntryTimeText(entry),
-                text: entry.text.replacingOccurrences(of: "\n", with: " "),
-                highlight: mainHistorySearch,
-                isPinned: pinned.contains(entry.text),
-                isSelected: index == selected?.0,
-                target: self,
-                action: #selector(historyResultRowClicked(_:)))
-            listStack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: listStack.widthAnchor,
-                                       constant: -16).isActive = true
-        }
-
-        let documentView = SDFlippedView()
-        documentView.addSubview(listStack)
-        NSLayoutConstraint.activate([
-            listStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
-            listStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
-            listStack.topAnchor.constraint(equalTo: documentView.topAnchor),
-            listStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
-        ])
-        let scroll = NSScrollView()
-        scroll.drawsBackground = false
-        scroll.hasVerticalScroller = true
-        scroll.verticalScroller?.controlSize = .small
-        // Окно с fullSizeContentView: скролл сам добавил бы сверху отступ
-        // высотой с тайтлбар, чтобы содержимое не уезжало под кнопки окна.
-        // Кнопки лежат над сайдбаром, а не над этой панелью, так что отступ
-        // здесь — просто пустая полоса над первой строкой.
-        scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsetsZero
-        scroll.documentView = documentView
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        documentView.translatesAutoresizingMaskIntoConstraints = false
-        documentView.widthAnchor.constraint(equalTo: scroll.widthAnchor).isActive = true
 
         let headerHairline = SDHairlineView()
         let column = NSStackView(views: [header, headerHairline, countRow, scroll])
@@ -3751,7 +3794,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         return entries.first
     }
 
-    @objc private func historyResultRowClicked(_ sender: SDHistoryResultRow) {
+    @objc fileprivate func historyResultRowClicked(_ sender: SDHistoryResultRow) {
         let entries = settings.recentTranscriptEntries
         guard entries.indices.contains(sender.entryIndex) else { return }
         historySelectionKey = historyEntryKey(entries[sender.entryIndex])
