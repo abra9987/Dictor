@@ -151,8 +151,11 @@ func drawBackground() {
     drawArrow(from: CGPoint(x: Art.appIconCenter.x + 90, y: Art.appIconCenter.y),
               to: CGPoint(x: Art.dropIconCenter.x - 108, y: Art.appIconCenter.y))
 
-    // Карточка первого запуска.
-    let cardRect = CGRect(x: 48, y: 352, width: Art.width - 96, height: 94)
+    // Карточка первого запуска. Поля сверху и снизу равны: текст — это блок
+    // высотой 69 (заголовок 20, зазор 1, три строки по 16), и над ним, и под
+    // ним по 16. Раньше блок начинался в 20 от верха карточки высотой 94 и
+    // кончался в 5 от низа — текст лежал на нижнем крае.
+    let cardRect = CGRect(x: 48, y: 346, width: Art.width - 96, height: 101)
     let cardPath = roundedRect(cardRect, radius: 16)
     NSGraphicsContext.current?.cgContext.setShadow(
         offset: CGSize(width: 0, height: 3),
@@ -166,7 +169,7 @@ func drawBackground() {
     cardPath.stroke()
 
     // Значок-восклицание в фирменном цвете.
-    let badgeRect = CGRect(x: cardRect.minX + 22, y: cardRect.minY + 22, width: 30, height: 30)
+    let badgeRect = CGRect(x: cardRect.minX + 22, y: cardRect.minY + 18, width: 30, height: 30)
     Art.voice.withAlphaComponent(0.12).setFill()
     NSBezierPath(ovalIn: badgeRect).fill()
     draw("!",
@@ -178,7 +181,7 @@ func drawBackground() {
     let textWidth = cardRect.width - 68 - 24
 
     draw("Первый запуск",
-         in: CGRect(x: textX, y: cardRect.minY + 20, width: textWidth, height: 20),
+         in: CGRect(x: textX, y: cardRect.minY + 16, width: textWidth, height: 20),
          font: .systemFont(ofSize: 13.5, weight: .semibold),
          color: Art.ink,
          alignment: .left)
@@ -188,7 +191,7 @@ func drawBackground() {
          самостоятельно. Системные настройки → «Конфиденциальность и безопасность» \
          → «Открыть всё равно».
          """,
-         in: CGRect(x: textX, y: cardRect.minY + 41, width: textWidth, height: 48),
+         in: CGRect(x: textX, y: cardRect.minY + 37, width: textWidth, height: 48),
          font: .systemFont(ofSize: 12, weight: .regular),
          color: Art.graphite,
          alignment: .left,
