@@ -296,6 +296,15 @@ final class DictorQuickPanel: NSPanel {
             toggle.widthAnchor.constraint(equalToConstant: 36),
             toggle.heightAnchor.constraint(equalToConstant: 22),
             toggle.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+            // Тумблер стоит между заголовком и подписью — по высоте там же,
+            // где стоял, пока шапка состояла из двух строк и он центрировался
+            // по ней. Когда шапка научилась расти вниз (прогресс, кнопки),
+            // центрирование по строке убрали и ничего не поставили взамен:
+            // без вертикального ограничения AppKit кладёт вид в y = 0, то есть
+            // на нижний край, и тумблер два месяца лежал на разделителе.
+            // Привязка к заголовку, а не к середине шапки, держит его на месте
+            // во всех девяти состояниях.
+            toggle.centerYAnchor.constraint(equalTo: head.bottomAnchor, constant: 1),
             textColumn.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
             textColumn.trailingAnchor.constraint(lessThanOrEqualTo: toggle.leadingAnchor,
                                                  constant: -12),
