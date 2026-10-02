@@ -94,6 +94,25 @@ struct AgentRuntimeState: Codable {
     /// отказавшего устройства — окно показывает его в строке «Микрофон»:
     /// иначе галочка у петлички при записи со встроенного — молчаливая ложь.
     var inputFallbackDeviceName: String?
+    /// Служба распознаёт на модели прошлой версии, пока текущая скачивается:
+    /// имя той, что работает сейчас. `nil` — работает текущая. Без этого окно
+    /// называло бы «используется» модель, которой ещё нет на диске.
+    var previousSpeechModelName: String?
+    /// Чем занята фоновая загрузка текущей модели — сырое значение
+    /// `SpeechModelUpdateStatus.Phase`.
+    var speechModelUpdatePhase: String?
+    var speechModelUpdateFraction: Double?
+
+    /// То же, собранное в одно значение: окно и панель показывают его
+    /// одинаково.
+    var speechModelUpdate: SpeechModelUpdateStatus? {
+        guard let previousSpeechModelName,
+              let phase = speechModelUpdatePhase.flatMap(SpeechModelUpdateStatus.Phase.init)
+        else { return nil }
+        return SpeechModelUpdateStatus(previousModelName: previousSpeechModelName,
+                                       phase: phase,
+                                       fraction: speechModelUpdateFraction)
+    }
 }
 
 enum AgentRuntimeStateStore {

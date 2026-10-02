@@ -38,7 +38,7 @@ Three suites are deliberately outside `all` and have to be run by name:
 Every screen is verified by rendering it, not by eye:
 
 ```bash
-swift/.build/debug/Dictor --export-settings-preview   /tmp/shots   # 14 PNG
+swift/.build/debug/Dictor --export-settings-preview   /tmp/shots   # 16 PNG
 swift/.build/debug/Dictor --export-history-preview    /tmp/shots ru
 swift/.build/debug/Dictor --export-onboarding-preview /tmp/shots
 swift/.build/debug/Dictor --export-popover-preview    /tmp/shots ru
@@ -48,7 +48,28 @@ swift/.build/debug/Dictor --export-capsule-preview    /tmp/shots ru
 swift/.build/debug/Dictor --export-hud-animation      /tmp/shots ru
 ```
 
-The loop is: render → look at the PNG → fix → render again.
+The loop is: render → look at the PNG → fix → render again. Check the pixel
+width of what you rendered, not only how it looks: a label that refuses to wrap
+makes the whole tab wider than the window, and the picture still looks fine.
+
+## Things a render cannot show
+
+Two debug-only tools exist for behaviour that depends on the machine it runs
+on. Neither is part of `--self-test all`.
+
+```bash
+# What smart insertion sees in whichever app is in front, five seconds from now.
+# Letters are printed as «L» and digits as «9» — the text itself never is.
+swift/.build/debug/Dictor --probe-insertion-context 5
+
+# The same audio through the same path a dictation takes.
+swift/.build/debug/Dictor --transcribe-file auto <audio>
+
+# …and as on the first launch after an update: the current model "is not on
+# disk", so the service has to come up on the previous one. The real model
+# files are not touched.
+swift/.build/debug/Dictor --transcribe-file auto --as-after-update <audio>
+```
 
 ## Versions and releases
 

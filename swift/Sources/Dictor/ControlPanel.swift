@@ -81,6 +81,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     /// подвал честно докладывал «Установлена версия 0.0.0, служба ещё работает
     /// на 1.2.0». Для снимков состояние задаётся явно.
     var previewStatusOverride: ServiceStatusKind?
+    /// Для рендера вкладки «Служба» в состоянии «работает прежняя модель»:
+    /// в обычной жизни оно длится минуты после обновления, и поймать его на
+    /// живой службе нечем.
+    var previewModelUpdateOverride: SpeechModelUpdateStatus?
     /// Пауза перед показом коротких состояний службы (макет 8c).
     private let statusHold = ServiceStatusHold()
     private var statusHoldTimer: Timer?
@@ -2199,7 +2203,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
         switch state?.status {
         case "ready":
-            return .ready(latencyMilliseconds: state?.medianLatencyMilliseconds)
+            return .ready(latencyMilliseconds: state?.medianLatencyMilliseconds,
+                          modelUpdate: state?.speechModelUpdate)
         // Пауза из панели меню-бара: раньше окно её не видело и подвал
         // показывал «Готово», пока хоткей нарочно молчал (аудит №11).
         case "paused":
@@ -4187,12 +4192,28 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
 
     private func addServiceModelGroup(to root: NSStackView) {
         let profile = SpeechModelProfile.productionDefault
+        // Карточка называет ту модель, которая распознаёт на самом деле. После
+        // обновления приложения это может быть модель прошлой версии — пока
+        // новая скачивается, — и «используется» рядом с именем новой было бы
+        // неправдой.
+        let modelUpdate = previewModelUpdateOverride
+            ?? AgentRuntimeStateStore.read()?.speechModelUpdate
+        let cardTitle: String
+        let cardDetail: String
+        if let modelUpdate {
+            cardTitle = modelUpdate.previousModelName + " · "
+                + t("используется, пока не готова новая", "in use until the new one is ready")
+            cardDetail = speechModelUpdateDetail(modelUpdate, newModelName: profile.shortName)
+        } else {
+            cardTitle = profile.shortName + " · " + t("используется", "in use")
+            cardDetail = t("~630 МБ · русский, английский и ещё 16 языков · Neural Engine. "
+                           + "Работает целиком на этом Mac; скачивается с huggingface.co при установке.",
+                           "~630 MB · Russian, English and 16 more · Neural Engine. "
+                           + "Runs entirely on this Mac; downloads from huggingface.co at setup.")
+        }
         let card = SDModelCard(
-            title: profile.shortName + " · " + t("используется", "in use"),
-            detail: t("~630 МБ · русский, английский и ещё 16 языков · Neural Engine. "
-                      + "Работает целиком на этом Mac; скачивается с huggingface.co при установке.",
-                      "~630 MB · Russian, English and 16 more · Neural Engine. "
-                      + "Runs entirely on this Mac; downloads from huggingface.co at setup."),
+            title: cardTitle,
+            detail: cardDetail,
             active: true,
             actionTitle: nil,
             target: nil,
@@ -4228,6 +4249,36 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             view.widthAnchor.constraint(equalTo: group.widthAnchor).isActive = true
         }
         root.addArrangedSubview(group)
+    }
+
+    /// Одна строка: подпись карточки модели не переносится.
+    private func speechModelUpdateDetail(_ update: SpeechModelUpdateStatus,
+                                         newModelName: String) -> String {
+        switch update.phase {
+        case .downloading:
+            let percent = update.fraction.map { " — \(Int(($0 * 100).rounded()))\u{00A0}%" } ?? ""
+            return t("\(newModelName) (~630 МБ) скачивается\(percent). Диктовка работает; "
+                     + "служба перейдёт на новую модель сама, в паузе.",
+                     "\(newModelName) (~630 MB) is downloading\(percent). Dictation works; "
+                     + "the service moves to the new model on its own, when idle.")
+        case .waitingForIdle:
+            return t("\(newModelName) скачана и проверена. Служба перейдёт на неё сама, "
+                     + "когда вы пару минут не диктуете.",
+                     "\(newModelName) is downloaded and verified. The service moves to it "
+                     + "on its own once you stop dictating for a couple of minutes.")
+        case .retrying:
+            // Причину не называем: это может быть сеть, место на диске или
+            // файлы, которые не сошлись с проверкой, — подробности в журнале.
+            return t("\(newModelName) (~630 МБ) пока не скачалась. "
+                     + "Диктовка работает; загрузка повторится сама.",
+                     "\(newModelName) (~630 MB) hasn’t downloaded yet. "
+                     + "Dictation works; the download retries on its own.")
+        case .failedToLoad:
+            return t("\(newModelName) скачана, но на этом Mac не запустилась. "
+                     + "Диктовка работает на прежней модели; подробности — в журнале.",
+                     "\(newModelName) is downloaded but failed to start on this Mac. "
+                     + "Dictation runs on the previous model; the log has the details.")
+        }
     }
 
     private func addServiceMeasurementsGroup(to root: NSStackView) {
@@ -5055,6 +5106,36 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
         exported += 1
     }
     panel.updateState = .notChecked
+
+    // И ещё одним — «Служба», пока распознаёт модель прошлой версии.
+    panel.previewModelUpdateOverride = SpeechModelUpdateStatus(
+        previousModelName: SpeechModelPackage.previous.profile.shortName,
+        phase: .downloading,
+        fraction: 0.34)
+    panel.settingsTab = "service"
+    for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
+                                     ("dark", NSAppearance.Name.darkAqua)] {
+        window.appearance = NSAppearance(named: appearanceName)
+        let view = panel.makeSettingsContentView()
+        let height = DictorControlPanelApp.settingsContentHeight(for: view, width: size.width)
+        window.setContentSize(NSSize(width: size.width, height: height))
+        view.frame = NSRect(origin: .zero, size: NSSize(width: size.width, height: height))
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw SettingsPreviewExportError(message: "no bitmap rep for model-update-\(suffix)")
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw SettingsPreviewExportError(message: "PNG encode failed for model-update-\(suffix)")
+        }
+        try png.write(to: directory.appendingPathComponent("settings-service-model-update-\(suffix).png"),
+                      options: .atomic)
+        exported += 1
+    }
+    panel.previewModelUpdateOverride = nil
 
     window.contentView = nil
     guard exported > 0 else {

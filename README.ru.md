@@ -155,7 +155,7 @@ swift/.build/debug/Dictor --self-test all
 в светлой и тёмной теме:
 
 ```bash
-swift/.build/debug/Dictor --export-settings-preview   <dir>          # 14 PNG
+swift/.build/debug/Dictor --export-settings-preview   <dir>          # 16 PNG
 swift/.build/debug/Dictor --export-history-preview    <dir> [ru|en]
 swift/.build/debug/Dictor --export-onboarding-preview <dir>
 swift/.build/debug/Dictor --export-popover-preview    <dir> [ru|en]

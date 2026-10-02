@@ -983,6 +983,13 @@ final class SDModelCard: NSView {
         let detailLabel = NSTextField(labelWithString: detail)
         detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = SD.C.subtle
+        // Подпись переносится. Однострочной она была шире вкладки: рендер
+        // «Службы» выходил 858 pt вместо 767, а в окне правый край текста
+        // уезжал за карточку.
+        detailLabel.lineBreakMode = .byWordWrapping
+        detailLabel.maximumNumberOfLines = 0
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        self.detailLabel = detailLabel
 
         let textStack = NSStackView(views: [titleLabel, detailLabel])
         textStack.orientation = .vertical
@@ -991,6 +998,7 @@ final class SDModelCard: NSView {
 
         var views: [NSView] = [textStack, NSView()]
         if let actionTitle, let action {
+            trailingReserve = 96
             let button = NSButton(title: actionTitle, target: target, action: action)
             button.isBordered = false
             // Макет: «✓ Активна» 11px 600 акцент, «Выбрать» 11px 400 graphite.
@@ -1018,8 +1026,23 @@ final class SDModelCard: NSView {
     }
 
     private var active = false
+    private var detailLabel: NSTextField?
+    /// Место под кнопку справа, если она есть: подписи его занимать нельзя.
+    private var trailingReserve: CGFloat = 0
 
     required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        // Ширину переноса нельзя задать в init — до первой раскладки ширина
+        // карточки нулевая; тот же приём, что у SDRowView.
+        guard let detailLabel else { return }
+        let available = bounds.width - 24 - trailingReserve
+        if available > 80, abs(detailLabel.preferredMaxLayoutWidth - available) > 0.5 {
+            detailLabel.preferredMaxLayoutWidth = available
+            detailLabel.invalidateIntrinsicContentSize()
+        }
+    }
 
     private func restyle() {
         if active {

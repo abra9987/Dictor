@@ -80,6 +80,38 @@ auto-stopped recording is almost always a forgotten toggle-mode one, so the
 text goes to History only — never to the cursor, which by then may sit in an
 unrelated field — and the error capsule says where to find it.
 
+## Changing the model without downtime
+
+A new model arrives with an app update, and the update used to begin by
+downloading 630 MB: no dictation until it finished, none at all without a
+network — while the previous model sat on disk, intact. `SpeechModelPackage`
+therefore describes two models, `current` and `previous`, each with its own
+integrity manifest, and `TranscriptionWorker.load` chooses between three
+plans: the current model if it is on disk and verifies; otherwise the previous
+one; otherwise the old blocking download. A verified model is loaded with
+`AsrModels.loadLocal`, never `load`: the latter answers any failure by wiping
+the cache and downloading again, which cannot help once the hashes match. If
+Core ML refuses a verified current model, the service stays on the previous
+one and says so, instead of failing to start.
+
+While the service runs on the previous model, `SpeechModelUpdater` fetches the
+current one in the background — **as files only**. Preparing a model for the
+Neural Engine takes tens of seconds and must not happen next to a live
+dictation, so the switch itself is an ordinary service restart, taken once
+dictation has been quiet for two minutes and the audio input is closed. It is
+the same path the service walks after every app update, which is the point:
+no new state to get wrong. Swapping the model in place under a running
+dictation was considered and refused — it means two models in memory and a
+Core ML compile beside live inference, and its failure mode is exactly the one
+this exists to prevent.
+
+The window says which model is actually transcribing. "Ready" stays "ready" —
+nothing is asked of the person — but the second line and the model card in
+the Service tab name the previous model and the state of the download.
+
+At the next model change `current` becomes `previous` and the model two
+versions back stops being a fallback.
+
 ## Invariants that cost something to learn
 
 - `AudioCapture` is not `@MainActor` (above).
@@ -195,7 +227,8 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |
 | `Statistics.swift` | what the Statistics section shows |
 | `UpdateCheck.swift`, `UpdateWindow.swift` | the updater |
-| `ModelIntegrity.swift` | per-file SHA-256 verification of the model, cache paths, disk space |
+| `ModelIntegrity.swift` | the two model descriptions with their manifests, per-file SHA-256 verification, cache paths, disk space |
+| `SpeechModelUpdate.swift` | background download of the current model while the previous one works, and the decision when to switch |
 | `ProblemReport.swift`, `DictionaryShare.swift` | the two things a person can choose to email: a diagnostics archive and their dictionary |
 | `Permissions.swift`, `PermissionsDoctor.swift` | the three macOS permissions and the three reasons a granted one still gets asked for |
 | `InstallLocation.swift` | moving the app into Applications, quarantine |

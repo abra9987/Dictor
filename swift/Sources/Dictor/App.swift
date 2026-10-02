@@ -1018,6 +1018,21 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var isTerminating = false
     private var isResettingSpeechModelCache = false
     private var isSwitchingSpeechModel = false
+    /// Служба распознаёт на модели прошлой версии: текущей на диске ещё нет,
+    /// она скачивается в фоне (см. SpeechModelUpdate.swift).
+    private var isRunningOnPreviousSpeechModel = false
+    private var speechModelUpdateTask: Task<Void, Never>?
+    /// Номер запуска фоновой загрузки. Отменённая задача доживает до своего
+    /// завершения и не должна тронуть состояние, которое уже принадлежит
+    /// следующей.
+    private var speechModelUpdateGeneration = 0
+    private var speechModelUpdatePhase: SpeechModelUpdateStatus.Phase?
+    private var speechModelUpdateFraction: Double?
+    private var speechModelUpdateFailedAttempts = 0
+    private var speechModelUpdateRetryWorkItem: DispatchWorkItem?
+    /// Когда закончилась последняя диктовка. Переход на скачанную модель
+    /// ждёт тишины, и отсчитывается она отсюда.
+    private var lastDictationActivityUptime = ProcessInfo.processInfo.systemUptime
     private var fallbackSpeechModelProfileAfterStartupFailure: SpeechModelProfile?
     private var startupTask: Task<Void, Never>?
     private var updateCheckLoopTask: Task<Void, Never>?
@@ -1322,6 +1337,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         settings.hasActiveRunMarker = false
         startupTask?.cancel()
         startupTask = nil
+        cancelSpeechModelUpdate()
         updateCheckLoopTask?.cancel()
         updateCheckLoopTask = nil
         manualUpdateCheckTask?.cancel()
@@ -1491,7 +1507,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
             do {
                 let throttler = ProgressThrottler()
-                try await asr.load(
+                let loadedSpeechModel = try await asr.load(
                     profile: speechModelProfile,
                     progressHandler: { [weak self] progress in
                         let title = speechModelStartupStatusTitle(progress)
@@ -1507,6 +1523,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                         }
                     })
                 guard !Task.isCancelled, !isTerminating else { return }
+                noteLoadedSpeechModel(loadedSpeechModel)
 
                 do {
                     let warmUpTiming = try await asr.warmUp()
@@ -1591,6 +1608,147 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 log("pending dictation recovery deferred: \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - Обновление модели без простоя
+
+    /// Запоминает, на какой модели поднялась служба. Если это модель прошлой
+    /// версии — запускает фоновую загрузку текущей.
+    private func noteLoadedSpeechModel(_ loaded: LoadedSpeechModel) {
+        switch loaded {
+        case .current:
+            if isRunningOnPreviousSpeechModel {
+                log("ASR: the service moved from \(SpeechModelPackage.previous.profile.shortName) to \(SpeechModelPackage.current.profile.shortName)")
+            }
+            isRunningOnPreviousSpeechModel = false
+            cancelSpeechModelUpdate()
+        case .previous:
+            isRunningOnPreviousSpeechModel = true
+            // Отсчёт тишины начинается заново: служба только что поднялась,
+            // и перезапускать её сразу же ради новой модели незачем.
+            lastDictationActivityUptime = ProcessInfo.processInfo.systemUptime
+            startSpeechModelUpdateIfNeeded()
+        case .previousAfterCurrentFailed:
+            // Текущая модель скачана, цела и не запустилась. Качать её снова
+            // незачем, а человек должен увидеть, на чём работает диктовка.
+            isRunningOnPreviousSpeechModel = true
+            cancelSpeechModelUpdate()
+            speechModelUpdatePhase = .failedToLoad
+        }
+    }
+
+    private func cancelSpeechModelUpdate() {
+        speechModelUpdateGeneration += 1
+        speechModelUpdateTask?.cancel()
+        speechModelUpdateTask = nil
+        speechModelUpdateRetryWorkItem?.cancel()
+        speechModelUpdateRetryWorkItem = nil
+        speechModelUpdatePhase = nil
+        speechModelUpdateFraction = nil
+        speechModelUpdateFailedAttempts = 0
+    }
+
+    private func startSpeechModelUpdateIfNeeded() {
+        guard isRunningOnPreviousSpeechModel,
+              speechModelUpdateTask == nil,
+              speechModelUpdatePhase != .waitingForIdle,
+              speechModelUpdatePhase != .failedToLoad,
+              !isTerminating else { return }
+        speechModelUpdateRetryWorkItem?.cancel()
+        speechModelUpdateRetryWorkItem = nil
+        speechModelUpdateGeneration += 1
+        let generation = speechModelUpdateGeneration
+        speechModelUpdatePhase = .downloading
+        speechModelUpdateFraction = nil
+        log("ASR: downloading \(SpeechModelPackage.current.profile.shortName) in the background; dictation stays on \(SpeechModelPackage.previous.profile.shortName)")
+
+        let throttler = ProgressThrottler()
+        // Вне главного потока и с низким приоритетом: сверка сумм — это
+        // чтение 630 МБ с диска, и ни капсуле, ни распознаванию оно мешать не
+        // должно.
+        speechModelUpdateTask = Task.detached(priority: .utility) { [weak self] in
+            var failure: Error?
+            do {
+                try await SpeechModelUpdater.fetchCurrentModel(progressHandler: { [weak self] progress in
+                    let fraction = speechModelStartupProgressValue(progress)
+                    guard throttler.shouldDispatch("", fraction) else { return }
+                    Task { @MainActor in
+                        self?.updateSpeechModelUpdateProgress(fraction, generation: generation)
+                    }
+                })
+            } catch {
+                failure = error
+            }
+            await self?.finishSpeechModelUpdate(failure: failure, generation: generation)
+        }
+        rebuildMenu()
+    }
+
+    private func updateSpeechModelUpdateProgress(_ fraction: Double?, generation: Int) {
+        guard generation == speechModelUpdateGeneration,
+              speechModelUpdatePhase == .downloading,
+              let fraction,
+              fraction != speechModelUpdateFraction,
+              !isTerminating else { return }
+        speechModelUpdateFraction = fraction
+        rebuildMenu()
+    }
+
+    private func finishSpeechModelUpdate(failure: Error?, generation: Int) {
+        guard generation == speechModelUpdateGeneration, !isTerminating else { return }
+        speechModelUpdateTask = nil
+        speechModelUpdateFraction = nil
+        let name = SpeechModelPackage.current.profile.shortName
+
+        if let failure {
+            speechModelUpdateFailedAttempts += 1
+            let delay = SpeechModelUpdater.retryDelay(
+                afterFailedAttempt: speechModelUpdateFailedAttempts,
+                failure: failure)
+            speechModelUpdatePhase = .retrying
+            log("ASR: background download of \(name) failed (attempt \(speechModelUpdateFailedAttempts)); next attempt in \(Int(delay / 60)) min: \(failure.localizedDescription)")
+            let work = DispatchWorkItem { [weak self] in
+                self?.startSpeechModelUpdateIfNeeded()
+            }
+            speechModelUpdateRetryWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        } else {
+            speechModelUpdateFailedAttempts = 0
+            speechModelUpdatePhase = .waitingForIdle
+            log("ASR: \(name) is downloaded and verified; the service will move to it when dictation is idle")
+        }
+        rebuildMenu()
+    }
+
+    /// Переход на скачанную модель. Зовётся раз в секунду наблюдателем
+    /// настроек; сам переход — обычный перезапуск службы, тот же путь, что
+    /// после обновления приложения.
+    private func switchToUpdatedSpeechModelIfIdle() {
+        // Служба, приостановленная на время сна, тоже занята: запуск посреди
+        // сна сбросил бы отметку «поднять после пробуждения», и неудача с
+        // микрофоном оставила бы её лежать.
+        let occupied = isRecording || isBusy || startupTask != nil
+            || isRestartingAudioInput || isSwitchingSpeechModel
+            || isResettingSpeechModelCache || installingUpdateVersion != nil
+            || shouldResumeRuntimeAfterWake || isTerminating
+        guard SpeechModelUpdater.switchIsDue(
+            updateIsReady: speechModelUpdatePhase == .waitingForIdle,
+            serviceIsOccupied: occupied,
+            audioInputIsOpen: audio.isEngineStarted,
+            secondsSinceLastDictation: ProcessInfo.processInfo.systemUptime
+                - lastDictationActivityUptime) else { return }
+        speechModelUpdatePhase = nil
+        log("ASR: dictation is idle — restarting the service on \(SpeechModelPackage.current.profile.shortName)")
+        startStartup(reason: "speech model update")
+    }
+
+    /// Что сказать окну и панели про модель, пока работает прежняя.
+    private var speechModelUpdateStatus: SpeechModelUpdateStatus? {
+        guard isRunningOnPreviousSpeechModel, let phase = speechModelUpdatePhase else { return nil }
+        return SpeechModelUpdateStatus(
+            previousModelName: SpeechModelPackage.previous.profile.shortName,
+            phase: phase,
+            fraction: speechModelUpdateFraction)
     }
 
     private func prepareForStartupAttempt() {
@@ -1967,11 +2125,19 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     @objc private func settingsWatchTimerFired(_ timer: Timer) {
+        // Отсчёт тишины для смены модели: пока идёт запись или распознавание,
+        // тишины нет. Отметки в начале и в конце диктовки одной не хватает —
+        // запись длиннее двух минут с перезапуском аудиовхода в конце
+        // оставила бы отметку на самом её начале.
+        if isRecording || isBusy {
+            lastDictationActivityUptime = ProcessInfo.processInfo.systemUptime
+        }
         guard !isRecording, !isBusy, !isTerminating else { return }
         _ = settings.refreshFromDisk()
         applyHotkeySettings(force: false)
         applyFloatingCapsuleSettings()
         applyLiveSettings()
+        switchToUpdatedSpeechModelIfIdle()
     }
 
     /// Настройки, которые окно меняет, а служба обязана подхватить сама.
@@ -3124,6 +3290,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     // MARK: - Recording loop
 
     private func handlePress() {
+        lastDictationActivityUptime = ProcessInfo.processInfo.systemUptime
         guard !isDictationPaused else { return }
         guard isReady, !isRecording, !isBusy, !isTerminating else {
             // Audible cue when the previous transcription is still in
@@ -4019,7 +4186,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                               medianLatencyMilliseconds: medianLatencyMilliseconds,
                               isUpdating: installingUpdateVersion != nil,
                               appVersion: currentBundleVersion(),
-                              inputFallbackDeviceName: audio.inputFallbackDeviceName)
+                              inputFallbackDeviceName: audio.inputFallbackDeviceName,
+                              previousSpeechModelName: speechModelUpdateStatus?.previousModelName,
+                              speechModelUpdatePhase: speechModelUpdateStatus?.phase.rawValue,
+                              speechModelUpdateFraction: speechModelUpdateStatus?.fraction)
         )
     }
 
@@ -4421,6 +4591,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 "Hotkey: \(hotkey.hotkey.name)",
                 "Trigger mode: \(TRIGGER_DISPLAY[settings.triggerMode] ?? settings.triggerMode.rawValue)",
                 "Speech model: \(speechModelProfile.displayName)",
+                "Running on the previous model: \(speechModelUpdateStatus.map { "\($0.previousModelName), update \($0.phase.rawValue)" } ?? "no")",
                 "Language: \(languageSettingText)",
                 "Paste behavior: \(PASTE_SUFFIX_DISPLAY[settings.pasteSuffix] ?? settings.pasteSuffix.rawValue)",
                 "Smart insertion: \(settings.smartInsertionEnabled)",
@@ -4632,7 +4803,11 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     private func makeSpeechModelSetupRow() -> NSView {
-        let state = speechModelSetupRowState(profile: settings.speechModelProfile,
+        // Строка называет модель, которая загружена на самом деле: пока
+        // текущая скачивается, это модель прошлой версии.
+        let state = speechModelSetupRowState(profile: isRunningOnPreviousSpeechModel
+                                                ? SpeechModelPackage.previous.profile
+                                                : settings.speechModelProfile,
                                              isSpeechModelReady: isSpeechModelReady,
                                              isStartupInProgress: startupTask != nil || isSwitchingSpeechModel,
                                              startupStatusTitle: startupStatusTitle,
@@ -4875,6 +5050,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     private func scheduleAudioIdleStop(reason: String) {
+        // Сюда приходит каждая закончившаяся запись, чем бы она ни кончилась:
+        // удобная точка, чтобы запомнить, когда человек диктовал в последний раз.
+        lastDictationActivityUptime = ProcessInfo.processInfo.systemUptime
         cancelAudioIdleStop()
         guard audio.isEngineStarted, !isRecording, !isBusy, !isTerminating else { return }
 
@@ -5349,6 +5527,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
         isResettingSpeechModelCache = true
+        // Фоновая загрузка пишет в тот самый каталог, который сейчас удалят.
+        cancelSpeechModelUpdate()
         prepareForStartupAttempt()
         startupStatusTitle = "Resetting speech model cache…"
         log("ASR: \(profile.shortName) cache reset started")
@@ -5861,7 +6041,8 @@ extension DictorApp: QuickPanelDelegate {
         // Пауза перекрывает только «Готово»: пока служба запускается или
         // сломана, это важнее нарочно выключенного хоткея.
         if isDictationPaused { return .paused }
-        return .ready(latencyMilliseconds: medianLatencyMilliseconds)
+        return .ready(latencyMilliseconds: medianLatencyMilliseconds,
+                      modelUpdate: speechModelUpdateStatus)
     }
 
     func quickPanelState() -> QuickPanelState {

@@ -132,6 +132,10 @@ let AUDIO_START_RETRY_DELAYS_SECONDS: [UInt64] = [1, 3, 8]
 let AUDIO_IDLE_STOP_DELAY_SECONDS: TimeInterval = 5
 let AUDIO_CONFIGURATION_CHANGE_SUPPRESSION_SECONDS: TimeInterval = 1
 let MODEL_DOWNLOAD_HEADROOM_BYTES: Int64 = 500 * 1024 * 1024
+/// Сколько тишины после последней диктовки нужно, чтобы служба перешла на
+/// скачанную в фоне модель. Между фразами одной мысли проходят секунды, между
+/// делами — минуты; две минуты отделяют одно от другого с запасом.
+let SPEECH_MODEL_SWITCH_QUIET_SECONDS: TimeInterval = 120
 
 let SETTINGS_SUITE = "com.raul.dictor"
 let CORRECTIONS_FILE_UTI = "com.raul.dictor.corrections"
@@ -634,7 +638,7 @@ enum SpeechModelProfile: String, CaseIterable {
     /// Загружается всегда поддерживаемая модель, какой бы профиль ни был
     /// сохранён, поэтому и сбрасывается её кеш, а не кеш названного профиля.
     var cacheResetDetail: String {
-        "Dictor will delete the local \(Self.productionDefault.shortName) model cache, unload the current speech model, and download a fresh verified copy before dictation is available again."
+        "Dictor will delete the local \(Self.productionDefault.shortName) model cache, unload the current speech model, and download a fresh verified copy. Dictation is unavailable until then — unless the previous model is still on this Mac, in which case it carries on with that one."
     }
 
     /// Реальная модель на диске — 632 МБ (603 МиБ): энкодер Ultra хранится в

@@ -3227,20 +3227,145 @@ enum DictorSelfTest {
         // Манифест обязан называть веса и граф каждой из четырёх моделей и
         // словарь: пустой или обрезанный список прошёл бы компиляцию и
         // сломал бы загрузку у каждого, у кого кеша ещё нет.
-        let manifestPaths = Set(ModelIntegrity.parakeetUltraManifestPaths)
-        for model in ["Decoder", "Encoder", "JointDecisionv3", "Preprocessor"] {
-            for file in ["coremldata.bin", "model.mil", "weights/weight.bin"] {
-                try expect(manifestPaths.contains("\(model).mlmodelc/\(file)"), equals: true,
-                           "model manifest must pin \(model).mlmodelc/\(file)")
+        // То же — для модели прошлой версии: служба поднимается на ней,
+        // пока скачивается текущая, и проверяется она тем же способом.
+        for package in [SpeechModelPackage.current, .previous] {
+            let name = package.profile.shortName
+            let manifestPaths = Set(package.files.map(\.relativePath))
+            for model in ["Decoder", "Encoder", "JointDecisionv3", "Preprocessor"] {
+                for file in ["coremldata.bin", "model.mil", "weights/weight.bin"] {
+                    try expect(manifestPaths.contains("\(model).mlmodelc/\(file)"), equals: true,
+                               "\(name) manifest must pin \(model).mlmodelc/\(file)")
+                }
+                try expect(package.strictDirectories.contains("\(model).mlmodelc"), equals: true,
+                           "\(name) must not tolerate stray files in \(model).mlmodelc")
+            }
+            try expect(manifestPaths.contains("parakeet_vocab.json"), equals: true,
+                       "\(name) manifest must pin the vocabulary")
+            try expect(package.repositoryCommit.count, equals: 40,
+                       "\(name) manifest must name the repository commit it was taken from")
+
+            // Если модель лежит на этой машине — манифест обязан с ней сходиться.
+            if package.filesExist {
+                try ModelIntegrity.verify(package, at: package.cacheDirectory)
             }
         }
-        try expect(manifestPaths.contains("parakeet_vocab.json"), equals: true,
-                   "model manifest must pin the vocabulary")
+        try expect(SpeechModelPackage.current.cacheDirectory
+                    == SpeechModelPackage.previous.cacheDirectory,
+                   equals: false,
+                   "the current and the previous model must live in different directories")
+        try expect(speechModelCacheDirectory(for: .multilingualUltra),
+                   equals: SpeechModelPackage.current.cacheDirectory,
+                   "cache reset must point at the current model, never at the previous one")
 
-        let localParakeetUltraCache = speechModelCacheDirectory(for: .multilingualUltra)
-        if fm.fileExists(atPath: localParakeetUltraCache.path) {
-            try ModelIntegrity.verifyParakeetUltraModel(at: localParakeetUltraCache)
+        try testSpeechModelUpdate()
+    }
+
+    /// Обновление модели без простоя: какую модель грузить, когда переходить
+    /// на скачанную и как часто повторять неудавшуюся загрузку. Всё это —
+    /// чистые решения; сама загрузка и CoreML здесь не трогаются.
+    private static func testSpeechModelUpdate() throws {
+        try expect(speechModelLoadPlan(currentIsIntact: true, previousIsIntact: true),
+                   equals: .loadCurrent,
+                   "the current model always wins when it is on disk")
+        try expect(speechModelLoadPlan(currentIsIntact: true, previousIsIntact: false),
+                   equals: .loadCurrent,
+                   "the current model does not need the previous one")
+        try expect(speechModelLoadPlan(currentIsIntact: false, previousIsIntact: true),
+                   equals: .loadPrevious,
+                   "without the current model dictation must come up on the previous one")
+        try expect(speechModelLoadPlan(currentIsIntact: false, previousIsIntact: false),
+                   equals: .downloadCurrent,
+                   "with no usable model the service downloads and waits, as on first install")
+
+        func due(ready: Bool = true, occupied: Bool = false, audio: Bool = false,
+                 quiet: TimeInterval = SPEECH_MODEL_SWITCH_QUIET_SECONDS) -> Bool {
+            SpeechModelUpdater.switchIsDue(updateIsReady: ready,
+                                           serviceIsOccupied: occupied,
+                                           audioInputIsOpen: audio,
+                                           secondsSinceLastDictation: quiet)
         }
+        try expect(due(), equals: true,
+                   "a downloaded model must be picked up once dictation has been quiet long enough")
+        try expect(due(ready: false), equals: false,
+                   "nothing to switch to while the download is unfinished")
+        try expect(due(occupied: true), equals: false,
+                   "never restart the service under a recording or a transcription")
+        try expect(due(audio: true), equals: false,
+                   "an open audio input means a dictation has just ended")
+        try expect(due(quiet: SPEECH_MODEL_SWITCH_QUIET_SECONDS - 1), equals: false,
+                   "a pause between two phrases is not idleness")
+
+        try expect(SpeechModelUpdater.retryDelay(afterFailedAttempt: 1), equals: 300,
+                   "the first retry comes in five minutes")
+        try expect(SpeechModelUpdater.retryDelay(afterFailedAttempt: 2), equals: 900,
+                   "the second retry comes in fifteen minutes")
+        try expect(SpeechModelUpdater.retryDelay(afterFailedAttempt: 3), equals: 3600,
+                   "later retries come hourly")
+        try expect(SpeechModelUpdater.retryDelay(afterFailedAttempt: 40), equals: 3600,
+                   "retries never stop and never get rarer than hourly")
+        // Скачалось и не сошлось с манифестом — это не сеть: каждая попытка
+        // стоит 630 МБ и кончится тем же, поэтому она одна в сутки.
+        try expect(
+            SpeechModelUpdater.retryDelay(
+                afterFailedAttempt: 1,
+                failure: SpeechModelUpdateError.downloadFailedVerification("probe")),
+            equals: 86_400,
+            "a download that fails verification must not be repeated every few minutes")
+
+        // Состояние доезжает до окна через файл службы: поля по отдельности
+        // обязаны собираться обратно в то же значение.
+        var state = AgentRuntimeState(status: "ready", detail: "", updatedAt: 0, pid: 1,
+                                      isReady: true, isRecording: false, isTranscribing: false,
+                                      speechModelReady: true, missingPermissions: [],
+                                      hotkeyName: "", triggerMode: "")
+        try expect(state.speechModelUpdate, equals: nil,
+                   "a service on the current model reports no model update")
+        state.previousSpeechModelName = "Parakeet TDT v3"
+        state.speechModelUpdatePhase = SpeechModelUpdateStatus.Phase.downloading.rawValue
+        state.speechModelUpdateFraction = 0.34
+        let decoded = try JSONDecoder().decode(AgentRuntimeState.self,
+                                               from: JSONEncoder().encode(state))
+        try expect(decoded.speechModelUpdate,
+                   equals: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                   phase: .downloading, fraction: 0.34),
+                   "the model update must survive the trip through the service state file")
+
+        // И до человека: подвал остаётся «Готово», но вторая строка говорит,
+        // что происходит с новой моделью, — в каждой фазе своё.
+        var subtitles: Set<String> = []
+        let phases: [SpeechModelUpdateStatus.Phase] = [.downloading, .waitingForIdle,
+                                                       .retrying, .failedToLoad]
+        for phase in phases {
+            let update = SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                 phase: phase, fraction: nil)
+            let kind = ServiceStatusKind.ready(latencyMilliseconds: 180, modelUpdate: update)
+            try expect(kind.identity, equals: "ready",
+                       "running on the previous model is still «ready», not a new state")
+            try expect(kind.isBusy, equals: false,
+                       "running on the previous model must not look like work in progress")
+            let shown = serviceStatusPresentation(kind, language: .russian)
+            try expect(shown.title,
+                       equals: serviceStatusPresentation(.ready(latencyMilliseconds: 180),
+                                                         language: .russian).title,
+                       "the title stays «ready» while the new model downloads")
+            subtitles.insert(shown.subtitle)
+        }
+        try expect(subtitles.count, equals: phases.count,
+                   "each phase of the model update must read differently")
+        try expect(
+            ServiceStatusKind.ready(
+                latencyMilliseconds: 180,
+                modelUpdate: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                     phase: .downloading, fraction: 0.34)
+            ).fingerprint
+            == ServiceStatusKind.ready(
+                latencyMilliseconds: 180,
+                modelUpdate: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                     phase: .downloading, fraction: 0.35)
+            ).fingerprint,
+            equals: false,
+            "download progress must repaint the window")
     }
 
     private static func testSpeechModelCachePathSafety() throws {

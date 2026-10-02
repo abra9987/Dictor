@@ -13,6 +13,11 @@ import FluidAudio
 // Печатает и сырой текст модели, и текст после правки: что из двух подвело,
 // по одному результату не понять.
 //
+// `--as-after-update` перед файлами разыгрывает первый запуск после
+// обновления приложения: текущей модели «нет на диске», и служба обязана
+// подняться на модели прошлой версии. Настоящие файлы моделей при этом не
+// трогаются — текущая просто ищется в пустом временном каталоге.
+//
 // Только в отладочной сборке: выпускаемому приложению читать произвольные
 // файлы незачем.
 
@@ -50,8 +55,11 @@ func transcribeFileLikeDictation(at url: URL,
 /// файлы: её загрузка на порядок дольше самого распознавания, и замер времени
 /// по файлам иначе мерил бы её.
 func runTranscribeFileTool(arguments: [String]) async -> Int32 {
+    var arguments = arguments
+    let asAfterUpdate = arguments.contains("--as-after-update")
+    arguments.removeAll { $0 == "--as-after-update" }
     guard arguments.count >= 2 else {
-        fputs("usage: Dictor --transcribe-file <language|auto> <audio> [audio…]\n", stderr)
+        fputs("usage: Dictor --transcribe-file <language|auto> [--as-after-update] <audio> [audio…]\n", stderr)
         return EXIT_FAILURE
     }
     guard let language = DictationLanguage(rawValue: arguments[0].lowercased()) else {
@@ -62,7 +70,17 @@ func runTranscribeFileTool(arguments: [String]) async -> Int32 {
 
     let worker = TranscriptionWorker()
     do {
-        try await worker.load(profile: .productionDefault)
+        var current = SpeechModelPackage.current
+        if asAfterUpdate {
+            current = current.relocated(toModelsDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("dictor-no-current-model-\(UUID().uuidString)",
+                                        isDirectory: true))
+        }
+        let loaded = try await worker.load(profile: .productionDefault, current: current)
+        let name = loaded == .current
+            ? SpeechModelPackage.current.profile.shortName
+            : SpeechModelPackage.previous.profile.shortName
+        print("model: \(name)\(loaded == .current ? "" : " (previous — the current one is not usable)")")
         _ = try await worker.warmUp()
     } catch {
         fputs("speech model failed to load: \(error.localizedDescription)\n", stderr)

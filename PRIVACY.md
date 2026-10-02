@@ -26,6 +26,11 @@ the app stops going online on its own, with one exception: if the cached model
 files ever fail their integrity check, the model is re-downloaded from
 `huggingface.co` regardless of that switch.
 
+An app update can bring a new speech model. In that case dictation keeps
+working on the model already on the Mac while the new one is downloaded in the
+background from the same place; nothing else is requested, and the old model
+is never downloaded again.
+
 When an update is installed, the archive is downloaded from that same channel;
 its address is derived from the version number rather than taken from the
 manifest, and both its SHA-256 checksum and its code signature are verified

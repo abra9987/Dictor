@@ -939,7 +939,14 @@ func exportQuickPanelPreviews(to directory: URL,
     for (base, appearanceName) in
         [("light", NSAppearance.Name.aqua),
          ("dark", NSAppearance.Name.darkAqua)] {
-      for (variant, offered) in [("", String?.none), ("-update", .some("1.1.3"))] {
+      // Третий кадр — служба на модели прошлой версии: в шапке самая длинная
+      // из строк состояния, и проверять надо, что панель от неё не раздалась.
+      let retrying = SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                             phase: .retrying, fraction: nil)
+      let variants: [(String, String?, SpeechModelUpdateStatus?)] = [
+          ("", nil, nil), ("-update", "1.1.3", nil), ("-model-update", nil, retrying),
+      ]
+      for (variant, offered, modelUpdate) in variants {
         let suffix = base + variant
         let now = Date()
         let state = QuickPanelState(
@@ -979,7 +986,7 @@ func exportQuickPanelPreviews(to directory: URL,
             // у того нет бандла, и версия выйдет 0.0.0.
             installedVersion: currentBundleVersion(),
             isCheckingForUpdates: false,
-            serviceStatus: .ready(latencyMilliseconds: 180)
+            serviceStatus: .ready(latencyMilliseconds: 180, modelUpdate: modelUpdate)
         )
         let panel = DictorQuickPanel(state: state)
         panel.appearance = NSAppearance(named: appearanceName)

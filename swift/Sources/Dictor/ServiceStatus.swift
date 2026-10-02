@@ -19,7 +19,13 @@ import AppKit
 enum ServiceStatusKind: Equatable {
     /// 1 · Готово. Единственное состояние без движения — потому что ничего и
     /// не происходит, и это хорошая новость.
-    case ready(latencyMilliseconds: Int?)
+    ///
+    /// `modelUpdate` — служба работает на модели прошлой версии, а текущая
+    /// скачивается в фоне. Это не отдельное состояние, а то же «Готово»:
+    /// диктовка работает, от человека ничего не нужно, и маркер остаётся
+    /// зелёным. Меняется только вторая строка — она обязана сказать правду о
+    /// том, какая модель распознаёт.
+    case ready(latencyMilliseconds: Int?, modelUpdate: SpeechModelUpdateStatus? = nil)
     /// Пауза: служба жива, но хоткей нарочно не слушается — тумблер в панели
     /// меню-бара. Не из макета 8 (десятое состояние): раньше пауза
     /// существовала только в памяти службы, и шапка панели показывала
@@ -85,8 +91,8 @@ enum ServiceStatusKind: Equatable {
     /// состоянию службы, а оно к этому моменту уже не меняется.
     var fingerprint: String {
         switch self {
-        case .ready(let latency):
-            return "ready:\(latency.map(String.init) ?? "-")"
+        case .ready(let latency, let modelUpdate):
+            return "ready:\(latency.map(String.init) ?? "-"):\(modelUpdate?.fingerprint ?? "-")"
         case .verifying(let done, let total):
             return "verifying:\(done)/\(total)"
         case .downloading(let fraction, let files, let totalFiles):
@@ -192,7 +198,28 @@ func serviceStatusPresentation(_ kind: ServiceStatusKind,
     func t(_ ru: String, _ en: String) -> String { localizedText(ru, en, language: language) }
 
     switch kind {
-    case .ready(let latency):
+    case .ready(_, let modelUpdate?):
+        // Работает прежняя модель. Отклик здесь не показываем: строка одна, и
+        // сказать, что происходит с новой моделью, важнее числа.
+        let detail: String
+        switch modelUpdate.phase {
+        case .downloading:
+            detail = modelUpdate.fraction.map {
+                t("новая модель скачивается · \(Int(($0 * 100).rounded()))\u{00A0}%",
+                  "new model downloading · \(Int(($0 * 100).rounded()))%")
+            } ?? t("новая модель скачивается", "new model downloading")
+        case .waitingForIdle:
+            detail = t("новая модель включится в паузе", "new model switches in when idle")
+        case .retrying:
+            detail = t("новая модель не скачалась, повторю позже",
+                       "new model didn’t download, will retry")
+        case .failedToLoad:
+            detail = t("новая модель не запустилась, работает прежняя",
+                       "new model didn’t start, the previous one works")
+        }
+        return .init(title: t("Готово к диктовке", "Ready to dictate"), subtitle: detail)
+
+    case .ready(let latency, nil):
         // Вторая строка называет модель и — если есть, что назвать — реальную
         // медиану отклика. Пока диктовок не было, числа нет и его не выдумываем.
         // Неразрывный пробел между числом и единицей: в подвале сайдбара
@@ -455,6 +482,22 @@ func exportServiceStatusPreviews(to directory: URL) throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let kinds: [(String, ServiceStatusKind)] = [
         ("1-ready", .ready(latencyMilliseconds: 180)),
+        ("1a-ready-model-downloading",
+         .ready(latencyMilliseconds: 180,
+                modelUpdate: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                     phase: .downloading, fraction: 0.34))),
+        ("1b-ready-model-waiting",
+         .ready(latencyMilliseconds: 180,
+                modelUpdate: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                     phase: .waitingForIdle, fraction: nil))),
+        ("1c-ready-model-retrying",
+         .ready(latencyMilliseconds: 180,
+                modelUpdate: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                     phase: .retrying, fraction: nil))),
+        ("1d-ready-model-failed",
+         .ready(latencyMilliseconds: 180,
+                modelUpdate: SpeechModelUpdateStatus(previousModelName: "Parakeet TDT v3",
+                                                     phase: .failedToLoad, fraction: nil))),
         ("2-starting", .starting),
         ("3-verifying", .verifying(done: 17, total: 21)),
         ("4-downloading", .downloading(fraction: 0.69, files: 12, totalFiles: 21)),
