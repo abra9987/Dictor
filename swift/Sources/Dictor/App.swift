@@ -563,12 +563,20 @@ func exportRecordingHUDAnimationFrames(to directory: URL,
     let framesPerSecond = 120.0
     let emptyLead = 0.35
     let recordingDuration = 6.20
-    let transcribingDuration = 2.40
+    let transcribingDuration = 1.20
+    // Диктовка кончается не распознаванием, а галочкой «Вставлено · N слов».
+    // Раньше экспорт обрывался на «Распознаю…»: анимация на витрине показывала
+    // капсулу, которая подумала и исчезла, — то есть программу, которая
+    // ничего не вставила. Держим чуть дольше настоящего: здесь это читают, а
+    // не замечают краем глаза.
+    let insertedDuration = max(SD.Anim.insertedHoldSeconds, 1.20)
+    let insertedWords = 12
     let emptyTail = 0.50
     let totalDuration = emptyLead
         + RECORDING_HUD_ANIMATE_IN_SECONDS
         + recordingDuration
         + transcribingDuration
+        + insertedDuration
         + RECORDING_HUD_ANIMATE_OUT_SECONDS
         + emptyTail
     let frameCount = Int((totalDuration * framesPerSecond).rounded())
@@ -581,6 +589,7 @@ func exportRecordingHUDAnimationFrames(to directory: URL,
     view.transcribingColor = settings.recordingHUDTranscribingColor.nsColor
     view.backgroundStyle = .dark
     view.showsCapsuleStroke = false
+    view.insertedWordCount = insertedWords
     view.mode = .recording
 
     var phase: CGFloat = 0
@@ -590,7 +599,8 @@ func exportRecordingHUDAnimationFrames(to directory: URL,
             let revealStart = emptyLead
             let recordingStart = revealStart + RECORDING_HUD_ANIMATE_IN_SECONDS
             let transcribingStart = recordingStart + recordingDuration
-            let hideStart = transcribingStart + transcribingDuration
+            let insertedStart = transcribingStart + transcribingDuration
+            let hideStart = insertedStart + insertedDuration
             let tailStart = hideStart + RECORDING_HUD_ANIMATE_OUT_SECONDS
 
             let reveal: CGFloat
@@ -616,21 +626,26 @@ func exportRecordingHUDAnimationFrames(to directory: URL,
                 level = Float(min(0.94, 0.10 + (0.78 * syllables * phrasing * detail)))
                 mode = .recording
                 transcribingElapsed = nil
-            } else if time < hideStart {
+            } else if time < insertedStart {
                 reveal = 1
                 level = 0
                 mode = .transcribing
                 transcribingElapsed = CGFloat(time - transcribingStart)
+            } else if time < hideStart {
+                reveal = 1
+                level = 0
+                mode = .inserted
+                transcribingElapsed = nil
             } else if time < tailStart {
                 reveal = 1 - CGFloat((time - hideStart) / RECORDING_HUD_ANIMATE_OUT_SECONDS)
                 level = 0
-                mode = .transcribing
-                transcribingElapsed = CGFloat(time - transcribingStart)
+                mode = .inserted
+                transcribingElapsed = nil
             } else {
                 reveal = 0
                 level = 0
-                mode = .transcribing
-                transcribingElapsed = CGFloat(time - transcribingStart)
+                mode = .inserted
+                transcribingElapsed = nil
             }
 
             phase += recordingHUDPhaseSpeed(mode: mode, level: level)
@@ -640,7 +655,7 @@ func exportRecordingHUDAnimationFrames(to directory: URL,
             // Таймер записи идёт вместе с кадрами. Без этого он стоял на
             // 0:00 всю анимацию: капсула показывала, что она умеет считать
             // время, и тут же доказывала обратное.
-            view.recordingElapsed = max(0, time - recordingStart)
+            view.recordingElapsed = min(recordingDuration, max(0, time - recordingStart))
             view.transcribingElapsedOverride = transcribingElapsed
             view.level = level
             view.phase = phase
