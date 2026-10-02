@@ -41,6 +41,13 @@ import UniformTypeIdentifiers
 if let status = DictorSelfTest.run(arguments: Array(CommandLine.arguments.dropFirst())) {
     exit(status)
 }
+if CommandLine.arguments.dropFirst().first == "--transcribe-file" {
+    let toolArguments = Array(CommandLine.arguments.dropFirst(2))
+    Task.detached {
+        exit(await runTranscribeFileTool(arguments: toolArguments))
+    }
+    dispatchMain()
+}
 #endif
 
 let app = NSApplication.shared
