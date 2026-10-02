@@ -90,29 +90,17 @@ enum TranscriptCorrector {
     static func apply(to text: String,
                       corrections: [TranscriptCorrection],
                       lexicon: RussianLexicon? = nil) -> (text: String, appliedCount: Int) {
-        // Предел шире пользовательского: сюда приходит и встроенный
-        // набор написаний, который в настройках не хранится.
-        let ordered = normalizedTranscriptCorrections(
-            corrections,
-            limit: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count
-                + LatinTermRestorations.count)
-        let active = ordered
-            .sorted { lhs, rhs in
-                if lhs.source.count != rhs.source.count { return lhs.source.count > rhs.source.count }
-                return lhs.source.localizedCaseInsensitiveCompare(rhs.source) == .orderedAscending
-            }
+        let compiled = CompiledRules.shared.rules(for: corrections)
+        let ordered = compiled.ordered
 
-        guard !text.isEmpty, !active.isEmpty else { return (text, 0) }
+        guard !text.isEmpty, !compiled.rules.isEmpty else { return (text, 0) }
 
         let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
         var matches: [Match] = []
 
-        for correction in active {
-            guard let pattern = pattern(for: correction),
-                  let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-            else { continue }
-
-            regex.enumerateMatches(in: text, range: fullRange) { match, _, _ in
+        for rule in compiled.rules {
+            let correction = rule.correction
+            rule.regex.enumerateMatches(in: text, range: fullRange) { match, _, _ in
                 guard let range = match?.range, range.location != NSNotFound else { return }
                 guard !matches.contains(where: { NSIntersectionRange($0.range, range).length > 0 }) else { return }
                 guard let found = Range(range, in: text) else { return }
@@ -147,7 +135,56 @@ enum TranscriptCorrector {
         return (rewritten as String, matches.count)
     }
 
-    private static func pattern(for correction: TranscriptCorrection) -> String? {
+    /// Скомпилированные правила для последнего набора записей.
+    ///
+    /// Раньше каждая диктовка заново нормализовала словарь, сортировала его и
+    /// компилировала по регулярному выражению на запись — 315 штук, около
+    /// 150 мс в отладочной сборке, — хотя словарь между диктовками почти
+    /// никогда не меняется. Это время человек ждал после каждого отпускания
+    /// клавиши. Набор хранится один: сравнить три сотни записей — микросекунды,
+    /// а второго набора в работающем приложении нет.
+    private final class CompiledRules: @unchecked Sendable {
+        struct Rule {
+            let regex: NSRegularExpression
+            let correction: TranscriptCorrection
+        }
+
+        static let shared = CompiledRules()
+
+        private let lock = NSLock()
+        private var source: [TranscriptCorrection]?
+        private var ordered: [TranscriptCorrection] = []
+        private var rules: [Rule] = []
+
+        func rules(for corrections: [TranscriptCorrection]) -> (ordered: [TranscriptCorrection], rules: [Rule]) {
+            lock.lock()
+            defer { lock.unlock() }
+            if source == corrections { return (ordered, rules) }
+
+            // Предел шире пользовательского: сюда приходит и встроенный
+            // набор написаний, который в настройках не хранится.
+            let normalized = normalizedTranscriptCorrections(
+                corrections,
+                limit: MAX_TRANSCRIPT_CORRECTIONS + BuiltInSpellings.count
+                    + LatinTermRestorations.count)
+            let active = normalized.sorted { lhs, rhs in
+                if lhs.source.count != rhs.source.count { return lhs.source.count > rhs.source.count }
+                return lhs.source.localizedCaseInsensitiveCompare(rhs.source) == .orderedAscending
+            }
+            source = corrections
+            ordered = normalized
+            rules = active.compactMap { correction in
+                guard let pattern = TranscriptCorrector.pattern(for: correction),
+                      let regex = try? NSRegularExpression(pattern: pattern,
+                                                           options: [.caseInsensitive])
+                else { return nil }
+                return Rule(regex: regex, correction: correction)
+            }
+            return (ordered, rules)
+        }
+    }
+
+    fileprivate static func pattern(for correction: TranscriptCorrection) -> String? {
         var parts = correction.source
             .split(whereSeparator: { $0.isWhitespace })
             .map { NSRegularExpression.escapedPattern(for: String($0)) }
