@@ -53,8 +53,11 @@ Eight links, `App.swift` `handleRelease` being the spine:
    model is involved, and the rules stay silent whenever they are not sure: an
    unreadable field, a symbol instead of a word, a first word the system
    dictionary does not know in lowercase (a name) or one whose spelling the
-   dictionary set (Python) — the text goes in as dictated. Terminals are never
-   read. The two rules must not feed each other: a message that lost its
+   dictionary set (Python) — the text goes in as dictated. Terminals are not
+   read, except Apple's Terminal, whose caret sits in the Claude Code input
+   line; a shell prompt ends in a sign and the rules leave it alone. Claude for
+   Mac (Electron) names its focused field only after Dictor sets
+   `AXManualAccessibility` on it, once per process, at the hotkey press. The two rules must not feed each other: a message that lost its
    period ends in a word, so in chat apps only a comma or a dash counts as
    continuation, and the period goes only when the dictation is the whole
    message.

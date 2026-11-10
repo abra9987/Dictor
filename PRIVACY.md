@@ -90,9 +90,16 @@ into, and at which app that field belongs to. It does this through the
 Accessibility permission the app already needs for inserting text. Those
 characters are used for one decision and dropped: they are not stored, not
 written to the log, and not sent anywhere. Password fields are not read, and
-neither are the common terminal apps — what stands before the cursor there is
-a prompt, not a sentence. Switch smart insertion off in Settings → Text and the
-app stops reading the field altogether.
+neither are most terminal apps — what stands before the cursor there is a
+prompt, not a sentence. The exception is Apple's Terminal, where the cursor
+sits in the input line of the program you type into. Switch smart insertion
+off in Settings → Text and the app stops reading the field altogether.
+
+Claude for Mac, like other apps built on Electron, does not describe its text
+fields to the system unless asked. When you dictate into it, the app asks it
+once, through the standard `AXManualAccessibility` attribute, so the field the
+text goes into becomes visible. This changes nothing in what is read: the same
+80 characters, dropped after one decision.
 
 ## macOS permissions
 
