@@ -3307,6 +3307,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             return
         }
         let initialInsertionContext = insertionTargetQueryContext()
+        if let initialInsertionContext {
+            ElectronAccessibility.enableIfNeeded(pid: initialInsertionContext.applicationPID,
+                                                 bundleIdentifier: initialInsertionContext.bundleIdentifier)
+        }
         cancelAudioIdleStop()
         var recoveryJournal: PendingDictationJournal?
         do {

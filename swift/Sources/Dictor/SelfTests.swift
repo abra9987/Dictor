@@ -594,8 +594,31 @@ enum DictorSelfTest {
                    "abandoning a hung read must not take as long as the read")
 
         // Терминал — не поле ввода: перед курсором там приглашение или рамка.
-        try expect(SmartInsertion.readsCaretText(in: "com.apple.Terminal"), equals: false,
-                   "caret text must not be read in a terminal")
+        // Исключение — Терминал macOS: его курсор стоит в поле Claude Code.
+        try expect(SmartInsertion.readsCaretText(in: "com.googlecode.iterm2"), equals: false,
+                   "caret text must not be read in an unverified terminal")
+        try expect(SmartInsertion.readsCaretText(in: "com.apple.Terminal"), equals: true,
+                   "caret text is read in Terminal, where the caret sits in the Claude Code prompt")
+        // Хвост, который Терминал отдал пробой 9 ноября: рамка над полем и «❯ ».
+        let claudeCodeEmpty = "────────────────\n❯ "
+        try expect(SmartInsertion.caretPosition(textBeforeCaret: claudeCodeEmpty), equals: .lineStart,
+                   "an empty Claude Code prompt is the start of a message")
+        try expect(SmartInsertion.caretPosition(textBeforeCaret: claudeCodeEmpty + "привет как дела"),
+                   equals: .continuation(needsSpace: true, afterMark: false),
+                   "words typed after the Claude Code prompt are a phrase to continue")
+        try expect(SmartInsertion.caretPosition(textBeforeCaret: claudeCodeEmpty + "Сделай так. "),
+                   equals: .sentenceStart(needsSpace: false),
+                   "after a full stop in the Claude Code prompt a new sentence starts")
+        try expect(SmartInsertion.caretPosition(textBeforeCaret: "raul@Mac Dictor % "), equals: .unknown,
+                   "a zsh prompt ends with a sign, and the rule leaves the text alone")
+        try expect(SmartInsertion.caretPosition(textBeforeCaret: "raul@host:~$ "), equals: .unknown,
+                   "a bash prompt ends with a sign, and the rule leaves the text alone")
+        // Claude для Mac — Electron: без флага он не называет поле с фокусом.
+        try expect(ElectronAccessibility.needsManualAccessibility(
+                       bundleIdentifier: "com.anthropic.claudefordesktop"), equals: true,
+                   "Claude for Mac gets the accessibility tree switched on")
+        try expect(ElectronAccessibility.needsManualAccessibility(bundleIdentifier: editor), equals: false,
+                   "other apps are not touched without the owner's consent")
         try expect(SmartInsertion.readsCaretText(in: editor), equals: true,
                    "caret text is read in ordinary apps")
         try expect(SmartInsertion.isChatApp(bundleIdentifier: editor), equals: false,
