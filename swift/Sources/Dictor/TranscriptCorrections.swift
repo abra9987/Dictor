@@ -20,41 +20,52 @@ import UniformTypeIdentifiers
 // used exactly as the user typed it.
 
 enum SpeechModelTextRepair {
-    /// Parakeet TDT v3 and Ultra, which shares its vocabulary, emit `<unk>`
-    /// for Cyrillic "ё" in Russian text.
-    /// For Russian and auto-detect (the app's default audience) the
-    /// token is replaced with "ё"/"Ё". For every other language the
-    /// token is genuinely unknown and is removed entirely so a stray
-    /// Cyrillic character doesn't appear in English/French/etc. text.
+    /// Parakeet TDT v3 и Ultra (словарь у них общий) пишут `<unk>` там, где
+    /// не нашлось токена. В русском это обычно «ё» внутри слова («мо<unk>»),
+    /// но бывает и знак — кавычки, на месте которых выходило «ёподелиться».
+    ///
+    /// Для русского и автоопределения: `<unk>`, прижатый к букве, становится
+    /// «е». Не «ё»: модель и так пишет «е» во всех остальных словах, и одна
+    /// «ё» среди них выглядела ошибкой, а владелец «ё» не пользуется.
+    /// Отдельно стоящий `<unk>` — не буква, он убирается. Для остальных
+    /// языков токен убирается всегда: кириллице в английском тексте неоткуда
+    /// взяться.
     static func apply(to text: String,
                       language: DictationLanguage = .auto) -> String {
         guard text.localizedCaseInsensitiveContains("<unk>") else { return text }
 
-        let replaceWithYo: Bool
+        let repairsLetter: Bool
         switch language {
         case .auto, .russian:
-            replaceWithYo = true
+            repairsLetter = true
         default:
-            replaceWithYo = false
+            repairsLetter = false
         }
 
+        let token = "<unk>"
         var result = ""
         result.reserveCapacity(text.count)
         var index = text.startIndex
+        var removedAny = false
 
         while index < text.endIndex {
             if matchesUnknownToken(in: text, at: index) {
-                if replaceWithYo {
-                    result.append(shouldCapitalizeYo(before: result) ? "Ё" : "ё")
+                let after = text.index(index, offsetBy: token.count)
+                let touchesLetter = (result.last?.isLetter ?? false)
+                    || nextCharacterIsLetter(in: text, from: after)
+                if repairsLetter, touchesLetter {
+                    result.append(shouldCapitalize(before: result) ? "Е" : "е")
+                } else {
+                    removedAny = true
                 }
-                index = text.index(index, offsetBy: 5)
+                index = after
             } else {
                 result.append(text[index])
                 index = text.index(after: index)
             }
         }
 
-        if !replaceWithYo {
+        if removedAny {
             result = result
                 .replacingOccurrences(of: #"\s+([.,!?;:])"#, with: "$1", options: .regularExpression)
                 .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
@@ -71,7 +82,15 @@ enum SpeechModelTextRepair {
         return text[index..<end].lowercased() == token
     }
 
-    private static func shouldCapitalizeYo(before prefix: String) -> Bool {
+    /// Следующий `<unk>` вплотную тоже считается буквой: «<unk><unk>лка».
+    private static func nextCharacterIsLetter(in text: String, from index: String.Index) -> Bool {
+        guard index < text.endIndex else { return false }
+        return text[index].isLetter || matchesUnknownToken(in: text, at: index)
+    }
+
+    /// Заглавная — только в начале слова, которое начинает предложение.
+    private static func shouldCapitalize(before prefix: String) -> Bool {
+        if prefix.last?.isLetter == true { return false }
         guard let last = prefix.last(where: { !$0.isWhitespace }) else { return true }
         return ".!?".contains(last)
     }

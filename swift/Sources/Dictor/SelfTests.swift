@@ -4481,8 +4481,8 @@ enum DictorSelfTest {
         )
         try expect(
             repairedYo.text,
-            equals: "Ёлка, моё и её. Потом ёжик.",
-            "dictation text processing should repair Parakeet unknown tokens used for Cyrillic yo"
+            equals: "Елка, мое и ее. Потом ежик.",
+            "dictation text processing should repair Parakeet unknown tokens inside words to е"
         )
 
         let repairedYoRussian = processedDictationText(
@@ -4493,8 +4493,8 @@ enum DictorSelfTest {
         )
         try expect(
             repairedYoRussian.text,
-            equals: "Ёлка.",
-            "explicit Russian language should repair <unk> to ё"
+            equals: "Елка.",
+            "explicit Russian language should repair <unk> inside a word to е"
         )
 
         let removedUnkEnglish = processedDictationText(
@@ -4545,8 +4545,31 @@ enum DictorSelfTest {
         )
         try expect(
             autoYo,
-            equals: "Ёлка",
-            "auto-detect language should preserve the ё repair for the default audience"
+            equals: "Елка",
+            "auto-detect language should repair <unk> inside a word for the default audience"
+        )
+
+        // Отдельно стоящий <unk> — знак (кавычки, тире), а не буква: «ё» на
+        // его месте давала «ёподелиться» и «словаре ё».
+        try expect(
+            SpeechModelTextRepair.apply(to: "Нажми <unk> Поделиться <unk> и всё.", language: .russian),
+            equals: "Нажми Поделиться и всё.",
+            "standalone <unk> in Russian should be removed, not turned into a letter"
+        )
+        try expect(
+            SpeechModelTextRepair.apply(to: "Я ей сказал: <unk>, ладно.", language: .auto),
+            equals: "Я ей сказал:, ладно.",
+            "removing a standalone <unk> should not leave a space before punctuation"
+        )
+        try expect(
+            SpeechModelTextRepair.apply(to: "Это мо<unk>.", language: .auto),
+            equals: "Это мое.",
+            "<unk> at the end of a word should become a lowercase е"
+        )
+        try expect(
+            SpeechModelTextRepair.apply(to: "Привет. <unk>жик пришёл.", language: .russian),
+            equals: "Привет. Ежик пришёл.",
+            "<unk> starting a sentence-initial word should become a capital Е"
         )
 
         let markerText = systemAudioMuteMarkerText(pid: 12345,
