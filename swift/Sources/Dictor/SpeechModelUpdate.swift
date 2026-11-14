@@ -124,3 +124,46 @@ enum SpeechModelUpdater {
             && secondsSinceLastDictation >= SPEECH_MODEL_SWITCH_QUIET_SECONDS
     }
 }
+
+func speechModelStartupStatusTitle(_ progress: DownloadProgress) -> String {
+    switch progress.phase {
+    case .listing:
+        return "Checking speech model files…"
+    case .downloading(let completedFiles, let totalFiles):
+        guard totalFiles > 0 else { return "Loading cached speech model…" }
+        let downloadFraction = min(max(progress.fractionCompleted / 0.5, 0), 1)
+        let percent = min(100, max(0, Int((downloadFraction * 100).rounded())))
+        return "Downloading speech model… \(percent)% (\(completedFiles)/\(totalFiles))"
+    case .compiling:
+        return "Preparing speech model…"
+    }
+}
+
+func speechModelStartupProgressValue(_ progress: DownloadProgress) -> Double? {
+    switch progress.phase {
+    case .downloading(_, let totalFiles):
+        guard totalFiles > 0 else { return nil }
+        let raw = min(max(progress.fractionCompleted / 0.5, 0), 1)
+        return (raw * 100).rounded() / 100.0   // round to 1%
+    case .listing, .compiling:
+        return nil
+    }
+}
+
+/// Thread-safe throttle that drops duplicate percent values
+/// before they hit @MainActor, preventing main-thread flooding.
+final class ProgressThrottler: @unchecked Sendable {
+    private var lastTitle: String = ""
+    private var lastFraction: Double? = nil
+    private let lock = NSLock()
+
+    /// Returns true when the progress actually changed and should be dispatched.
+    func shouldDispatch(_ title: String, _ fraction: Double?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard title != lastTitle || fraction != lastFraction else { return false }
+        lastTitle = title
+        lastFraction = fraction
+        return true
+    }
+}
