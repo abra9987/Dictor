@@ -230,7 +230,8 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `TranscriptionWorker.swift` | the model |
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
 | `SmartInsertion.swift` | what stands before the cursor, and the two rules that fit the text to it |
-| `TextInsertion.swift` | clipboard and keystroke insertion |
+| `TextInsertion.swift` | the insertion entry point, strategies and keystroke posting |
+| `ClipboardPaste.swift` | paste through the clipboard: the lazy promise, the restore after the read, the never-read failsafe |
 | `BrowserTyping.swift` | the one place insertion types instead of pasting: a text field inside a Chrome web page, where ⌘V is lost every other time |
 | `Settings.swift`, `CoreTypes.swift` | stored settings and shared types |
 | `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |
