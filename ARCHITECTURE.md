@@ -230,6 +230,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `TranscriptionWorker.swift` | the model |
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
 | `SmartInsertion.swift` | what stands before the cursor, and the two rules that fit the text to it |
+| `InsertionTarget.swift` | where the text will land: the focused field and caret through accessibility, and the capsule's target stabiliser |
 | `TextInsertion.swift` | the insertion entry point, strategies and keystroke posting |
 | `ClipboardPaste.swift` | paste through the clipboard: the lazy promise, the restore after the read, the never-read failsafe |
 | `BrowserTyping.swift` | the one place insertion types instead of pasting: a text field inside a Chrome web page, where ⌘V is lost every other time |
