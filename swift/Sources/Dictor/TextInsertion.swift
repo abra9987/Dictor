@@ -1,16 +1,4 @@
 import AppKit
-import AVFoundation
-import AudioToolbox
-import Foundation
-import CoreGraphics
-import CryptoKit
-import Darwin
-import ApplicationServices
-import FluidAudio
-import IOKit
-import QuartzCore
-import ServiceManagement
-import UniformTypeIdentifiers
 
 // MARK: - Text insertion
 //
