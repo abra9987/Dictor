@@ -101,6 +101,8 @@ enum DictorSelfTest {
             return runSuite("settings-reachable", testSettingsReachability)
         case "smart-insertion":
             return runSuite("smart-insertion", testSmartInsertion)
+        case "browser-typing":
+            return runSuite("browser-typing", testBrowserTyping)
         case "all":
             return runSuite("all", testAll)
         default:
@@ -158,6 +160,7 @@ enum DictorSelfTest {
         try testDockActivationPolicy()
         try testSettingsReachability()
         try testSmartInsertion()
+        try testBrowserTyping()
     }
 
     /// Достижимость настроек — по реестру SETTINGS_CATALOG. Класс дефекта
@@ -6332,7 +6335,7 @@ enum DictorSelfTest {
         }
     }
 
-    private static func expect<T: Equatable>(
+    static func expect<T: Equatable>(
         _ actual: T,
         equals expected: T,
         _ message: String

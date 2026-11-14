@@ -84,11 +84,14 @@ final class ProgressThrottler: @unchecked Sendable {
 enum TextInsertionStrategy: String {
     case clipboardPaste
     case directUnicode
+    /// Печать в поле веб-страницы Chrome, где ⌘V теряется. См. BrowserTyping.
+    case browserTyping
 
     var displayName: String {
         switch self {
         case .clipboardPaste: return "Clipboard paste"
         case .directUnicode: return "Direct Unicode typing"
+        case .browserTyping: return "Browser field typing"
         }
     }
 }
@@ -736,6 +739,8 @@ func textInsertionStrategyChain(primary: TextInsertionStrategy) -> [TextInsertio
         return [.clipboardPaste, .directUnicode]
     case .directUnicode:
         return [.directUnicode]
+    case .browserTyping:
+        return [.browserTyping, .clipboardPaste]
     }
 }
 
@@ -833,8 +838,22 @@ enum TextInserter {
     /// clipboardPaste — directUnicode печатает текст сам, ждать там нечего.
     static private(set) var lastSuccessfulStrategy: TextInsertionStrategy?
 
+    /// Единственный открытый вход. Способ выбирается здесь, а не у
+    /// вызывающего: так его не обойдёт ни диктовка, ни быстрая панель, ни
+    /// будущая третья точка вставки.
     @discardableResult
-    static func insert(_ text: String, strategy: TextInsertionStrategy = defaultStrategy) -> Bool {
+    static func insert(_ text: String) -> Bool {
+        let choice = BrowserTyping.choiceForFrontmostApplication()
+        // Журнал — только там, где выбор вообще возможен: так видно, каким
+        // путём шла диктовка в Chrome, а остальные программы не шумят.
+        if BrowserTyping.bundleIdentifiers.contains(
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "") {
+            log("text insertion strategy: \(choice.strategy.displayName) (\(choice.reason))")
+        }
+        return insert(text, strategy: choice.strategy)
+    }
+
+    private static func insert(_ text: String, strategy: TextInsertionStrategy) -> Bool {
         lastSuccessfulStrategy = nil
         for candidate in textInsertionStrategyChain(primary: strategy) {
             if insert(text, using: candidate) {
@@ -855,6 +874,8 @@ enum TextInserter {
             return ClipboardPasteInserter.insert(text)
         case .directUnicode:
             return DirectUnicodeInserter.insert(text)
+        case .browserTyping:
+            return BrowserTyping.type(text)
         }
     }
 }

@@ -68,6 +68,11 @@ Eight links, `App.swift` `handleRelease` being the spine:
    clipboard for a manual ⌘V, Enter-after-insert is withheld, and the person
    is told — a silent rollback would leave the optimistic “Inserted” HUD as
    an unfixable lie.
+   The exception is a text field inside a Chrome web page: there Chrome drops
+   Dictor's ⌘V intermittently — the page gets an empty clipboard although Chrome
+   did pull the text — so the text is typed as Unicode key events instead, and
+   the clipboard is not touched (`BrowserTyping`). It is a workaround: the
+   trigger inside Chrome was not found.
 7. **`Statistics` and history** — both written before insertion and after
    smart insertion, so what the person sees in History is exactly what was
    pasted. The leading space and the configured suffix are glue between
@@ -226,6 +231,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
 | `SmartInsertion.swift` | what stands before the cursor, and the two rules that fit the text to it |
 | `TextInsertion.swift` | clipboard and keystroke insertion |
+| `BrowserTyping.swift` | the one place insertion types instead of pasting: a text field inside a Chrome web page, where ⌘V is lost every other time |
 | `Settings.swift`, `CoreTypes.swift` | stored settings and shared types |
 | `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |
 | `Statistics.swift` | what the Statistics section shows |
