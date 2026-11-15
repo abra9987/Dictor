@@ -89,6 +89,44 @@ enum BrowserTyping {
                       focus: readFocus(pid: app.processIdentifier))
     }
 
+    // MARK: Пробуждение дерева доступности
+    //
+    // После запуска Chrome не строит дерево универсального доступа и на
+    // вопрос «что в фокусе» отвечает «ничего» (kAXErrorNoValue, −25212).
+    // Тогда выбор выше видит «фокус неизвестен» и откатывается на ⌘V — с тем
+    // самым сбоем. Так прошли три диктовки 15 ноября 2026 после перезапуска
+    // Chrome. Chrome включает базовый режим, когда ассистивная программа
+    // читает роль самого приложения: так Apple советует делать Voice Control,
+    // и это обрабатывает ChromeApplication.accessibilityRole. Замер на чистом
+    // Chrome: через 0,3 с страница появилась в дереве, фокус — поле поиска.
+    // Флаг AXEnhancedUserInterface тоже будит Chrome, но включает полный
+    // режим экранного диктора — тяжелее и с задержкой в 2 с; не нужен.
+
+    /// Процессы, о пробуждении которых уже написано в журнал.
+    private final class WokenProcesses: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pids: Set<pid_t> = []
+        func insert(_ pid: pid_t) -> Bool { lock.withLock { pids.insert(pid).inserted } }
+    }
+    private static let woken = WokenProcesses()
+
+    /// Вызывается при нажатии клавиши диктовки — пока идёт запись, Chrome
+    /// успевает собрать дерево. Роль читается на каждом нажатии: Chrome
+    /// умеет сам выключать доступность после простоя, а повторное чтение
+    /// дешёвое. Не ждёт ответа: зависший браузер не задерживает запись.
+    static func wakeAccessibilityIfNeeded(pid: pid_t, bundleIdentifier: String) {
+        guard bundleIdentifiers.contains(bundleIdentifier) else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard AXIsProcessTrusted() else { return }
+            let application = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(application, 0.1)
+            let role = string(application, kAXRoleAttribute)
+            if woken.insert(pid) {
+                log("accessibility woken for \(bundleIdentifier) (pid \(pid)): role \(role ?? "none")")
+            }
+        }
+    }
+
     /// Шаг печати: кусок текста или перевод строки.
     enum Step: Equatable {
         case text(String)
@@ -225,6 +263,10 @@ extension DictorSelfTest {
                             .text("конец"), .lineBreak],
                    "every newline, CRLF included, becomes Shift+Return instead of Enter")
         try expect(BrowserTyping.steps(for: ""), equals: [], "nothing to type")
+
+        // Пробуждение — тот же список: чужие программы не трогаются.
+        try expect(BrowserTyping.bundleIdentifiers.contains(chrome), equals: true,
+                   "Chrome must be woken at the hotkey press, or its focus stays unknown")
 
         try expect(textInsertionStrategyChain(primary: .browserTyping),
                    equals: [.browserTyping, .clipboardPaste],

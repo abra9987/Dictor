@@ -3310,6 +3310,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         if let initialInsertionContext {
             ElectronAccessibility.enableIfNeeded(pid: initialInsertionContext.applicationPID,
                                                  bundleIdentifier: initialInsertionContext.bundleIdentifier)
+            BrowserTyping.wakeAccessibilityIfNeeded(pid: initialInsertionContext.applicationPID,
+                                                    bundleIdentifier: initialInsertionContext.bundleIdentifier)
         }
         cancelAudioIdleStop()
         var recoveryJournal: PendingDictationJournal?
