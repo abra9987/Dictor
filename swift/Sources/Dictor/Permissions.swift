@@ -122,6 +122,8 @@ enum StartupFailureStage {
 struct StartupFailure {
     let stage: StartupFailureStage
     let detail: String
+    /// Звук не запустился, потому что в системе нет ни одного входа.
+    var isMissingAudioInput: Bool = false
 
     var statusTitle: String { stage.statusTitle }
     var retryTitle: String { stage.retryTitle }

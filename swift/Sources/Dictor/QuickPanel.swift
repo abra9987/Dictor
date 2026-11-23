@@ -256,7 +256,8 @@ final class DictorQuickPanel: NSPanel {
         case .ready: marker.shape = .dot(SD.C.positive)
         // Пауза, как и «выключено», — намеренный покой: кольцо, без движения.
         case .off, .paused: marker.shape = .hollowRing
-        case .needsPermission, .versionMismatch: marker.shape = .hollowSquare
+        // «Нет микрофона» — тоже ожидание человека, а не поломка службы.
+        case .needsPermission, .versionMismatch, .noMicrophone: marker.shape = .hollowSquare
         case .failed: marker.shape = .filledSquare(SD.C.danger)
         default: marker.shape = .wave(slow: kind.waveIsSlow)
         }

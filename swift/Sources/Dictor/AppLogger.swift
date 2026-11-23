@@ -102,6 +102,11 @@ struct AgentRuntimeState: Codable {
     /// `SpeechModelUpdateStatus.Phase`.
     var speechModelUpdatePhase: String?
     var speechModelUpdateFraction: Double?
+    /// Известная причина сбоя при `status == "error"` — сейчас только
+    /// `AGENT_FAILURE_REASON_NO_MICROPHONE`. Отдельное поле, а не новый
+    /// статус: окно прошлой версии нового статуса не знает и показало бы
+    /// вечное «запускается».
+    var failureReason: String?
 
     /// То же, собранное в одно значение: окно и панель показывают его
     /// одинаково.

@@ -227,6 +227,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `MainWindow.swift`, `SettingsUI.swift`, `SDTheme.swift` | the design system — every control is drawn by hand to match the mockups in both themes |
 | `HotkeyListener.swift` | the event tap and chord handling |
 | `AudioCapture.swift`, `AudioInputDevices.swift` | recording, conversion, device selection |
+| `MissingMicrophone.swift` | no input device at all: the failure reason the window shows, no pointless retries, the device-list listener that restarts the service when a microphone appears |
 | `TranscriptionWorker.swift` | the model |
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
 | `SmartInsertion.swift` | what stands before the cursor, and the two rules that fit the text to it |

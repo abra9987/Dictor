@@ -46,6 +46,10 @@ enum ServiceStatusKind: Equatable {
     case needsPermission(name: String)
     /// 8 · Ошибка.
     case failed
+    /// Ошибка с известной причиной: в системе нет ни одного микрофона. Не
+    /// поломка службы, а отключённое устройство — и лечится не кнопкой
+    /// «Запустить», а подключением; служба подхватит микрофон сама.
+    case noMicrophone
     /// 9 · Выключена намеренно. Не поломка, поэтому ни кнопки, ни движения.
     case off
     /// Служба работает, но из прежней версии приложения. Так бывает, когда
@@ -59,7 +63,7 @@ enum ServiceStatusKind: Equatable {
     var isBusy: Bool {
         switch self {
         case .starting, .verifying, .downloading, .warmingUp, .updating: return true
-        case .ready, .paused, .needsPermission, .failed, .off, .versionMismatch: return false
+        case .ready, .paused, .needsPermission, .failed, .noMicrophone, .off, .versionMismatch: return false
         }
     }
 
@@ -81,6 +85,7 @@ enum ServiceStatusKind: Equatable {
         case .updating: return "updating"
         case .needsPermission: return "needsPermission"
         case .failed: return "failed"
+        case .noMicrophone: return "noMicrophone"
         case .off: return "off"
         case .versionMismatch: return "versionMismatch"
         }
@@ -102,7 +107,7 @@ enum ServiceStatusKind: Equatable {
             return "needsPermission:\(name)"
         case .versionMismatch(let running, let installed):
             return "versionMismatch:\(running)→\(installed)"
-        case .starting, .warmingUp, .updating, .failed, .off, .paused:
+        case .starting, .warmingUp, .updating, .failed, .noMicrophone, .off, .paused:
             return identity
         }
     }
@@ -274,6 +279,12 @@ func serviceStatusPresentation(_ kind: ServiceStatusKind,
                      subtitle: t("Диктовка сейчас не работает", "Dictation is not working now"),
                      primaryAction: t("Запустить", "Start"),
                      secondaryAction: t("Подробнее", "Details"),
+                     wantsAttention: true)
+
+    case .noMicrophone:
+        return .init(title: t("Нет микрофона", "No microphone"),
+                     subtitle: t("подключите — диктовка вернётся",
+                                 "connect one — dictation comes back"),
                      wantsAttention: true)
 
     case .paused:
@@ -505,6 +516,7 @@ func exportServiceStatusPreviews(to directory: URL) throws {
         ("6-updating", .updating),
         ("7-permission", .needsPermission(name: "Микрофон")),
         ("8-failed", .failed),
+        ("8a-no-microphone", .noMicrophone),
         ("9-off", .off),
         ("10-paused", .paused),
     ]

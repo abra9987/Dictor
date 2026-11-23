@@ -1328,9 +1328,13 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 "- Missing permissions: \(state.missingPermissions.isEmpty ? "none" : state.missingPermissions.joined(separator: ", "))",
                 "- Hotkey: \(state.hotkeyName), trigger: \(state.triggerMode)",
             ]
+            if let reason = state.failureReason {
+                lines.append("- Failure reason: \(reason)")
+            }
         } else {
             lines.append("- State file unavailable (service not running?)")
         }
+        lines.append(inputDevicesDiagnosticsLine(availableAudioInputDevices()))
         lines += [
             "",
             "Settings:",
@@ -2210,7 +2214,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         case "paused":
             return .paused
         case "error":
-            return .failed
+            return serviceStatusForErrorState(failureReason: state?.failureReason)
         default:
             if let verified = state?.verifiedModelFiles, let total = state?.totalModelFiles {
                 return .verifying(done: verified, total: total)
@@ -2240,7 +2244,8 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
         case .versionMismatch: marker.shape = .hollowSquare
         // Пауза, как и «выключено», — намеренный покой: кольцо, без движения.
         case .off, .paused: marker.shape = .hollowRing
-        case .needsPermission: marker.shape = .hollowSquare
+        // «Нет микрофона» — ожидание человека, как и доступ: пустой квадрат.
+        case .needsPermission, .noMicrophone: marker.shape = .hollowSquare
         case .failed: marker.shape = .filledSquare(SD.C.danger)
         default: marker.shape = .wave(slow: kind.waveIsSlow)
         }

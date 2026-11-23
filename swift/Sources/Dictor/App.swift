@@ -1063,6 +1063,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var pendingAudioRouteRefresh = false
     private var audioConfigurationChangeSuppressedUntil: TimeInterval?
     private var workspacePowerObservers: [NSObjectProtocol] = []
+    private var audioInputDeviceWatcher: AudioInputDeviceWatcher?
     private var hotkeyPausedForExternalCapture = false
     private var hotkeyCaptureFailsafeTimer: Timer?
     private var shouldResumeRuntimeAfterWake = false
@@ -1287,6 +1288,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             }
         }
         installWorkspacePowerObservers()
+        installAudioInputDeviceWatcher()
         installGlobalMouseMonitor()
         installHotkeyCaptureObservers()
 
@@ -1345,6 +1347,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         stopPermissionReadinessMonitor()
         stopSetupChecklistRefreshTimer()
         removeWorkspacePowerObservers()
+        audioInputDeviceWatcher?.stop()
+        audioInputDeviceWatcher = nil
         removeGlobalMouseMonitor()
         removeHotkeyCaptureObservers()
         correctionSyncTimer?.invalidate()
@@ -1424,6 +1428,31 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             return
         }
         log("HotkeyListener: resumed after shortcut capture (\(reason))")
+    }
+
+    /// Сбой «нет микрофона» лечится подключением, а не кнопкой: как только в
+    /// системе появился вход, служба запускается сама.
+    private func installAudioInputDeviceWatcher() {
+        audioInputDeviceWatcher?.stop()
+        let watcher = AudioInputDeviceWatcher { [weak self] in
+            Task { @MainActor in
+                self?.handleAudioInputDevicesChanged()
+            }
+        }
+        watcher.start()
+        audioInputDeviceWatcher = watcher
+    }
+
+    private func handleAudioInputDevicesChanged() {
+        let devices = availableAudioInputDevices()
+        let failureIsMissingInput = startupFailure?.isMissingAudioInput == true
+        guard shouldRestartAfterInputDevicesChanged(
+            failureIsMissingInput: failureIsMissingInput,
+            hasStartupTask: startupTask != nil || isRestartingAudioInput,
+            isTerminating: isTerminating,
+            inputDevices: devices) else { return }
+        log("audio input devices changed: \(devices.count) input(s) now available; restarting after the no-microphone failure")
+        startStartup(reason: "microphone connected")
     }
 
     private func installWorkspacePowerObservers() {
@@ -1872,8 +1901,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             stopAudioEngineImmediately()
         }
 
-        let detail = startupFailureDetail(stage: stage, error: error)
-        startupFailure = StartupFailure(stage: stage, detail: detail)
+        let isMissingInput = isMissingAudioInputFailure(stage: stage,
+                                                        inputDevices: availableAudioInputDevices())
+        let detail = isMissingInput
+            ? NO_MICROPHONE_FAILURE_DETAIL
+            : startupFailureDetail(stage: stage, error: error)
+        startupFailure = StartupFailure(stage: stage, detail: detail,
+                                        isMissingAudioInput: isMissingInput)
         log("startup failed (\(reason), \(stage)): \(startupFailureLogDetail(stage: stage, error: error))")
         setMenuBarState(.error)
         if !missingPermissions().isEmpty {
@@ -1906,6 +1940,14 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 lastError = error
                 stopAudioEngineImmediately()
                 log("audio startup attempt \(attempt)/\(totalAttempts) failed (\(reason)): \(singleLineLogDetail(audioStartupErrorDescription(error)))")
+
+                // Без единого входа повторять нечего: CoreAudio не передумает,
+                // пока человек не подключит микрофон, а это подхватит
+                // слушатель устройств.
+                guard shouldRetryAudioStartup(inputDevices: availableAudioInputDevices()) else {
+                    log("audio startup: no input devices on this Mac; not retrying until one appears")
+                    throw error
+                }
 
                 guard let delay = audioStartupRetryDelaySeconds(afterFailedAttempt: attempt) else {
                     throw error
@@ -3328,7 +3370,14 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             PendingDictationRecovery.remove(recoveryJournal?.url)
             stopAudioEngineImmediately()
             log("recording start failed: \(error.localizedDescription)")
-            signalDictationFailure()
+            // Служба готова, а микрофон пропал уже после запуска: наушники
+            // убрали в кейс. Один звук ошибки причину не называл.
+            if availableAudioInputDevices().isEmpty {
+                log("recording start failed: no input devices on this Mac")
+                signalDictationFailure(message: noMicrophoneDictationMessage(language: settings.interfaceLanguage))
+            } else {
+                signalDictationFailure()
+            }
             return
         }
         isRecording = true
@@ -4194,7 +4243,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                               inputFallbackDeviceName: audio.inputFallbackDeviceName,
                               previousSpeechModelName: speechModelUpdateStatus?.previousModelName,
                               speechModelUpdatePhase: speechModelUpdateStatus?.phase.rawValue,
-                              speechModelUpdateFraction: speechModelUpdateStatus?.fraction)
+                              speechModelUpdateFraction: speechModelUpdateStatus?.fraction,
+                              failureReason: startupFailure?.isMissingAudioInput == true
+                                  ? AGENT_FAILURE_REASON_NO_MICROPHONE
+                                  : nil)
         )
     }
 
@@ -6030,7 +6082,9 @@ extension DictorApp: QuickPanelDelegate {
         // запускается · обычно 1–3 секунды» — навечно. Состояние .failed из
         // макета 8 с кнопкой «Открыть Настройки» существовало и было
         // недостижимо.
-        if startupFailure != nil { return .failed }
+        if let startupFailure {
+            return startupFailure.isMissingAudioInput ? .noMicrophone : .failed
+        }
         if let verified = verifiedModelFiles, let total = totalModelFiles {
             return .verifying(done: verified, total: total)
         }

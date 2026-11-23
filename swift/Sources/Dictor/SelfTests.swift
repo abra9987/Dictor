@@ -49,6 +49,8 @@ enum DictorSelfTest {
             return runSuite("audio-conversion", testAudioConversion)
         case "audio-input":
             return runSuite("audio-input", testAudioInputDeviceFiltering)
+        case "missing-microphone":
+            return runSuite("missing-microphone", testMissingMicrophone)
         case "model-status":
             return runSuite("model-status", testSpeechModelStartupStatus)
         case "service-status":
@@ -137,6 +139,7 @@ enum DictorSelfTest {
         try testAudioLevelMetering()
         try testAudioConversion()
         try testAudioInputDeviceFiltering()
+        try testMissingMicrophone()
         try testSpeechModelStartupStatus()
         try testServiceStatusHold()
         try testQuitLeavesServiceEnabled()

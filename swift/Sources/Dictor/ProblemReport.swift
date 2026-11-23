@@ -84,12 +84,33 @@ enum ProblemReport {
         }
     }
 
-    static func messageBody(archive: Archive, language: InterfaceLanguage) -> String {
+    /// Строка о состоянии службы для тела письма. Описание проблемы люди
+    /// оставляют пустым — «(опишите здесь)» так и уходит, — и причина должна
+    /// читаться без распаковки архива.
+    static func serviceLine(state: AgentRuntimeState?) -> String {
+        guard let state else { return "Service: not running" }
+        var line = "Service: \(state.status)"
+        if let reason = state.failureReason {
+            line += " (\(reason))"
+        }
+        if state.status == "error",
+           let first = state.detail.components(separatedBy: .newlines).first?
+               .trimmingCharacters(in: .whitespaces),
+           !first.isEmpty {
+            line += " — " + String(first.prefix(200))
+        }
+        return line
+    }
+
+    static func messageBody(archive: Archive,
+                            language: InterfaceLanguage,
+                            serviceLine: String) -> String {
         let version = "Dictor \(currentBundleVersion()) (\(currentBundleBuild())), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
         let crashes = archive.crashReportCount
         return localizedText(
             """
             \(version)
+            \(serviceLine)
 
             Что делал и что случилось:
             (опишите здесь)
@@ -99,6 +120,7 @@ enum ProblemReport {
             """,
             """
             \(version)
+            \(serviceLine)
 
             What I was doing and what happened:
             (describe here)
@@ -130,7 +152,9 @@ enum ProblemReport {
         MailHandoff.present(
             subject: "Dictor \(currentBundleVersion()) — "
                 + localizedText("отчёт о проблеме", "problem report", language: language),
-            body: messageBody(archive: archive, language: language),
+            body: messageBody(archive: archive,
+                              language: language,
+                              serviceLine: serviceLine(state: AgentRuntimeStateStore.read())),
             attachment: archive.url,
             anchor: anchor,
             logLabel: "problem report",
