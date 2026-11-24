@@ -239,6 +239,7 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |
 | `Statistics.swift` | what the Statistics section shows |
 | `UpdateCheck.swift`, `UpdateWindow.swift` | the updater |
+| `UpdateDownload.swift` | fetching the archive over a bad link: a stall (not slowness) breaks the connection, the next attempt resumes with `Range`/`If-Range`, progress in bytes for both install paths |
 | `ModelIntegrity.swift` | the two model descriptions with their manifests, per-file SHA-256 verification, cache paths, disk space |
 | `SpeechModelUpdate.swift` | background download of the current model while the previous one works, and the decision when to switch |
 | `ProblemReport.swift`, `DictionaryShare.swift` | the two things a person can choose to email: a diagnostics archive and their dictionary |

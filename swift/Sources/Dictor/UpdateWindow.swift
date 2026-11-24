@@ -262,9 +262,10 @@ func exportUpdateWindowPreviews(to directory: URL,
     var exported = 0
     for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                      ("dark", NSAppearance.Name.darkAqua)] {
-        let installingPhase = localizedText("Скачиваю и проверяю архив…",
-                                            "Downloading and verifying the archive…",
-                                            language: language)
+        // Ход — той же функцией, что в бою, на правдоподобном размере архива.
+        let installingPhase = updateDownloadPhaseText(
+            UpdateDownloadProgress(received: 1_234_567, total: 4_292_088, attempt: 1),
+            language: language, capitalized: true)
         for (state, phase) in [("offer", String?.none),
                                ("installing", .some(installingPhase))] {
             let window = UpdateAvailableWindow(release: release,

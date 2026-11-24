@@ -153,6 +153,8 @@ struct PreparedDictorUpdate: Sendable {
 
 enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
     case network
+    /// Связь была, но обрывалась раз за разом: часть архива пришла, остальное нет.
+    case downloadInterrupted(received: Int64, total: Int64?)
     case httpStatus(Int)
     case invalidManifest
     case manifestVersionMismatch(expected: String, actual: String)
@@ -168,7 +170,9 @@ enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
         if language == .english {
             switch self {
             case .network:
-                return "The update could not be downloaded. Check your internet connection."
+                return "Dictor couldn't reach the update server. Check your internet connection; if it works, the network may be blocking the server — try a VPN or another network, then Retry."
+            case .downloadInterrupted(let received, let total):
+                return "The download kept breaking off (\(updateDownloadPhaseText(UpdateDownloadProgress(received: received, total: total, attempt: 1), language: .english, capitalized: false))). If the internet works, the network is probably throttling the update server — turn on a VPN or switch networks, then Retry."
             case .httpStatus(let code):
                 return "The update server returned HTTP \(code)."
             case .invalidManifest:
@@ -189,7 +193,9 @@ enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
         }
         switch self {
         case .network:
-            return "Не удалось скачать обновление. Проверьте подключение к интернету."
+            return "Не удалось связаться с сервером обновлений. Проверьте интернет; если он работает — сеть, вероятно, не пускает к серверу: включите VPN или другую сеть и нажмите «Повторить»."
+        case .downloadInterrupted(let received, let total):
+            return "Скачивание раз за разом обрывалось (\(updateDownloadPhaseText(UpdateDownloadProgress(received: received, total: total, attempt: 1), language: .russian, capitalized: false))). Если интернет работает, сеть, вероятно, режет сервер обновлений: включите VPN или другую сеть и нажмите «Повторить»."
         case .httpStatus(let code):
             return "Сервер обновлений вернул ошибку HTTP \(code)."
         case .invalidManifest:
@@ -242,27 +248,41 @@ enum DictorUpdateInstaller {
         return manifest
     }
 
-    static func prepare(manifest: DictorUpdateManifest) async throws -> PreparedDictorUpdate {
-        guard appCanBeReplaced(at: Bundle.main.bundleURL) else {
-            throw DictorUpdateInstallerError.appNotWritable
-        }
-
-        let archiveURL = updateArchiveURL(forVersion: manifest.version)
-        var request = URLRequest(url: archiveURL)
-        request.setValue("dictor-in-app-update", forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 60
-        let (archiveData, response) = try await fetch(request: request,
-                                                      maxBytes: UPDATE_ARCHIVE_MAX_BYTES)
-        guard (200..<300).contains(response.statusCode) else {
-            throw DictorUpdateInstallerError.httpStatus(response.statusCode)
-        }
+    /// Архив целиком и с проверенной суммой. Отдельно от `prepare`, чтобы
+    /// самотест гонял ровно эту цепочку — загрузчик с докачкой и SHA-256 —
+    /// через заглушку сервера, а не её копию.
+    static func downloadVerifiedArchive(
+        manifest: DictorUpdateManifest,
+        policy: UpdateDownloadPolicy = .standard,
+        configuration: URLSessionConfiguration? = nil,
+        progress: @escaping @Sendable (UpdateDownloadProgress) -> Void
+    ) async throws -> Data {
+        let archiveData = try await UpdateArchiveDownloader.download(
+            from: updateArchiveURL(forVersion: manifest.version),
+            userAgent: "dictor-in-app-update",
+            policy: policy,
+            configuration: configuration,
+            progress: progress)
 
         var hasher = SHA256()
         hasher.update(data: archiveData)
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         guard digest.caseInsensitiveCompare(manifest.sha256) == .orderedSame else {
+            log("update: archive checksum mismatch for v\(manifest.version)")
             throw DictorUpdateInstallerError.checksumMismatch
         }
+        return archiveData
+    }
+
+    static func prepare(manifest: DictorUpdateManifest,
+                        progress: @escaping @Sendable (UpdateDownloadProgress) -> Void)
+        async throws -> PreparedDictorUpdate {
+        guard appCanBeReplaced(at: Bundle.main.bundleURL) else {
+            throw DictorUpdateInstallerError.appNotWritable
+        }
+
+        let archiveData = try await downloadVerifiedArchive(manifest: manifest,
+                                                            progress: progress)
 
         let workDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("Dictor-update-\(UUID().uuidString)", isDirectory: true)

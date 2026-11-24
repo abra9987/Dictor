@@ -5947,7 +5947,18 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             do {
                 let manifest = try await DictorUpdateInstaller.fetchManifest(
                     expectedVersion: version)
-                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest)
+                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest) {
+                    [weak self] progress in
+                    Task { @MainActor in
+                        // Прогресс, доехавший после сбоя, не должен затереть
+                        // текст ошибки.
+                        guard let self, self.installingUpdateVersion == version else { return }
+                        self.updateAvailableWindow?.showProgress(
+                            updateDownloadPhaseText(progress,
+                                                    language: self.settings.interfaceLanguage,
+                                                    capitalized: true))
+                    }
+                }
                 // Скрипт ждёт смерти этого процесса, чтобы заменить бандл, и
                 // сам снимает службу. Уходим с дороги сразу после запуска.
                 try launchPreparedDictorUpdate(prepared, language: self.settings.interfaceLanguage)
@@ -5963,6 +5974,9 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 let detail = (error as? DictorUpdateInstallerError)?
                     .message(language: self.settings.interfaceLanguage)
                     ?? error.localizedDescription
+                // В журнал — при любом исходе. Раньше сбой при открытом окне
+                // обновления не записывался, и отчёт о проблеме молчал.
+                log("update: install of v\(version) failed: \(error)")
                 if let window = self.updateAvailableWindow {
                     window.showFailure(detail)
                 } else {
@@ -5973,7 +5987,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     private func showUpdateCouldNotStart(version: String, detail: String) {
-        log("update: install of v\(version) failed: \(detail)")
         showAppForModal()
         let alert = NSAlert()
         alert.alertStyle = .warning

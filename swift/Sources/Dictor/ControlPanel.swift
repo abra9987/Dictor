@@ -4619,6 +4619,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
     private func beginInAppUpdate(for release: DictorRelease) {
         guard updateTask == nil else { return }
         let version = release.version
+        log("update: installing v\(version) from the window")
         updateState = .preparing(
             version: version,
             phase: t("получаю манифест…", "fetching the manifest…"))
@@ -4631,10 +4632,27 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 guard !Task.isCancelled else { return }
                 self.updateState = .preparing(
                     version: version,
-                    phase: self.t("скачиваю и проверяю SHA-256…",
-                                  "downloading and verifying SHA-256…"))
+                    phase: self.t("скачиваю…", "downloading…"))
                 self.refresh(force: true)
-                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest)
+                let prepared = try await DictorUpdateInstaller.prepare(manifest: manifest) {
+                    [weak self] progress in
+                    Task { @MainActor in
+                        // Только пока идёт скачивание этой версии: опоздавший
+                        // прогресс не должен затереть «архив проверен» или ошибку.
+                        guard let self, self.updateTask != nil,
+                              case .preparing(let target, let current) = self.updateState,
+                              target == version,
+                              current != self.t("архив проверен, ставлю…",
+                                                "archive verified, installing…")
+                        else { return }
+                        let phase = updateDownloadPhaseText(progress, language: self.language,
+                                                            capitalized: false)
+                        guard self.updateState != .preparing(version: version, phase: phase)
+                        else { return }
+                        self.updateState = .preparing(version: version, phase: phase)
+                        self.refresh(force: true)
+                    }
+                }
                 guard !Task.isCancelled else {
                     try? FileManager.default.removeItem(at: prepared.workDirectory)
                     return
@@ -4653,6 +4671,7 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 }
             } catch {
                 self.updateTask = nil
+                log("update: install of v\(version) failed: \(error)")
                 let message = (error as? DictorUpdateInstallerError)?
                     .message(language: self.language) ?? error.localizedDescription
                 self.updateState = .failed(message)

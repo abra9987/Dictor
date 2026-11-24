@@ -3486,6 +3486,7 @@ enum DictorSelfTest {
         try testUpdateCheckParsing()
         try testUpdateCheckState()
         try testDirectUpdateManifest()
+        try testUpdateDownload()
         try testUpdateHelperScript()
         try testDirectUpdateReplacement()
         try testUpdateProgressState()

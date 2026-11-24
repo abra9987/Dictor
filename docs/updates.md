@@ -27,6 +27,30 @@ public, and it stays as it is because the app must not depend on a service that
 rate-limits anonymous requests. The `.dmg` is mirrored to GitHub Releases for
 people who look for a download button there.
 
+## How the archive is downloaded
+
+The archive used to be fetched in one request with a 60-second limit on the
+whole transfer. On a throttled link — the case that exposed it was a provider
+in Russia letting the 800-byte manifest through instantly while the 4 MB
+archive did not finish in two minutes — the update hung on "downloading" and
+the failure never reached the log.
+
+Now (`UpdateDownload.swift`):
+
+- **Silence, not slowness, ends an attempt.** As long as bytes keep arriving
+  there is no deadline; 30 seconds without a single byte and the connection is
+  dropped.
+- **The next attempt resumes** with `Range: bytes=N-` and `If-Range: <ETag>`.
+  A server that answers `200` instead of `206` simply replaces what was
+  received; a mismatched `Content-Range` starts over.
+- **It gives up after four attempts in a row that brought nothing new**; an
+  attempt that advanced the download resets the count.
+- Both install paths show progress in megabytes and say when they are
+  resuming. Every interruption, the final result and any failure are written
+  to the log, so a problem report shows what happened.
+- When it does give up, the message says how much arrived and suggests a VPN or
+  another network — the only remedy when the provider blocks the server.
+
 ## What is checked before anything is replaced
 
 1. **The version in the manifest must match the version being installed.**
@@ -45,8 +69,9 @@ people who look for a download button there.
    host. The manifest is our own file, but it is still treated as untrusted
    input.
 
-3. **The downloaded archive is rejected above 64 MB** — the size is checked
-   once the download completes — and its SHA-256 must equal the digest in the
+3. **The downloaded archive is rejected above 64 MB** — by the announced size
+   before the body is read, and again as bytes arrive — and its SHA-256, taken
+   over the whole archive after any resumes, must equal the digest in the
    manifest.
 
 4. **The extracted bundle must satisfy a code-signing requirement**, not merely
