@@ -170,9 +170,9 @@ enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
         if language == .english {
             switch self {
             case .network:
-                return "Dictor couldn't reach the update server. Check your internet connection; if it works, the network may be blocking the server — try a VPN or another network, then Retry."
+                return "Dictor couldn't reach the update server. Check your internet connection; if it works, the network may be blocking the server — try a VPN or another network, then try again."
             case .downloadInterrupted(let received, let total):
-                return "The download kept breaking off (\(updateDownloadPhaseText(UpdateDownloadProgress(received: received, total: total, attempt: 1), language: .english, capitalized: false))). If the internet works, the network is probably throttling the update server — turn on a VPN or switch networks, then Retry."
+                return "The download kept breaking off (\(updateDownloadPhaseText(UpdateDownloadProgress(received: received, total: total, attempt: 1), language: .english, capitalized: false))). If the internet works, the network is probably throttling the update server — turn on a VPN or switch networks, then try again."
             case .httpStatus(let code):
                 return "The update server returned HTTP \(code)."
             case .invalidManifest:
@@ -193,9 +193,9 @@ enum DictorUpdateInstallerError: LocalizedError, Equatable, Sendable {
         }
         switch self {
         case .network:
-            return "Не удалось связаться с сервером обновлений. Проверьте интернет; если он работает — сеть, вероятно, не пускает к серверу: включите VPN или другую сеть и нажмите «Повторить»."
+            return "Не удалось связаться с сервером обновлений. Проверьте интернет; если он работает — сеть, вероятно, не пускает к серверу: включите VPN или другую сеть и попробуйте ещё раз."
         case .downloadInterrupted(let received, let total):
-            return "Скачивание раз за разом обрывалось (\(updateDownloadPhaseText(UpdateDownloadProgress(received: received, total: total, attempt: 1), language: .russian, capitalized: false))). Если интернет работает, сеть, вероятно, режет сервер обновлений: включите VPN или другую сеть и нажмите «Повторить»."
+            return "Скачивание раз за разом обрывалось (\(updateDownloadPhaseText(UpdateDownloadProgress(received: received, total: total, attempt: 1), language: .russian, capitalized: false))). Если интернет работает, сеть, вероятно, режет сервер обновлений: включите VPN или другую сеть и попробуйте ещё раз."
         case .httpStatus(let code):
             return "Сервер обновлений вернул ошибку HTTP \(code)."
         case .invalidManifest:

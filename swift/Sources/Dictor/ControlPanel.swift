@@ -4669,6 +4669,10 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                     NSApp.terminate(nil)
                 }
+            } catch is CancellationError {
+                // Окно закрывается — это не сбой обновления, показывать нечего.
+                log("update: install of v\(version) cancelled")
+                self.updateTask = nil
             } catch {
                 self.updateTask = nil
                 log("update: install of v\(version) failed: \(error)")
@@ -5100,13 +5104,24 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
         }
     }
 
-    // Отдельным кадром — «доступно обновление»: у вкладки «Приложение»
-    // появляется точка, и это единственное место, где она вообще бывает.
-    panel.updateState = .available(DictorRelease(tagName: "v1.8.0",
-                                                 version: "1.8.0",
-                                                 body: "",
-                                                 htmlURL: ""))
+    // Отдельными кадрами — строка «Версия» в трёх состояниях. «Доступно»:
+    // у вкладки «Приложение» появляется точка, и это единственное место, где
+    // она вообще бывает. «Скачивание» и «сбой» — тексты загрузчика как в бою:
+    // сбой длинный, и влезает ли он в подзаголовок, видно только на снимке.
+    let previewLanguage = Settings.shared.interfaceLanguage
+    let updateStates: [(String, ControlPanelUpdateState)] = [
+        ("update", .available(DictorRelease(tagName: "v1.8.0", version: "1.8.0",
+                                            body: "", htmlURL: ""))),
+        ("updating", .preparing(version: "1.8.0", phase: updateDownloadPhaseText(
+            UpdateDownloadProgress(received: 1_234_567, total: 4_292_088, attempt: 2),
+            language: previewLanguage, capitalized: false))),
+        ("update-failed", .failed(DictorUpdateInstallerError
+            .downloadInterrupted(received: 1_234_567, total: 4_292_088)
+            .message(language: previewLanguage))),
+    ]
     panel.settingsTab = "app"
+    for (stateName, state) in updateStates {
+    panel.updateState = state
     for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
                                      ("dark", NSAppearance.Name.darkAqua)] {
         window.appearance = NSAppearance(named: appearanceName)
@@ -5119,15 +5134,16 @@ func exportSettingsPanelPreviews(to directory: URL) throws {
         window.layoutIfNeeded()
         window.displayIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-            throw SettingsPreviewExportError(message: "no bitmap rep for update-badge-\(suffix)")
+            throw SettingsPreviewExportError(message: "no bitmap rep for \(stateName)-\(suffix)")
         }
         view.cacheDisplay(in: view.bounds, to: rep)
         guard let png = rep.representation(using: .png, properties: [:]) else {
-            throw SettingsPreviewExportError(message: "PNG encode failed for update-badge-\(suffix)")
+            throw SettingsPreviewExportError(message: "PNG encode failed for \(stateName)-\(suffix)")
         }
-        try png.write(to: directory.appendingPathComponent("settings-app-update-\(suffix).png"),
+        try png.write(to: directory.appendingPathComponent("settings-app-\(stateName)-\(suffix).png"),
                       options: .atomic)
         exported += 1
+    }
     }
     panel.updateState = .notChecked
 

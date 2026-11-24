@@ -93,6 +93,12 @@ fi
 grep -q 'func launchPreparedDictorUpdate' swift/Sources/Dictor/UpdateCheck.swift
 grep -q 'launchPreparedDictorUpdate(prepared' swift/Sources/Dictor/App.swift
 
+# Сбой установки обязан попасть в журнал из обоих путей — иначе отчёт о
+# проблеме молчит. Так было до 1.11.3: при открытом окне обновления сбой не
+# записывался, и по папиному отчёту нельзя было понять, что сломалось.
+grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/App.swift
+grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/ControlPanel.swift
+
 # Мёртвый код. Дважды этот класс доходил до релиза: апдейтер был написан целиком
 # и недостижим, кнопка очистки поиска рисовалась и не принимала кликов.
 # Компилятор молчит и про приватный метод без вызывающего, и про класс, который

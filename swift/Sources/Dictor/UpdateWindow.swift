@@ -135,6 +135,9 @@ final class UpdateAvailableWindow: NSWindow {
         buttonRow = row
         root.addArrangedSubview(row)
         row.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -56).isActive = true
+        // Под кнопками может встать текст сбоя — без зазора он к ним прилипает.
+        // Пока кнопки скрыты (идёт скачивание), отступ стек не применяет.
+        root.setCustomSpacing(12, after: row)
 
         // Место под ход установки. Появляется на месте кнопок, чтобы окно не
         // прыгало по высоте в момент нажатия.
@@ -266,14 +269,21 @@ func exportUpdateWindowPreviews(to directory: URL,
         let installingPhase = updateDownloadPhaseText(
             UpdateDownloadProgress(received: 1_234_567, total: 4_292_088, attempt: 1),
             language: language, capitalized: true)
-        for (state, phase) in [("offer", String?.none),
-                               ("installing", .some(installingPhase))] {
+        // Сбой — самый длинный текст окна: проверяем, что он помещается.
+        let failure = DictorUpdateInstallerError
+            .downloadInterrupted(received: 1_234_567, total: 4_292_088)
+            .message(language: language)
+        for (state, phase, failed) in [("offer", String?.none, false),
+                                       ("installing", .some(installingPhase), false),
+                                       ("failed", .some(failure), true)] {
             let window = UpdateAvailableWindow(release: release,
                                                currentVersion: "1.1.1",
                                                language: language)
             window.appearance = NSAppearance(named: appearanceName)
             window.colorSpace = .sRGB
-            if let phase { window.showProgress(phase) }
+            if let phase {
+                if failed { window.showFailure(phase) } else { window.showProgress(phase) }
+            }
             window.layoutIfNeeded()
             guard let view = window.contentView,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }

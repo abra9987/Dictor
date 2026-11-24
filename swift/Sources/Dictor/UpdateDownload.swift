@@ -70,11 +70,12 @@ func updateDownloadPhaseText(_ progress: UpdateDownloadProgress,
                                "\(megabytes(progress.received)) MB",
                                language: language)
     }
-    let verb = progress.attempt > 1
-        ? localizedText("связь прерывалась, докачиваю", "the connection dropped, resuming",
-                        language: language)
-        : localizedText("скачиваю", "downloading", language: language)
-    let text = "\(verb): \(amount)"
+    // Без своего двоеточия: в строке «Версия» фраза идёт после
+    // «Обновляю до 1.11.3:», и второе двоеточие читалось бы как список.
+    let text = progress.attempt > 1
+        ? localizedText("связь прерывалась, докачиваю — \(amount)",
+                        "connection dropped, resuming — \(amount)", language: language)
+        : localizedText("скачано \(amount)", "downloaded \(amount)", language: language)
     guard capitalized, let first = text.first else { return text }
     return first.uppercased() + text.dropFirst()
 }
@@ -396,12 +397,24 @@ final class UpdateDownloadStubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var payload = Data()
     nonisolated(unsafe) private static var script: [Reply] = []
     nonisolated(unsafe) private static var requests: [URLRequest] = []
+    nonisolated(unsafe) private static var delivered: Int64 = 0
 
     static func install(payload: Data, script: [Reply]) {
         lock.lock(); defer { lock.unlock() }
         self.payload = payload
         self.script = script
         requests = []
+        delivered = 0
+    }
+
+    /// Сколько байт загрузчик уже признал полученными — по его прогрессу.
+    static func noteDelivered(_ received: Int64) {
+        lock.lock(); delivered = max(delivered, received); lock.unlock()
+    }
+
+    private static func hasDelivered(_ bytes: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return delivered >= Int64(bytes)
     }
 
     static var seenRequests: [URLRequest] {
@@ -452,11 +465,17 @@ final class UpdateDownloadStubProtocol: URLProtocol, @unchecked Sendable {
         switch reply.ending {
         case .finish: client?.urlProtocolDidFinishLoading(self)
         case .drop:
-            // Обрыв — чуть позже данных: система доставляет их делегату не
-            // мгновенно, а мгновенная ошибка выбросила бы ещё не доставленное.
-            // В живой сети между последним пакетом и обрывом тоже проходит время.
+            // Обрыв — только когда загрузчик признал отданное: система доставляет
+            // данные делегату не мгновенно, а мгновенная ошибка выбросила бы ещё
+            // не доставленное. Ждём по факту, не по часам — на нагруженной машине
+            // фиксированная пауза не гарантирует ничего. В живой сети между
+            // последним пакетом и обрывом время тоже проходит.
             let client = client
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { [self] in
+            DispatchQueue.global().async { [self] in
+                let deadline = Date().addingTimeInterval(5)
+                while !Self.hasDelivered(end), Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
                 client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
             }
         case .stall: break  // молчим, пока загрузчик сам не оборвёт
@@ -505,7 +524,10 @@ extension DictorSelfTest {
                 do {
                     let data = try await DictorUpdateInstaller.downloadVerifiedArchive(
                         manifest: manifest, policy: policy, configuration: configuration,
-                        progress: { probe.record($0) })
+                        progress: {
+                            probe.record($0)
+                            UpdateDownloadStubProtocol.noteDelivered($0.received)
+                        })
                     probe.outcome = .success(data)
                 } catch {
                     probe.outcome = .failure(error)
@@ -600,11 +622,11 @@ extension DictorSelfTest {
         // Подпись хода: та же строка уходит в окно и в настройки.
         let sample = UpdateDownloadProgress(received: 1_234_567, total: 4_292_088, attempt: 1)
         try expect(updateDownloadPhaseText(sample, language: .russian, capitalized: true),
-                   equals: "Скачиваю: 1,2 из 4,3 МБ", "Russian progress uses a decimal comma")
+                   equals: "Скачано 1,2 из 4,3 МБ", "Russian progress uses a decimal comma")
         try expect(updateDownloadPhaseText(UpdateDownloadProgress(received: 1_234_567,
                                                                   total: nil, attempt: 3),
                                            language: .english, capitalized: false),
-                   equals: "the connection dropped, resuming: 1.2 MB",
+                   equals: "connection dropped, resuming — 1.2 MB",
                    "a resumed attempt says so, and an unknown size is not invented")
         try expect(DictorUpdateInstallerError.downloadInterrupted(received: 1_000_000,
                                                                   total: 4_300_000)
