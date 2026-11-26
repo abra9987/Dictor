@@ -1,6 +1,3 @@
-// Кадры анимации капсулы в PNG (--export-hud-animation): движение капсулы
-// проверяется по кадрам, а не на глаз.
-
 import AppKit
 
 let RECORDING_HUD_EXPORT_ARGUMENT = "--export-hud-animation"

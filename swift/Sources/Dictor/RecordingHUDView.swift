@@ -1,6 +1,3 @@
-// Капсула записи: волна уровня, «Распознаю…» и «Вставлено». Только отрисовка —
-// когда и где её показать, решает DictorApp.
-
 import AppKit
 
 final class RecordingHUDView: NSView {

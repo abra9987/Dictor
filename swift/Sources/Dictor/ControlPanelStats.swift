@@ -1,6 +1,3 @@
-// Раздел «Статистика»: карточки итогов, график по дням, привычки, часы и год,
-// экспорт в CSV и сброс.
-
 import AppKit
 
 extension DictorControlPanelApp {
