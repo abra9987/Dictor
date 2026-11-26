@@ -30,6 +30,12 @@ enum SpeechModelTextRepair {
     /// Отдельно стоящий `<unk>` — не буква, он убирается. Для остальных
     /// языков токен убирается всегда: кириллице в английском тексте неоткуда
     /// взяться.
+    ///
+    /// Кавычки вокруг слова модель тоже пишет `<unk>`, вплотную к буквам:
+    /// «нажми <unk>Сохранить<unk>». Правило «прижат к букве — значит „е“»
+    /// делало из этого «еСохранитье», и с 1.11.1 таких диктовок набралось
+    /// девять за две недели. Поэтому сначала ищутся пары: `<unk>` в начале
+    /// слова и парный ему в конце слова становятся «», остальное — как раньше.
     static func apply(to text: String,
                       language: DictationLanguage = .auto) -> String {
         guard text.localizedCaseInsensitiveContains("<unk>") else { return text }
@@ -42,26 +48,38 @@ enum SpeechModelTextRepair {
             repairsLetter = false
         }
 
-        let token = "<unk>"
+        // Метка вместо `<unk>`: дальше удобнее работать с массивом символов,
+        // где каждая метка — один элемент.
+        let marker: Character = "\u{E000}"
+        let chars = Array(text.replacingOccurrences(of: "<unk>", with: String(marker),
+                                                    options: .caseInsensitive))
+        let roles = repairsLetter ? quoteRoles(in: chars, marker: marker) : [:]
+
         var result = ""
-        result.reserveCapacity(text.count)
-        var index = text.startIndex
+        result.reserveCapacity(chars.count)
         var removedAny = false
 
-        while index < text.endIndex {
-            if matchesUnknownToken(in: text, at: index) {
-                let after = text.index(index, offsetBy: token.count)
+        for (position, character) in chars.enumerated() {
+            guard character == marker else {
+                result.append(character)
+                continue
+            }
+            switch roles[position] {
+            case .opening:
+                result.append("«")
+            case .closing:
+                result.append("»")
+            case .dropped:
+                removedAny = true
+            case nil:
+                let next = position + 1 < chars.count ? chars[position + 1] : nil
                 let touchesLetter = (result.last?.isLetter ?? false)
-                    || nextCharacterIsLetter(in: text, from: after)
+                    || next.map { $0.isLetter || $0 == marker } == true
                 if repairsLetter, touchesLetter {
                     result.append(shouldCapitalize(before: result) ? "Е" : "е")
                 } else {
                     removedAny = true
                 }
-                index = after
-            } else {
-                result.append(text[index])
-                index = text.index(after: index)
             }
         }
 
@@ -74,18 +92,69 @@ enum SpeechModelTextRepair {
         return result
     }
 
-    private static func matchesUnknownToken(in text: String, at index: String.Index) -> Bool {
-        let token = "<unk>"
-        guard let end = text.index(index, offsetBy: token.count, limitedBy: text.endIndex) else {
-            return false
-        }
-        return text[index..<end].lowercased() == token
+    private enum QuoteRole {
+        case opening
+        case closing
+        /// Открывающая кавычка без пары перед заглавной или латиницей: буквой
+        /// она быть не может («еAnyone»), кавычкой без пары — тоже.
+        case dropped
     }
 
-    /// Следующий `<unk>` вплотную тоже считается буквой: «<unk><unk>лка».
-    private static func nextCharacterIsLetter(in text: String, from index: String.Index) -> Bool {
-        guard index < text.endIndex else { return false }
-        return text[index].isLetter || matchesUnknownToken(in: text, at: index)
+    /// Какие метки — кавычки. Открывающая стоит в начале слова (перед ней не
+    /// буква, после — буква), закрывающая — в конце (перед ней не пробел,
+    /// после — не буква).
+    ///
+    /// Перед заглавной или латинской буквой «ё» не бывает, так что такая
+    /// открывающая — точно кавычка; пару ей ищем до точки, не дальше
+    /// двенадцати слов («Забыли пароль?», «О, это AI, бла-бла»). Перед
+    /// строчной это может быть «ёжик», поэтому кавычками считается только
+    /// одно слово целиком: «<unk>хочу<unk>». «<unk>лка, мо<unk>» — это
+    /// «елка» и «мое», а не цитата.
+    private static func quoteRoles(in chars: [Character],
+                                   marker: Character) -> [Int: QuoteRole] {
+        func isOpening(_ i: Int) -> Bool {
+            let before = i > 0 ? chars[i - 1] : nil
+            guard before.map({ !$0.isLetter && $0 != marker }) ?? true else { return false }
+            return i + 1 < chars.count && chars[i + 1].isLetter
+        }
+        func isClosing(_ i: Int) -> Bool {
+            guard i > 0, !chars[i - 1].isWhitespace, chars[i - 1] != marker else { return false }
+            return i + 1 >= chars.count || !(chars[i + 1].isLetter || chars[i + 1] == marker)
+        }
+
+        var roles: [Int: QuoteRole] = [:]
+        var i = 0
+        while i < chars.count {
+            defer { i += 1 }
+            guard chars[i] == marker, roles[i] == nil, isOpening(i) else { continue }
+            let first = chars[i + 1]
+            let certain = first.isUppercase || (first.isASCII && first.isLetter)
+            var words = 1
+            var closing: Int?
+            var j = i + 1
+            while j < chars.count {
+                let c = chars[j]
+                if c == marker {
+                    if isClosing(j) { closing = j }
+                    break
+                }
+                if c == "." || c.isNewline { break }
+                if c.isWhitespace {
+                    words += 1
+                    if !certain || words > 12 { break }
+                }
+                if !certain, !c.isLetter, c != "-" { break }
+                j += 1
+            }
+            if let closing {
+                roles[i] = .opening
+                roles[closing] = .closing
+                i = closing
+            } else if certain {
+                roles[i] = .dropped
+            }
+        }
+        return roles
     }
 
     /// Заглавная — только в начале слова, которое начинает предложение.
@@ -416,6 +485,40 @@ extension DictorSelfTest {
             SpeechModelTextRepair.apply(to: "Привет. <unk>жик пришёл.", language: .russian),
             equals: "Привет. Ежик пришёл.",
             "<unk> starting a sentence-initial word should become a capital Е"
+        )
+
+        // Кавычки вокруг слова: примеры из настоящих диктовок, где выходило
+        // «еСохранитье» и «еЗабыли паролье».
+        let quoteCases: [(String, String)] = [
+            ("Я нажал <unk>Сохранить<unk> для клауд.", "Я нажал «Сохранить» для клауд."),
+            ("Нажимаю <unk>Забыли пароль<unk>, ввожу новый.", "Нажимаю «Забыли пароль», ввожу новый."),
+            ("Нажми <unk>Открыть черновик<unk> и всё.", "Нажми «Открыть черновик» и всё."),
+            ("когда я нажму на определенное <unk>хочу<unk> это видео",
+             "когда я нажму на определенное «хочу» это видео"),
+            ("нажимаешь <unk>присоединиться<unk>, он пишет", "нажимаешь «присоединиться», он пишет"),
+            ("там написано <unk>квартира<unk>, но это дом", "там написано «квартира», но это дом"),
+            ("Кнопка <unk>Забыли пароль?<unk> не работает.", "Кнопка «Забыли пароль?» не работает."),
+            ("Он не должен трубить <unk>О, это AI, бла-бла-бла<unk> и так далее.",
+             "Он не должен трубить «О, это AI, бла-бла-бла» и так далее."),
+            ("Называется он <unk>Anyone who has stood in front of a plot",
+             "Называется он Anyone who has stood in front of a plot"),
+            ("Вкладка <unk>Тесты<unk>.", "Вкладка «Тесты»."),
+        ]
+        for (raw, expected) in quoteCases {
+            try expect(SpeechModelTextRepair.apply(to: raw, language: .auto), equals: expected,
+                       "<unk> pairs around words should become «» quotes: \(raw)")
+        }
+        // А «ё» в начале и в конце слова остаётся буквой.
+        try expect(
+            SpeechModelTextRepair.apply(to: "<unk>жик и вс<unk> тут.", language: .auto),
+            equals: "Ежик и все тут.",
+            "a lowercase ё-word followed by a word ending in ё must not be read as a quote"
+        )
+        try expect(
+            processedDictationText(rawTranscript: "Я нажал <unk>Сохранить<unk>.",
+                                   corrections: [], removeFillerWords: false).text,
+            equals: "Я нажал «Сохранить».",
+            "the dictation pipeline should turn <unk> quote pairs into «»"
         )
     }
 }
