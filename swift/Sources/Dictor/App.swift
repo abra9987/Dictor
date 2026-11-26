@@ -3532,6 +3532,10 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                         }
                     }
                     log("\(String(format: "%.2f", dur)) s audio → \(String(format: "%.2f", asrTiming.totalSeconds)) s → \(cleaned.count) chars")
+                    DiagnosticAudioSamples.saveIfEnabled(
+                        samples: samples, audioSeconds: dur, inputChannels: audio.inputChannelCount,
+                        language: settings.dictationLanguage, rawText: transcription.text,
+                        processedText: processed.text, insertedText: cleaned)
                     if !cleaned.isEmpty {
                         let historyStartedAt = ProcessInfo.processInfo.systemUptime
                         addToHistory(

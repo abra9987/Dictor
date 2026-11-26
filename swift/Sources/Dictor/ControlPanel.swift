@@ -1976,11 +1976,17 @@ final class DictorControlPanelApp: NSObject, NSApplicationDelegate, NSWindowDele
             value: settings.checkForUpdates
                 ? t("1 раз в 6 ч", "once every 6 h")
                 : t("нет", "none"))
+        // Записи для диагностики включаются только вручную, но факт обязан
+        // сказать правду и тогда.
+        let keptSamples = DiagnosticAudioSamples.keptCount()
         let audioFact = privacyFactRow(
             title: t("Аудио после распознавания", "Audio after transcription"),
-            subtitle: t("На время обработки на диске живёт страховочный журнал. При сбое он остаётся, чтобы вернуть диктовку в историю",
+            subtitle: keptSamples > 0
+                ? t("Включены записи для диагностики: последние \(keptSamples) лежат в Application Support/Dictor/AudioSamples",
+                    "Diagnostic recordings are on: the latest \(keptSamples) are kept in Application Support/Dictor/AudioSamples")
+                : t("На время обработки на диске живёт страховочный журнал. При сбое он остаётся, чтобы вернуть диктовку в историю",
                         "A crash-recovery journal lives on disk while a dictation is handled. After a failure it stays so the dictation can be recovered"),
-            value: t("удаляется", "deleted"))
+            value: keptSamples > 0 ? t("хранятся", "kept") : t("удаляется", "deleted"))
         let notificationsFact = privacyFactRow(
             title: t("Системные уведомления", "System notifications"),
             subtitle: t("Приложение не показывает баннеров — ни разу, ни при ошибке",

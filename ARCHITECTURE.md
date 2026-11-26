@@ -184,7 +184,7 @@ and the "text wasn't inserted" banner.
 | Service status for the window, panel PID, dictionary sync file | `~/Library/Application Support/Dictor/` |
 | Log | `~/Library/Logs/Dictor.log`; launchd captures the same stream into `~/Library/Logs/Dictor-agent.launchd.log` |
 | Speech model (~630 MB, downloaded once) | `~/Library/Application Support/FluidAudio/Models/` |
-| Audio | nowhere after the text exists; during recording, a crash-recovery journal that is deleted as soon as the dictation is handled |
+| Audio | nowhere after the text exists; during recording, a crash-recovery journal that is deleted as soon as the dictation is handled. Only when `diagnostic_audio_samples_v1` is set: the latest N recordings in `~/Library/Application Support/Dictor/AudioSamples/` (`DiagnosticAudioSamples`), and the Privacy tab says so |
 
 ## Updates
 

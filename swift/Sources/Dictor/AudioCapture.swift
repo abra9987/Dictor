@@ -357,6 +357,14 @@ final class AudioCapture: @unchecked Sendable {
         return engineStarted
     }
 
+    /// Сколько каналов отдаёт микрофон. Встроенный микрофон MacBook иногда
+    /// приходит тремя каналами вместо одного, и распознавание в эти сессии
+    /// ошибается чаще; сохранённые для диагностики записи помечаются этим.
+    var inputChannelCount: Int? {
+        lock.lock(); defer { lock.unlock() }
+        return tapInputFormat.map { Int($0.channelCount) }
+    }
+
     func startEngine(inputDevicePreference: String = "",
                                  recordingImmediately: Bool = false,
                                  recoveryJournal: PendingDictationJournal? = nil) throws {
