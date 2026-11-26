@@ -47,15 +47,15 @@ final class Settings: @unchecked Sendable {
     private static let keyPlayFeedbackSounds = "play_feedback_sounds"
     private static let keyShowInDock = "show_in_dock"
     private static let keyInputDevice = "input_device"
-    private static let keyCheckForUpdates = "check_for_updates"
-    private static let keyLastUpdateCheckAt = "last_update_check_at"
-    private static let keyLastUpdateCheckSource = "last_update_check_source"
-    private static let keyLastUpdateCheckResult = "last_update_check_result"
-    private static let keyLastUpdateCheckVersion = "last_update_check_version"
-    private static let keyUpdateReminderPausedVersion = "update_reminder_paused_version"
-    private static let keyUpdateReminderPausedUntil = "update_reminder_paused_until"
-    private static let keyLastSeenVersion = "last_seen_version"
-    private static let keySkippedVersions = "skipped_versions"
+    static let keyCheckForUpdates = "check_for_updates"
+    static let keyLastUpdateCheckAt = "last_update_check_at"
+    static let keyLastUpdateCheckSource = "last_update_check_source"
+    static let keyLastUpdateCheckResult = "last_update_check_result"
+    static let keyLastUpdateCheckVersion = "last_update_check_version"
+    static let keyUpdateReminderPausedVersion = "update_reminder_paused_version"
+    static let keyUpdateReminderPausedUntil = "update_reminder_paused_until"
+    static let keyLastSeenVersion = "last_seen_version"
+    static let keySkippedVersions = "skipped_versions"
     private static let keyTranscriptCorrections = "transcript_corrections"
     private static let keyTranscriptCorrectionsSyncFile = "transcript_corrections_sync_file"
     private static let keyDictationLanguage = "dictation_language"
@@ -66,7 +66,7 @@ final class Settings: @unchecked Sendable {
     private static let keyActiveRunMarker = "active_run_marker"
     private static let keyAgentEnabled = "agent_enabled"
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
 
     /// Разобранный архив истории вместе с тем, из чего он получен. Архив
     /// читают десятки раз за одну пересборку окна и раз в 0,75 с ради
@@ -627,151 +627,6 @@ final class Settings: @unchecked Sendable {
                 defaults.set(normalized, forKey: Self.keyInputDevice)
             } else {
                 defaults.removeObject(forKey: Self.keyInputDevice)
-            }
-        }
-    }
-
-    /// По умолчанию включено. Раньше стояло `false` — и правильно: обновления
-    /// вели в чужой репозиторий, а проверять их было незачем. Теперь канал
-    /// свой, приложение не нотаризовано и живёт вне App Store, так что узнать
-    /// о починке человеку больше неоткуда. Выключается в «Настройки →
-    /// Основное», и тогда приложение само в сеть не ходит — так и написано
-    /// во вкладке «Приватность».
-    var checkForUpdates: Bool {
-        get {
-            if defaults.object(forKey: Self.keyCheckForUpdates) == nil { return true }
-            return defaults.bool(forKey: Self.keyCheckForUpdates)
-        }
-        set { defaults.set(newValue, forKey: Self.keyCheckForUpdates) }
-    }
-
-    var lastUpdateCheckAt: Date? {
-        get { defaults.object(forKey: Self.keyLastUpdateCheckAt) as? Date }
-        set {
-            if let newValue {
-                defaults.set(newValue, forKey: Self.keyLastUpdateCheckAt)
-            } else {
-                defaults.removeObject(forKey: Self.keyLastUpdateCheckAt)
-            }
-        }
-    }
-
-    var lastUpdateCheckSource: UpdateCheckSource? {
-        get {
-            guard let raw = defaults.string(forKey: Self.keyLastUpdateCheckSource) else {
-                return nil
-            }
-            return UpdateCheckSource(rawValue: raw)
-        }
-        set {
-            if let newValue {
-                defaults.set(newValue.rawValue, forKey: Self.keyLastUpdateCheckSource)
-            } else {
-                defaults.removeObject(forKey: Self.keyLastUpdateCheckSource)
-            }
-        }
-    }
-
-    var lastUpdateCheckResult: UpdateCheckResult? {
-        get {
-            guard let raw = defaults.string(forKey: Self.keyLastUpdateCheckResult) else {
-                return nil
-            }
-            return UpdateCheckResult(rawValue: raw)
-        }
-        set {
-            if let newValue {
-                defaults.set(newValue.rawValue, forKey: Self.keyLastUpdateCheckResult)
-            } else {
-                defaults.removeObject(forKey: Self.keyLastUpdateCheckResult)
-            }
-        }
-    }
-
-    var lastUpdateCheckVersion: String {
-        get {
-            guard let raw = defaults.string(forKey: Self.keyLastUpdateCheckVersion),
-                  let normalized = normalizedStoredAppVersion(raw) else {
-                return ""
-            }
-            return normalized
-        }
-        set {
-            if let normalized = normalizedStoredAppVersion(newValue) {
-                defaults.set(normalized, forKey: Self.keyLastUpdateCheckVersion)
-            } else {
-                defaults.removeObject(forKey: Self.keyLastUpdateCheckVersion)
-            }
-        }
-    }
-
-    /// "Remind me later" pause state, persisted so a relaunch inside
-    /// the 24 h window does not re-prompt ~30 s after launch. Both
-    /// halves are validated independently and corrupt stored values
-    /// degrade to nil; DictorApp treats a missing half as "no pause"
-    /// and clears the leftover at startup.
-    var updateReminderPausedVersion: String? {
-        get {
-            guard let raw = defaults.string(forKey: Self.keyUpdateReminderPausedVersion),
-                  let normalized = normalizedStoredAppVersion(raw) else {
-                return nil
-            }
-            return normalized
-        }
-        set {
-            if let newValue, let normalized = normalizedStoredAppVersion(newValue) {
-                defaults.set(normalized, forKey: Self.keyUpdateReminderPausedVersion)
-            } else {
-                defaults.removeObject(forKey: Self.keyUpdateReminderPausedVersion)
-            }
-        }
-    }
-
-    var updateReminderPausedUntil: Date? {
-        get {
-            normalizedUpdateReminderPauseExpiry(
-                storedValue: defaults.object(forKey: Self.keyUpdateReminderPausedUntil)
-            )
-        }
-        set {
-            if let newValue,
-               normalizedUpdateReminderPauseExpiry(storedValue: newValue) != nil {
-                defaults.set(newValue, forKey: Self.keyUpdateReminderPausedUntil)
-            } else {
-                defaults.removeObject(forKey: Self.keyUpdateReminderPausedUntil)
-            }
-        }
-    }
-
-    var lastSeenVersion: String {
-        get {
-            guard let raw = defaults.string(forKey: Self.keyLastSeenVersion),
-                  let normalized = normalizedStoredAppVersion(raw) else {
-                return ""
-            }
-            return normalized
-        }
-        set {
-            if let normalized = normalizedStoredAppVersion(newValue) {
-                defaults.set(normalized, forKey: Self.keyLastSeenVersion)
-            } else {
-                defaults.removeObject(forKey: Self.keyLastSeenVersion)
-            }
-        }
-    }
-
-    var skippedVersions: [String] {
-        get {
-            normalizedSkippedUpdateVersions(
-                (defaults.array(forKey: Self.keySkippedVersions) as? [String]) ?? []
-            )
-        }
-        set {
-            let versions = normalizedSkippedUpdateVersions(newValue)
-            if versions.isEmpty {
-                defaults.removeObject(forKey: Self.keySkippedVersions)
-            } else {
-                defaults.set(versions, forKey: Self.keySkippedVersions)
             }
         }
     }

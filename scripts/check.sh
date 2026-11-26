@@ -234,7 +234,13 @@ SUITES
 # новая настройка без записи в реестре роняет сборку.
 python3 - <<'CATALOG'
 import re, sys
+import pathlib
 settings = open("swift/Sources/Dictor/Settings.swift", encoding="utf-8").read()
+# Настройки живут в классе Settings и в его расширениях по темам (история,
+# обновления) в соседних файлах: var из расширения — такая же настройка.
+for path in sorted(pathlib.Path("swift/Sources/Dictor").glob("*.swift")):
+    text = path.read_text(encoding="utf-8")
+    settings += "\n".join(re.findall(r"^extension Settings \{\n(.*?)^\}", text, re.M | re.S))
 catalog = open("swift/Sources/Dictor/SettingsCatalog.swift", encoding="utf-8").read()
 
 declared = re.findall(r"^    (?:private\s+)?var (\w+)", settings, re.M)
