@@ -54,34 +54,34 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         let capturedAt: TimeInterval
     }
 
-    private var statusItem: NSStatusItem!
+    var statusItem: NSStatusItem!
     private var templateImage: NSImage?
     private var recordingImage: NSImage?
     private var errorImage: NSImage?
     private var recordingStartedAtUptime: TimeInterval?
-    private var quickPanel: DictorQuickPanel?
+    var quickPanel: DictorQuickPanel?
     /// Пауза перед показом коротких состояний службы (макет 8c) — та же, что
     /// в подвале окна, чтобы шапка панели и подвал не расходились словами.
-    private let quickPanelStatusHold = ServiceStatusHold()
-    private var quickPanelStatusHoldTimer: Timer?
+    let quickPanelStatusHold = ServiceStatusHold()
+    var quickPanelStatusHoldTimer: Timer?
     /// Плавающая капсула (макет 6c). Живёт, только пока включена в настройках.
     private let floatingCapsule = FloatingCapsuleController()
-    private var isDictationPaused = false
+    var isDictationPaused = false
     private var menuBarGlyphPhase: CGFloat = 0
     private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
     private var insertedHUDWorkItem: DispatchWorkItem?
-    private let audio = AudioCapture()
+    let audio = AudioCapture()
     private let hotkey = HotkeyListener()
     private let asr = TranscriptionWorker()
     private let insertionTargetTracker = FocusedInsertionTargetTracker()
-    private let settings = Settings.shared
+    let settings = Settings.shared
 
-    private var isRecording = false
-    private var isBusy = false
-    private var isReady = false
+    var isRecording = false
+    var isBusy = false
+    var isReady = false
     private var isCoreRuntimeReady = false
-    private var isSpeechModelReady = false
-    private var isTerminating = false
+    var isSpeechModelReady = false
+    var isTerminating = false
     private var isResettingSpeechModelCache = false
     private var isSwitchingSpeechModel = false
     /// Служба распознаёт на модели прошлой версии: текущей на диске ещё нет,
@@ -102,15 +102,15 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var fallbackSpeechModelProfileAfterStartupFailure: SpeechModelProfile?
     private var startupTask: Task<Void, Never>?
     private var updateCheckLoopTask: Task<Void, Never>?
-    private var manualUpdateCheckTask: Task<Void, Never>?
+    var manualUpdateCheckTask: Task<Void, Never>?
     private var startupStatusTitle = "Loading speech model…"
-    private var speechModelStartupProgressFraction: Double?
+    var speechModelStartupProgressFraction: Double?
     /// «Проверено N файлов модели из M» — то, чем занята служба первые
     /// секунды после запуска. Раньше это время выглядело как «Остановлена».
-    private var verifiedModelFiles: Int?
-    private var totalModelFiles: Int?
+    var verifiedModelFiles: Int?
+    var totalModelFiles: Int?
     private var lastDownloadPhase: DownloadPhase?
-    private var startupFailure: StartupFailure?
+    var startupFailure: StartupFailure?
     private var didTouchAudioEngine = false
     private var permissionReadinessTimer: Timer?
     private var lastPermissionReadinessMissingKey: String?
@@ -171,7 +171,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// Local transcript archive, newest first. UI applies the user's visible limit.
     private var history: [TranscriptHistoryEntry] = []
 
-    private var visibleHistory: [TranscriptHistoryEntry] {
+    var visibleHistory: [TranscriptHistoryEntry] {
         limitedRecentTranscriptEntries(history, limit: settings.recentTranscriptLimit)
     }
 
@@ -182,13 +182,13 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     /// Latest release detected by the periodic check. nil = no update,
     /// or user has skipped it.
-    private var pendingUpdate: DictorRelease?
-    private var isCheckingForUpdates = false
+    var pendingUpdate: DictorRelease?
+    var isCheckingForUpdates = false
     /// Установка, запущенная из «Update now…». Держим задачу, чтобы второй
     /// клик не начал вторую загрузку, и версию — чтобы меню показывало, что
     /// идёт работа, а не молчало на десятках мегабайт скачивания.
     private var updateInstallTask: Task<Void, Never>?
-    private var installingUpdateVersion: String?
+    var installingUpdateVersion: String?
     private var updateAvailableWindow: UpdateAvailableWindow?
     private var reminderPausedUpdateVersion: String?
     private var reminderPausedUntil: Date?
@@ -370,7 +370,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         return true
     }
 
-    private func openControlPanelFromAgent(section: String? = nil) {
+    func openControlPanelFromAgent(section: String? = nil) {
         if DictorControlPanelRegistry.activateExistingPanelIfPresent() {
             log("control panel activated from agent")
             if let section {
@@ -837,7 +837,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     /// Что сказать окну и панели про модель, пока работает прежняя.
-    private var speechModelUpdateStatus: SpeechModelUpdateStatus? {
+    var speechModelUpdateStatus: SpeechModelUpdateStatus? {
         guard isRunningOnPreviousSpeechModel, let phase = speechModelUpdatePhase else { return nil }
         return SpeechModelUpdateStatus(
             previousModelName: SpeechModelPackage.previous.profile.shortName,
@@ -1205,7 +1205,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         rebuildMenu()
     }
 
-    private func missingPermissions() -> [Permission] {
+    func missingPermissions() -> [Permission] {
         Permission.allCases.filter { !Permissions.isGranted($0) }
     }
 
@@ -1524,7 +1524,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         statusItem.button?.toolTip = "Dictor"
     }
 
-    private func setMenuBarState(_ state: MenuBarState) {
+    func setMenuBarState(_ state: MenuBarState) {
         guard let button = statusItem.button else { return }
         switch state {
         case .loading:
@@ -3197,7 +3197,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// поповере, «Quit Dictor» в служебном меню, ⌘Q в окне. Все три обязаны
     /// делать одно и то же, иначе «выйти» означает разное в зависимости от
     /// того, откуда вышли, — а человек видит одно приложение.
-    private func quitApplicationCompletely() {
+    func quitApplicationCompletely() {
         guard confirmStopDictation() else { return }
         // Окно — отдельный процесс, и раньше выход его не касался: иконка из
         // меню-бара исчезала, а приложение оставалось на экране и в Dock.
@@ -3279,7 +3279,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     // MARK: - Menu
 
-    private func rebuildMenu() {
+    func rebuildMenu() {
         publishAgentState()
         if quickPanel?.isVisible == true {
             quickPanel?.apply(state: quickPanelState())
@@ -3323,19 +3323,19 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// Сколько файлов модели уже скачано. Байты FluidAudio не отдаёт — только
     /// число файлов и долю, поэтому «412 МБ из 600 МБ» из макета показать
     /// нечем, а придумывать объём нельзя.
-    private var downloadedModelFiles: Int? {
+    var downloadedModelFiles: Int? {
         guard case .downloading(let completed, _)? = lastDownloadPhase else { return nil }
         return completed
     }
 
-    private var totalDownloadModelFiles: Int? {
+    var totalDownloadModelFiles: Int? {
         guard case .downloading(_, let total)? = lastDownloadPhase else { return nil }
         return total
     }
 
     /// Медиана времени распознавания последних тридцати диктовок. Это же число
     /// показывает плитка в «Продвинутых» — считаем один раз здесь.
-    private var medianLatencyMilliseconds: Int? {
+    var medianLatencyMilliseconds: Int? {
         guard let seconds = medianRecognitionSeconds(entries: settings.recentTranscriptEntries),
               seconds > 0 else { return nil }
         return Int((seconds * 1000).rounded())
@@ -3381,7 +3381,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         localizedText(russian, english, language: settings.interfaceLanguage)
     }
 
-    private func buildMenu() -> NSMenu {
+    func buildMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
@@ -4147,7 +4147,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
 
     // MARK: - Settings submenu
 
-    private func restartAudioForInputDeviceChange() {
+    func restartAudioForInputDeviceChange() {
         restartAudioInput(reason: "input device change")
     }
 
@@ -4756,7 +4756,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
     }
 
-    private func recordUpdateCheck(release: DictorRelease?, source: UpdateCheckSource) {
+    func recordUpdateCheck(release: DictorRelease?, source: UpdateCheckSource) {
         let skippedVersions = source == .manual ? [] : settings.skippedVersions
         let result = updateCheckResult(
             for: release,
@@ -4772,7 +4772,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         log("update check \(source.rawValue): \(result.rawValue)\(versionText)")
     }
 
-    private func handleFetchedRelease(_ release: DictorRelease,
+    func handleFetchedRelease(_ release: DictorRelease,
                                       source: UpdateCheckSource = .automatic) {
         let current = currentBundleVersion()
         guard isNewer(release.version, than: current) else { return }
@@ -4822,7 +4822,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// меню открывается правым кликом по иконке в строке состояния, а до этого
     /// не додумывается почти никто — предложение обновиться существовало
     /// примерно нигде.
-    private func presentUpdateWindow(for release: DictorRelease, currentVersion: String) {
+    func presentUpdateWindow(for release: DictorRelease, currentVersion: String) {
         guard updateAvailableWindow == nil else { return }
         let window = UpdateAvailableWindow(release: release,
                                            currentVersion: currentVersion,
@@ -4838,7 +4838,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         log("update window shown for v\(release.version)")
     }
 
-    private func closeUpdateWindow() {
+    func closeUpdateWindow() {
         updateAvailableWindow?.close()
         updateAvailableWindow = nil
     }
@@ -4935,7 +4935,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         rebuildMenu()
     }
 
-    private func pauseUpdateReminder(for release: DictorRelease) {
+    func pauseUpdateReminder(for release: DictorRelease) {
         setUpdateReminderPause(version: release.version,
                                until: Date().addingTimeInterval(UPDATE_REMIND_LATER_SECONDS))
         pendingUpdate = nil
@@ -4981,7 +4981,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         reminderPausedUntil = until
     }
 
-    private func showUpdateCheckFailedAlert(_ failure: UpdateCheckFailure) {
+    func showUpdateCheckFailedAlert(_ failure: UpdateCheckFailure) {
         showAppForModal()
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -5001,7 +5001,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// проверка подписи нашим сертификатом → подмена бандла с перезапуском.
     /// Загрузка идёт в фоне, а меню всё это время показывает, что происходит:
     /// молчание в ответ на нажатие читается как поломка.
-    private func startUpdate(for release: DictorRelease) {
+    func startUpdate(for release: DictorRelease) {
         guard updateInstallTask == nil else { return }
         let version = release.version
         log("update: installing v\(version)")
@@ -5096,279 +5096,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
             TCC.reset(p, bundleID: bundleID)
         }
         settings.lastSeenVersion = current
-    }
-}
-
-// MARK: - Quick panel (поповер меню-бара)
-
-extension DictorApp: QuickPanelDelegate {
-
-    @objc func statusItemClicked(_ sender: NSStatusBarButton) {
-        if NSApp.currentEvent?.type == .rightMouseUp {
-            // Меню действий: отмена записи, разрешения, обновление, окно,
-            // диагностика, выход. Настроек здесь больше нет — все они живут
-            // в окне, и меню не обязано быть их вторым адресом.
-            statusItem.menu = buildMenu()
-            sender.performClick(nil)
-            statusItem.menu = nil
-            return
-        }
-        let panel = quickPanel ?? {
-            let created = DictorQuickPanel(state: quickPanelState())
-            created.quickDelegate = self
-            quickPanel = created
-            return created
-        }()
-        panel.toggle(relativeTo: sender, state: quickPanelState())
-    }
-
-    /// Состояние службы для панели. Агент — это и есть служба, поэтому здесь
-    /// оно известно напрямую, без чтения файла состояния.
-    ///
-    /// Наружу — состояние, выдержавшее паузу (макет 8c): прогрев длится 0,2 с
-    /// и в шапке успевал только мигнуть.
-    private func quickPanelServiceStatus() -> ServiceStatusKind {
-        let settled = quickPanelStatusHold.settle(rawQuickPanelServiceStatus())
-        scheduleQuickPanelStatusWakeup()
-        return settled
-    }
-
-    /// Пока панель открыта, созревшую паузу некому донести до экрана: шапка
-    /// пересобирается по событиям службы, а их в этот момент может не быть.
-    private func scheduleQuickPanelStatusWakeup() {
-        quickPanelStatusHoldTimer?.invalidate()
-        quickPanelStatusHoldTimer = nil
-        guard let deadline = quickPanelStatusHold.pendingDeadline,
-              quickPanel?.isVisible == true else { return }
-        let delay = max(0.05, deadline.timeIntervalSinceNow)
-        quickPanelStatusHoldTimer = Timer.scheduledTimer(withTimeInterval: delay,
-                                                         repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.quickPanel?.isVisible == true else { return }
-                self.quickPanel?.apply(state: self.quickPanelState())
-            }
-        }
-    }
-
-    private func rawQuickPanelServiceStatus() -> ServiceStatusKind {
-        if installingUpdateVersion != nil { return .updating }
-        if !settings.agentEnabled { return .off }
-        if let missing = missingPermissions().first {
-            return .needsPermission(name: localizedPermissionTitle(missing,
-                                                                   language: settings.interfaceLanguage))
-        }
-        // Отказ на старте (модель не загрузилась, слушатель хоткея не встал)
-        // раньше сюда не доносился: сборщик проваливался в «Служба
-        // запускается · обычно 1–3 секунды» — навечно. Состояние .failed из
-        // макета 8 с кнопкой «Открыть Настройки» существовало и было
-        // недостижимо.
-        if let startupFailure {
-            return startupFailure.isMissingAudioInput ? .noMicrophone : .failed
-        }
-        if let verified = verifiedModelFiles, let total = totalModelFiles {
-            return .verifying(done: verified, total: total)
-        }
-        if !isSpeechModelReady {
-            if speechModelStartupProgressFraction != nil || downloadedModelFiles != nil {
-                return .downloading(fraction: speechModelStartupProgressFraction,
-                                    files: downloadedModelFiles,
-                                    totalFiles: totalDownloadModelFiles)
-            }
-            return .starting
-        }
-        if !isReady { return .warmingUp }
-        // Пауза перекрывает только «Готово»: пока служба запускается или
-        // сломана, это важнее нарочно выключенного хоткея.
-        if isDictationPaused { return .paused }
-        return .ready(latencyMilliseconds: medianLatencyMilliseconds,
-                      modelUpdate: speechModelUpdateStatus)
-    }
-
-    func quickPanelState() -> QuickPanelState {
-        let language = settings.interfaceLanguage
-        let rawPreference = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
-        let devices = availableAudioInputDevices()
-        var microphoneName = audioInputDevice(matching: rawPreference, in: devices)?.name
-            ?? localizedText("Системный по умолчанию", "System default", language: language)
-        // Выбранное устройство отказало — строка обязана сказать, с чего
-        // запись идёт на самом деле, а не повторять галочку из настроек.
-        if let failed = audio.inputFallbackDeviceName {
-            microphoneName = localizedText("\(failed) отказал — системный",
-                                           "\(failed) failed — system default",
-                                           language: language)
-        }
-
-        let calendar = Calendar.current
-        let todayKey = dictationUsageDayKey(for: Date(), calendar: calendar)
-        let today = settings.dailyDictationUsage.first(where: { $0.day == todayKey })
-        let week = lastSevenCompletedDictationUsage(settings.dailyDictationUsage,
-                                                    referenceDate: Date(),
-                                                    calendar: calendar)
-        let weekBars = dictationUsageBarFractions(
-            week.days.map { $0.usage.characterCount } + [today?.characterCount ?? 0])
-
-        return QuickPanelState(
-            enabled: !isDictationPaused,
-            language: settings.dictationLanguage,
-            microphoneName: microphoneName,
-            devices: devices,
-            // Ровно столько, сколько выбрано в «Недавнее в панели меню-бара»
-            // (1/5/10): панель — единственный оставшийся список меню-бара,
-            // и настройка управляет именно ею.
-            recent: visibleHistory,
-            historyKeepingEnabled: settings.recentTranscriptLimit != .off,
-            todayCharacters: today?.characterCount ?? 0,
-            todayAudioSeconds: today?.audioSeconds ?? 0,
-            weekBars: weekBars,
-            interfaceLanguage: language
-        ,
-                               availableUpdateVersion: pendingUpdate?.version,
-                               installedVersion: currentBundleVersion(),
-                               isCheckingForUpdates: isCheckingForUpdates,
-                               serviceStatus: quickPanelServiceStatus())
-    }
-
-    func quickPanelDidToggleEnabled(_ enabled: Bool) {
-        isDictationPaused = !enabled
-        if isDictationPaused {
-            setMenuBarState(.paused)
-            log("dictation paused from quick panel")
-        } else {
-            setMenuBarState(isReady ? .idle : .loading)
-            log("dictation resumed from quick panel")
-        }
-        rebuildMenu()
-    }
-
-    func quickPanelDidSelectLanguage(_ language: DictationLanguage) {
-        settings.dictationLanguage = language
-        log("dictation language selected from quick panel: \(language.rawValue)")
-        rebuildMenu()
-    }
-
-    func quickPanelDidSelectInputDevice(uid: String) {
-        guard !isRecording, !isBusy, !isTerminating else { return }
-        settings.inputDevice = uid
-        log("input device selected from quick panel: \(uid.isEmpty ? "system default" : uid)")
-        restartAudioForInputDeviceChange()
-        rebuildMenu()
-    }
-
-    func quickPanelDidCopyRecent(text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-    }
-
-    func quickPanelDidPasteRecent(text: String) {
-        _ = TextInserter.insert(pastedText(from: text, suffix: settings.pasteSuffix))
-    }
-
-    func quickPanelOpenSettings() {
-        openControlPanelFromAgent(section: "settings")
-    }
-
-    func quickPanelOpenHistory() {
-        openControlPanelFromAgent(section: "history")
-    }
-
-    // MARK: - Окно обновления
-
-    func updateWindowDidChooseInstall(version: String) {
-        guard let release = pendingUpdate, release.version == version else { return }
-        startUpdate(for: release)
-    }
-
-    func updateWindowDidChooseLater(version: String) {
-        guard let release = pendingUpdate, release.version == version else { return }
-        closeUpdateWindow()
-        pauseUpdateReminder(for: release)
-    }
-
-    func updateWindowDidChooseSkip(version: String) {
-        closeUpdateWindow()
-        var skipped = settings.skippedVersions
-        if !skipped.contains(version) {
-            skipped.append(version)
-            settings.skippedVersions = skipped
-            log("user skipped v\(version) from the update window")
-        }
-        pendingUpdate = nil
-        rebuildMenu()
-    }
-
-    /// «Выйти» в поповере — та кнопка, которой люди действительно выходят:
-    /// поповер открывается левым кликом, а меню с «Quit Dictor» — правым,
-    /// куда мало кто заходит. Она же и не выходила толком: завершала процесс
-    /// службы, оставляя открытое окно жить своей жизнью и не снимая launchd,
-    /// так что «Выйти» выглядело как «пропала иконка».
-    ///
-    /// Теперь это тот же полный выход, что и в меню.
-    func quickPanelQuit() {
-        quitApplicationCompletely()
-    }
-
-    func quickPanelInstallUpdate() {
-        guard let release = pendingUpdate else { return }
-        presentUpdateWindow(for: release, currentVersion: currentBundleVersion())
-    }
-
-    /// Ручная проверка из панели. Обработчик для неё существовал с самого
-    /// начала, но не был подключён ни к одному элементу интерфейса: узнать о
-    /// новой версии можно было только дождавшись автоматической проверки.
-    /// «Открыть Настройки» / «Запустить» / «Перезапустить службу» из шапки
-    /// панели — те же действия, что и в подвале окна.
-    func quickPanelStatusPrimaryAction() {
-        switch quickPanelServiceStatus() {
-        case .needsPermission:
-            openControlPanelFromAgent(section: "settings")
-        case .failed, .versionMismatch:
-            // Перезапускать службу из неё самой нельзя: `bootout` ждал бы
-            // смерти этого же процесса и повесил бы главный поток. Открываем
-            // окно — там перезапуск делает отдельный процесс, и там же видно,
-            // чем всё кончилось.
-            openControlPanelFromAgent(section: "settings")
-        default:
-            break
-        }
-    }
-
-    func quickPanelStatusSecondaryAction() {
-        openControlPanelFromAgent(section: "settings")
-    }
-
-    func quickPanelCheckForUpdates() {
-        guard !isCheckingForUpdates else { return }
-        isCheckingForUpdates = true
-        refreshQuickPanel()
-        manualUpdateCheckTask = Task { [weak self] in
-            let outcome = await UpdateCheck.fetchLatest()
-            guard !Task.isCancelled, let self, !self.isTerminating else { return }
-            self.manualUpdateCheckTask = nil
-            self.isCheckingForUpdates = false
-            self.recordUpdateCheck(release: try? outcome.get(), source: .manual)
-            switch outcome {
-            case .success(let release):
-                self.handleFetchedRelease(release, source: .manual)
-                self.refreshQuickPanel()
-                if self.pendingUpdate == nil {
-                    self.quickPanel?.flashUpToDate()
-                }
-            case .failure(let error):
-                // Проверка не удалась — и сказать об этом обязательно. Раньше
-                // здесь просто не оказывалось обновления, и панель отвечала
-                // «у вас последняя версия»: человек, у которого не было сети,
-                // получал бодрое подтверждение вместо правды.
-                log("manual update check failed: \(error)")
-                self.refreshQuickPanel()
-                self.showUpdateCheckFailedAlert(error)
-            }
-        }
-    }
-
-    private func refreshQuickPanel() {
-        guard let panel = quickPanel, panel.isVisible else { return }
-        panel.apply(state: quickPanelState())
     }
 }
 
