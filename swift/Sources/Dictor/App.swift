@@ -1611,7 +1611,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 let requestedAt = ProcessInfo.processInfo.systemUptime
                 let transcription = try await asr.transcribe(
                     samples: samples,
-                    language: settings.dictationLanguage.fluidLanguage,
+                    language: settings.dictationLanguage,
                     requestedAt: requestedAt
                 )
                 let completedAt = ProcessInfo.processInfo.systemUptime
@@ -3459,7 +3459,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         // immediately, but its disk/menu updates now overlap inference.
         let asrRequestedAt = ProcessInfo.processInfo.systemUptime
         let transcriptionWorker = asr
-        let language = settings.dictationLanguage.fluidLanguage
+        let language = settings.dictationLanguage
         let transcriptionTask = Task.detached(priority: .userInitiated) {
             let transcription = try await transcriptionWorker.transcribe(
                 samples: samples,
@@ -3720,7 +3720,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
                 let requestedAt = ProcessInfo.processInfo.systemUptime
                 let transcription = try await asr.transcribe(
                     samples: captured.samples,
-                    language: settings.dictationLanguage.fluidLanguage,
+                    language: settings.dictationLanguage,
                     requestedAt: requestedAt
                 )
                 let completedAt = ProcessInfo.processInfo.systemUptime

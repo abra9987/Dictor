@@ -268,8 +268,8 @@ actor TranscriptionWorker {
     }
 
     func transcribe(samples: [Float],
-                               language: Language? = nil,
-                               requestedAt: TimeInterval) async throws -> TranscriptionWorkerResult {
+                    language: DictationLanguage = .auto,
+                    requestedAt: TimeInterval) async throws -> TranscriptionWorkerResult {
         let workerEnteredAt = ProcessInfo.processInfo.systemUptime
         guard let engine else { throw NSError(domain: "Dictor", code: -2) }
         guard !inFlight else {
@@ -284,14 +284,36 @@ actor TranscriptionWorker {
             let decoderPreparationStartedAt = ProcessInfo.processInfo.systemUptime
             var state = try TdtDecoderState()
             let fluidCallStartedAt = ProcessInfo.processInfo.systemUptime
-            let result = try await asr.transcribe(samples, decoderState: &state, language: language)
+            let result = try await asr.transcribe(samples, decoderState: &state,
+                                                  language: language.fluidLanguage)
+            var text = result.text
+            var processingTime = result.processingTime
+            // Чужой язык в русской диктовке (ForeignLanguageGuard): та же
+            // запись ещё раз, с кириллицей. Случается редко и стоит один
+            // проход модели — десятые доли секунды.
+            let policy = ForeignLanguageGuard.policy(for: language)
+            if policy.retriesLatinSlavic, ForeignLanguageGuard.needsCyrillicRetry(text) {
+                var retryState = try TdtDecoderState()
+                let retry = try await asr.transcribe(samples, decoderState: &retryState,
+                                                     language: .russian)
+                processingTime += retry.processingTime
+                if ForeignLanguageGuard.containsCyrillic(retry.text) {
+                    log("ASR: Latin-script Slavic output replaced by a Cyrillic retry")
+                    text = retry.text
+                } else {
+                    log("ASR: Latin-script Slavic output kept: the Cyrillic retry had no Cyrillic")
+                }
+            }
+            if policy.foldsNonRussianCyrillic {
+                text = ForeignLanguageGuard.foldNonRussianCyrillic(text)
+            }
             let fluidCallCompletedAt = ProcessInfo.processInfo.systemUptime
             return TranscriptionWorkerResult(
-                text: result.text,
+                text: text,
                 workerQueueSeconds: workerEnteredAt - requestedAt,
                 decoderPreparationSeconds: fluidCallStartedAt - decoderPreparationStartedAt,
                 fluidCallSeconds: fluidCallCompletedAt - fluidCallStartedAt,
-                fluidProcessingSeconds: result.processingTime
+                fluidProcessingSeconds: processingTime
             )
         }
     }
@@ -301,7 +323,7 @@ actor TranscriptionWorker {
         let requestedAt = ProcessInfo.processInfo.systemUptime
         let transcription = try await transcribe(
             samples: samples,
-            language: nil,
+            language: .auto,
             requestedAt: requestedAt
         )
         let completedAt = ProcessInfo.processInfo.systemUptime

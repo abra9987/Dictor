@@ -36,7 +36,7 @@ func transcribeFileLikeDictation(at url: URL,
     let samples = try AudioConverter().resampleAudioFile(url)
     let requestedAt = ProcessInfo.processInfo.systemUptime
     let result = try await worker.transcribe(samples: samples,
-                                             language: language.fluidLanguage,
+                                             language: language,
                                              requestedAt: requestedAt)
     let transcriptionSeconds = ProcessInfo.processInfo.systemUptime - requestedAt
     let processed = processedDictationText(rawTranscript: result.text,

@@ -164,6 +164,7 @@ enum DictorSelfTest {
         try testSettingsReachability()
         try testSmartInsertion()
         try testBrowserTyping()
+        try testForeignLanguageGuard()
     }
 
     /// Достижимость настроек — по реестру SETTINGS_CATALOG. Класс дефекта
