@@ -97,7 +97,7 @@ grep -q 'launchPreparedDictorUpdate(prepared' swift/Sources/Dictor/AppUpdates.sw
 # проблеме молчит. Так было до 1.11.3: при открытом окне обновления сбой не
 # записывался, и по папиному отчёту нельзя было понять, что сломалось.
 grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/AppUpdates.swift
-grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/ControlPanel.swift
+grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/ControlPanelUpdates.swift
 
 # Мёртвый код. Дважды этот класс доходил до релиза: апдейтер был написан целиком
 # и недостижим, кнопка очистки поиска рисовалась и не принимала кликов.
