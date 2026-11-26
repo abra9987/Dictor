@@ -2,16 +2,7 @@ import AppKit
 import AVFoundation
 import AudioToolbox
 import Foundation
-import CoreGraphics
-import CryptoKit
-import Darwin
-import ApplicationServices
 import DictorObjCSupport
-import FluidAudio
-import IOKit
-import QuartzCore
-import ServiceManagement
-import UniformTypeIdentifiers
 
 // MARK: - Audio capture
 //
