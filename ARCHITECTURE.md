@@ -226,28 +226,28 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `RecordingHUDView.swift`, `RecordingHUDExport.swift` | drawing the recording capsule, and its frame-by-frame export |
 | `UpdateProgressApp.swift` | the separate process that shows install progress while the helper replaces the app |
 | `ControlPanel.swift`, `ControlPanel*.swift` | the window, `DictorControlPanelApp`: `ControlPanel.swift` holds its state and lifecycle; sections (`Sidebar`, `Today`, `Stats`, `History`, `Dictionary`), settings (`Settings` plus a file per tab: `DictationTab`, `TextTab`, `LookTab`, `AppPrivacyTabs`, `ServiceTab`), `Updates`, `Refresh`, `Previews` |
-| `MainWindow.swift`, `SettingsUI.swift`, `SDTheme.swift` | the design system — every control is drawn by hand to match the mockups in both themes |
-| `HotkeyListener.swift` | the event tap and chord handling |
+| `MainWindow.swift`, `SettingsUI.swift`, `SDTheme.swift` | the design system — every control is drawn by hand to match the mockups in both themes. Window pieces: `MainWindowCards`, `MainWindowRows`, `HistoryListViews`, `EnamelAndHintViews`; settings pieces: `SettingsControls`, `SettingsFieldControls`, `SettingsCards` |
+| `HotkeyListener.swift`, `HotkeyRecorder.swift`, `HotkeyChoice.swift` | the event tap and chord handling; recording a new shortcut in the window; the shortcut type and key names |
 | `AudioCapture.swift`, `AudioInputDevices.swift` | recording, conversion, device selection |
 | `PendingDictationRecovery.swift` | the on-disk journal of a recording, so a dictation survives a crash before it became text |
 | `MissingMicrophone.swift` | no input device at all: the failure reason the window shows, no pointless retries, the device-list listener that restarts the service when a microphone appears |
 | `TranscriptionWorker.swift` | the model |
-| `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
+| `TranscriptCorrections.swift`, `TranscriptCorrectionHelpers.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition; normalising, importing and sync-merging the dictionary |
 | `SmartInsertion.swift` | what stands before the cursor, and the two rules that fit the text to it |
 | `InsertionTarget.swift` | where the text will land: the focused field and caret through accessibility, and the capsule's target stabiliser |
 | `TextInsertion.swift` | the insertion entry point, strategies and keystroke posting |
 | `ClipboardPaste.swift` | paste through the clipboard: the lazy promise, the restore after the read, the never-read failsafe |
 | `BrowserTyping.swift` | the one place insertion types instead of pasting: a text field inside a Chrome web page, where ⌘V is lost every other time |
-| `Settings.swift`, `CoreTypes.swift` | stored settings and shared types |
+| `Settings.swift`, `SettingsHistory.swift`, `SettingsUpdateState.swift`, `CoreTypes.swift`, `DictationOptions.swift`, `DictationHistoryTypes.swift` | stored settings (history and update state are `extension Settings`, which `check.sh` reads together with the class) and shared types: constants, dictation options, history and usage records |
 | `SettingsCatalog.swift` | the tab list and the settings registry: every `Settings` var is declared shown-somewhere, internal, or user data — `check.sh` cross-checks the list, the `settings-reachable` suite proves the shown rows are clickable and that every declared tab exists and holds at least one row |
-| `Statistics.swift` | what the Statistics section shows |
-| `UpdateCheck.swift`, `UpdateWindow.swift` | the updater |
+| `Statistics.swift`, `StatisticsCharts.swift` | what the Statistics section shows, and its charts |
+| `UpdateCheck.swift`, `UpdateWindow.swift`, `UpdateHelperScript.swift` | the updater; the helper script that replaces the app, and the private files it writes |
 | `UpdateDownload.swift` | fetching the archive over a bad link: a stall (not slowness) breaks the connection, the next attempt resumes with `Range`/`If-Range`, progress in bytes for both install paths |
 | `ModelIntegrity.swift` | the two model descriptions with their manifests, per-file SHA-256 verification, cache paths, disk space |
 | `SpeechModelUpdate.swift` | background download of the current model while the previous one works, and the decision when to switch |
 | `ProblemReport.swift`, `DictionaryShare.swift` | the two things a person can choose to email: a diagnostics archive and their dictionary |
 | `Permissions.swift`, `PermissionsDoctor.swift` | the three macOS permissions and the three reasons a granted one still gets asked for |
 | `InstallLocation.swift` | moving the app into Applications, quarantine |
-| `ServiceStatus.swift`, `FloatingCapsule.swift`, `QuickPanel.swift` | service state, the floating capsule, the menu-bar popover |
+| `ServiceStatus.swift`, `FloatingCapsule.swift`, `QuickPanel*.swift` | service state, the floating capsule, the menu-bar popover (`QuickPanel` holds the panel, `QuickPanelStatusRows` and `QuickPanelRows` its rows, `QuickPanelViews` the small views, `QuickPanelPreviews` the export) |
 | `Onboarding*.swift` | first-run flow inside the window |
 | `SelfTests.swift`, `*SelfTests.swift` | the suite registry and `all` live in `SelfTests.swift`; suite bodies are `extension DictorSelfTest` in `*SelfTests.swift` grouped by area, or next to their module (DEBUG only) |
