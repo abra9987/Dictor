@@ -91,12 +91,12 @@ fi
 # Установку обновления зовёт и меню-бар, и окно. Пока она была написана
 # внутри ControlPanel, из агента до неё было не дотянуться.
 grep -q 'func launchPreparedDictorUpdate' swift/Sources/Dictor/UpdateCheck.swift
-grep -q 'launchPreparedDictorUpdate(prepared' swift/Sources/Dictor/App.swift
+grep -q 'launchPreparedDictorUpdate(prepared' swift/Sources/Dictor/AppUpdates.swift
 
 # Сбой установки обязан попасть в журнал из обоих путей — иначе отчёт о
 # проблеме молчит. Так было до 1.11.3: при открытом окне обновления сбой не
 # записывался, и по папиному отчёту нельзя было понять, что сломалось.
-grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/App.swift
+grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/AppUpdates.swift
 grep -q 'log("update: install of v\\(version) failed' swift/Sources/Dictor/ControlPanel.swift
 
 # Мёртвый код. Дважды этот класс доходил до релиза: апдейтер был написан целиком
