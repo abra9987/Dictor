@@ -28,7 +28,7 @@ the helper has to outlive the bundle it is overwriting.
 
 ## The path of one dictation
 
-Eight links, `App.swift` `handleRelease` being the spine:
+Eight links, `handleRelease` in `AppDictation.swift` being the spine:
 
 1. **`HotkeyListener`** — a `CGEventTap` sees the key go down and up. Only the
    bound key is swallowed; its companion modifier is left to the system, because
@@ -198,7 +198,7 @@ is written out in [docs/updates.md](docs/updates.md).
 - **`scripts/check.sh`** — static: manifests, the signing pin against the
   keychain, site markup and asset existence, and grep rules that guard defects
   this project has actually shipped. It does not compile.
-- **Self-tests** — 36 suites in `SelfTests.swift`, 33 in `all`, three excluded
+- **Self-tests** — 36 suites registered in `SelfTests.swift`, 33 in `all`, three excluded
   by name because they need a live machine. They exist only in DEBUG builds.
   Several assert *reachability* rather than behaviour: that a control is not
   covered by another view, that an action has a receiver, that a suite is
@@ -222,11 +222,14 @@ worth as much as a feature, and it stopped this question from being reopened.
 | File | What it is |
 |---|---|
 | `main.swift` | entry point, argument handling, the three process modes |
-| `App.swift` | the agent: menu bar, hotkey handling, the dictation pipeline, diagnostics |
-| `ControlPanel.swift` | the window: sections, settings tabs, dictionary, the Service section |
+| `App.swift`, `App*.swift` | the agent, `DictorApp`: `App.swift` holds its state and lifecycle, the rest are extensions by concern — `AppDictation` (press and release, the pipeline), `AppStartup` (model loading, background model update), `AppAudioRuntime` (sleep and wake, audio route), `AppReadiness` (permissions, live settings), `AppRecordingHUD` and `AppRecordingHUDPlacement` (menu-bar icon, the capsule and where it stands), `AppSystemAudioMute`, `AppMenu`, `AppSetupChecklist`, `AppHistoryAndDiagnostics`, `AppCorrectionSync`, `AppUpdates`, `AppQuickPanel` |
+| `RecordingHUDView.swift`, `RecordingHUDExport.swift` | drawing the recording capsule, and its frame-by-frame export |
+| `UpdateProgressApp.swift` | the separate process that shows install progress while the helper replaces the app |
+| `ControlPanel.swift`, `ControlPanel*.swift` | the window, `DictorControlPanelApp`: `ControlPanel.swift` holds its state and lifecycle; sections (`Sidebar`, `Today`, `Stats`, `History`, `Dictionary`), settings (`Settings` plus a file per tab: `DictationTab`, `TextTab`, `LookTab`, `AppPrivacyTabs`, `ServiceTab`), `Updates`, `Refresh`, `Previews` |
 | `MainWindow.swift`, `SettingsUI.swift`, `SDTheme.swift` | the design system — every control is drawn by hand to match the mockups in both themes |
 | `HotkeyListener.swift` | the event tap and chord handling |
 | `AudioCapture.swift`, `AudioInputDevices.swift` | recording, conversion, device selection |
+| `PendingDictationRecovery.swift` | the on-disk journal of a recording, so a dictation survives a crash before it became text |
 | `MissingMicrophone.swift` | no input device at all: the failure reason the window shows, no pointless retries, the device-list listener that restarts the service when a microphone appears |
 | `TranscriptionWorker.swift` | the model |
 | `TranscriptCorrections.swift`, `BuiltInSpellings.swift`, `LatinTermRestorations.swift`, `FillerWordRemoval.swift` | text after recognition |
@@ -247,4 +250,4 @@ worth as much as a feature, and it stopped this question from being reopened.
 | `InstallLocation.swift` | moving the app into Applications, quarantine |
 | `ServiceStatus.swift`, `FloatingCapsule.swift`, `QuickPanel.swift` | service state, the floating capsule, the menu-bar popover |
 | `Onboarding*.swift` | first-run flow inside the window |
-| `SelfTests.swift` | all suites (DEBUG only) |
+| `SelfTests.swift`, `*SelfTests.swift` | the suite registry and `all` live in `SelfTests.swift`; suite bodies are `extension DictorSelfTest` in `*SelfTests.swift` grouped by area, or next to their module (DEBUG only) |
