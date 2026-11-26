@@ -30,12 +30,12 @@ final class Settings: @unchecked Sendable {
     private static let keyInterfaceLanguage = "interface_language"
     private static let keyTriggerMode = "trigger_mode"
     private static let keyPasteSuffix = "paste_suffix"
-    private static let keyRecentTranscripts = "recent_transcripts"
-    private static let keyPreferredRecentTranscripts = "recent_transcripts_preferred_v1"
-    private static let keyRecentTranscriptHistory = "recent_transcript_history"
-    private static let keyRecentTranscriptEntries = "recent_transcript_entries_v1"
-    private static let keyDailyDictationUsage = "daily_dictation_usage_v1"
-    private static let keyDidImportDictationUsageLog = "did_import_dictation_usage_log_v1"
+    static let keyRecentTranscripts = "recent_transcripts"
+    static let keyPreferredRecentTranscripts = "recent_transcripts_preferred_v1"
+    static let keyRecentTranscriptHistory = "recent_transcript_history"
+    static let keyRecentTranscriptEntries = "recent_transcript_entries_v1"
+    static let keyDailyDictationUsage = "daily_dictation_usage_v1"
+    static let keyDidImportDictationUsageLog = "did_import_dictation_usage_log_v1"
     private static let keyShowRecordingWaveform = "show_recording_waveform"
     private static let keyRecordingHUDRecordingColor = "recording_hud_recording_color"
     private static let keyRecordingHUDTranscribingColor = "recording_hud_transcribing_color"
@@ -72,8 +72,8 @@ final class Settings: @unchecked Sendable {
     /// читают десятки раз за одну пересборку окна и раз в 0,75 с ради
     /// отпечатка, а разбор тысячи записей из JSON — это 12–25 мс. Сравнить
     /// байты — memcmp, поэтому, пока они те же, отдаётся прошлый результат.
-    private let historyCacheLock = NSLock()
-    private var historyCache: (data: Data, pinned: [String], entries: [TranscriptHistoryEntry])?
+    let historyCacheLock = NSLock()
+    var historyCache: (data: Data, pinned: [String], entries: [TranscriptHistoryEntry])?
 
     static let shared = Settings()
 
@@ -363,148 +363,6 @@ final class Settings: @unchecked Sendable {
             return defaults.bool(forKey: "smart_insertion_v1")
         }
         set { defaults.set(newValue, forKey: "smart_insertion_v1") }
-    }
-
-    var recentTranscriptLimit: RecentTranscriptLimit {
-        get {
-            parseRecentTranscriptLimit(storedValue: defaults.object(forKey: Self.keyRecentTranscripts))
-                ?? DEFAULT_RECENT_TRANSCRIPT_LIMIT
-        }
-        set {
-            // Запоминаем последний ненулевой выбор, чтобы выключение и
-            // повторное включение истории возвращали ту же длину списка
-            // в меню-баре, а не молча подменяли её десяткой.
-            if newValue != .off {
-                defaults.set(newValue.rawValue, forKey: Self.keyPreferredRecentTranscripts)
-            }
-            defaults.set(newValue.rawValue, forKey: Self.keyRecentTranscripts)
-        }
-    }
-
-    /// Длина списка в меню-баре, к которой возвращаемся при включении
-    /// истории обратно.
-    var preferredRecentTranscriptLimit: RecentTranscriptLimit {
-        let stored = parseRecentTranscriptLimit(
-            storedValue: defaults.object(forKey: Self.keyPreferredRecentTranscripts))
-        guard let stored, stored != .off else { return DEFAULT_RECENT_TRANSCRIPT_LIMIT }
-        return stored
-    }
-
-    var recentTranscriptHistory: [String] {
-        get {
-            let stored = defaults.stringArray(forKey: Self.keyRecentTranscriptHistory) ?? []
-            return Array(
-                stored.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                    .prefix(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES)
-            )
-        }
-        set {
-            let cleaned = Array(
-                newValue.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                    .prefix(TRANSCRIPT_HISTORY_ARCHIVE_MAX_ENTRIES)
-            )
-            if cleaned.isEmpty {
-                defaults.removeObject(forKey: Self.keyRecentTranscriptHistory)
-            } else {
-                defaults.set(cleaned, forKey: Self.keyRecentTranscriptHistory)
-            }
-            defaults.removeObject(forKey: Self.keyRecentTranscriptEntries)
-        }
-    }
-
-    /// Сырые байты архива истории — как лежат в defaults. Для дешёвого ответа
-    /// на «изменилось ли снаружи»: сравнить Data — это memcmp, а декодировать
-    /// до 10 000 записей каждую секунду наблюдателя настроек — нет.
-    var recentTranscriptEntriesStoredData: Data? {
-        defaults.data(forKey: Self.keyRecentTranscriptEntries)
-    }
-
-    var recentTranscriptEntries: [TranscriptHistoryEntry] {
-        get {
-            if let data = defaults.data(forKey: Self.keyRecentTranscriptEntries) {
-                // Закреплённые участвуют в ограничении архива, поэтому они —
-                // такая же часть ключа, как сами байты.
-                let pinned = pinnedTranscripts
-                historyCacheLock.lock()
-                let cached = historyCache
-                historyCacheLock.unlock()
-                if let cached, cached.data == data, cached.pinned == pinned {
-                    return cached.entries
-                }
-                if let decoded = try? JSONDecoder().decode([TranscriptHistoryEntry].self, from: data) {
-                    let cleaned = decoded.compactMap { entry -> TranscriptHistoryEntry? in
-                        let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !text.isEmpty else { return nil }
-                        return TranscriptHistoryEntry(
-                            text: text,
-                            transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
-                            asrTiming: entry.asrTiming,
-                            createdAt: entry.createdAt
-                        )
-                    }
-                    let entries = limitedTranscriptHistoryArchive(cleaned, pinned: Set(pinned))
-                    historyCacheLock.lock()
-                    historyCache = (data, pinned, entries)
-                    historyCacheLock.unlock()
-                    return entries
-                }
-            }
-
-            return recentTranscriptHistory.map { TranscriptHistoryEntry(text: $0) }
-        }
-        set {
-            let cleaned = limitedTranscriptHistoryArchive(
-                newValue.compactMap { entry -> TranscriptHistoryEntry? in
-                    let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { return nil }
-                    return TranscriptHistoryEntry(
-                        text: text,
-                        transcriptionDurationSeconds: entry.transcriptionDurationSeconds,
-                        asrTiming: entry.asrTiming,
-                        createdAt: entry.createdAt
-                    )
-                },
-                pinned: Set(pinnedTranscripts)
-            )
-
-            guard !cleaned.isEmpty else {
-                defaults.removeObject(forKey: Self.keyRecentTranscriptEntries)
-                defaults.removeObject(forKey: Self.keyRecentTranscriptHistory)
-                return
-            }
-
-            if let data = try? JSONEncoder().encode(cleaned) {
-                defaults.set(data, forKey: Self.keyRecentTranscriptEntries)
-            }
-            defaults.set(cleaned.map(\.text), forKey: Self.keyRecentTranscriptHistory)
-        }
-    }
-
-    var dailyDictationUsage: [DailyDictationUsage] {
-        get {
-            guard let data = defaults.data(forKey: Self.keyDailyDictationUsage),
-                  let decoded = try? JSONDecoder().decode([DailyDictationUsage].self, from: data) else {
-                return []
-            }
-            return mergedDailyDictationUsage(decoded)
-        }
-        set {
-            let cleaned = mergedDailyDictationUsage(newValue)
-            guard !cleaned.isEmpty else {
-                defaults.removeObject(forKey: Self.keyDailyDictationUsage)
-                return
-            }
-            if let data = try? JSONEncoder().encode(cleaned) {
-                defaults.set(data, forKey: Self.keyDailyDictationUsage)
-            }
-        }
-    }
-
-    var didImportDictationUsageLog: Bool {
-        get { defaults.bool(forKey: Self.keyDidImportDictationUsageLog) }
-        set { defaults.set(newValue, forKey: Self.keyDidImportDictationUsageLog) }
     }
 
     var showRecordingWaveform: Bool {
