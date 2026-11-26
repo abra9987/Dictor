@@ -162,6 +162,27 @@ for text in texts.values():
             if match and not FRAMEWORK_PREFIXES.match(match.group(1)):
                 candidates.add(match.group(1))
 
+# Хранимые свойства агента и окна. Пока классы жили в одном файле, свойства
+# были private и попадали под правило выше; после разбиения на расширения по
+# файлам они стали internal, и забытое свойство снова стало невидимым.
+# Только эти два класса: у структур поле с одним вхождением — норма (Codable,
+# поэлементный init).
+MAIN_CLASS = re.compile(r"^(?:@MainActor\s+)?final class (?:DictorApp|DictorControlPanelApp)\b")
+STORED_PROPERTY = re.compile(
+    r"^    (?:(?:weak|lazy|static|nonisolated|private|fileprivate|private\(set\))\s+)*"
+    r"(?:var|let)\s+(\w+)(?![^=\n]*\{\s*$)")
+for text in texts.values():
+    inside = False
+    for line in text.split("\n"):
+        if MAIN_CLASS.match(line):
+            inside = True
+        elif inside and line.startswith("}"):
+            inside = False
+        elif inside:
+            match = STORED_PROPERTY.match(line)
+            if match:
+                candidates.add(match.group(1))
+
 counts = Counter()
 for text in texts.values():
     for word in re.findall(r"\b\w+\b", text):
