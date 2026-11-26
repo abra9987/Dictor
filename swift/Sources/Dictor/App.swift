@@ -65,7 +65,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     let quickPanelStatusHold = ServiceStatusHold()
     var quickPanelStatusHoldTimer: Timer?
     /// Плавающая капсула (макет 6c). Живёт, только пока включена в настройках.
-    private let floatingCapsule = FloatingCapsuleController()
+    let floatingCapsule = FloatingCapsuleController()
     var isDictationPaused = false
     private var menuBarGlyphPhase: CGFloat = 0
     private var lastMenuBarGlyphUpdateAt: TimeInterval = 0
@@ -112,8 +112,8 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     var lastDownloadPhase: DownloadPhase?
     var startupFailure: StartupFailure?
     var didTouchAudioEngine = false
-    private var permissionReadinessTimer: Timer?
-    private var lastPermissionReadinessMissingKey: String?
+    var permissionReadinessTimer: Timer?
+    var lastPermissionReadinessMissingKey: String?
     /// Recording-time system-audio mute state machine. Main-actor
     /// only; transitions are driven by muteIfNeededForRecording /
     /// unmuteIfWeMuted and the SystemAudio.*Async completions. The
@@ -169,7 +169,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var systemAudioMuteWatchdog: Process?
 
     /// Local transcript archive, newest first. UI applies the user's visible limit.
-    private var history: [TranscriptHistoryEntry] = []
+    var history: [TranscriptHistoryEntry] = []
 
     var visibleHistory: [TranscriptHistoryEntry] {
         limitedRecentTranscriptEntries(history, limit: settings.recentTranscriptLimit)
@@ -178,7 +178,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// In-session click counter per permission. Click #2 onwards
     /// resets the matching TCC entry before re-requesting — belt
     /// and braces for stuck DENIED entries macOS occasionally caches.
-    private var permClickCount: [Permission: Int] = [:]
+    var permClickCount: [Permission: Int] = [:]
 
     /// Latest release detected by the periodic check. nil = no update,
     /// or user has skipped it.
@@ -196,20 +196,20 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     private var correctionSyncTimer: Timer?
     /// Хоткеи агент раньше читал только при старте, поэтому их смена
     /// требовала перезапуска службы. Таймер подхватывает их на лету.
-    private var settingsWatchTimer: Timer?
+    var settingsWatchTimer: Timer?
     /// Что служба видела в настройках в прошлый тик. Нужны, чтобы отличать
     /// «человек поменял в окне» от «ничего не изменилось»: без сравнения
     /// перезапуск аудиовхода случался бы раз в секунду.
-    private var lastSeenInputDevice: String?
-    private var lastSeenCorrections: [TranscriptCorrection]?
-    private var lastSeenCorrectionSyncFilePath: String?
+    var lastSeenInputDevice: String?
+    var lastSeenCorrections: [TranscriptCorrection]?
+    var lastSeenCorrectionSyncFilePath: String?
     /// Байты архива истории, какими агент видел их в последний раз. Обновляется
     /// и собственными записями (persistHistoryArchive), и наблюдателем — чтобы
     /// «изменилось снаружи» не срабатывало на самих себя.
-    private var lastSeenHistoryArchiveData: Data?
-    private var lastAppliedHotkeySignature = ""
-    private var correctionSyncFileFingerprint: CorrectionSyncFileFingerprint?
-    private var correctionSyncBaselineCorrections: [TranscriptCorrection] = []
+    var lastSeenHistoryArchiveData: Data?
+    var lastAppliedHotkeySignature = ""
+    var correctionSyncFileFingerprint: CorrectionSyncFileFingerprint?
+    var correctionSyncBaselineCorrections: [TranscriptCorrection] = []
     private var isApplyingCorrectionSyncFile = false
     /// Serial queue for the periodic sync-file scan (validate + hash
     /// + read). The UI recommends putting the sync file in iCloud
@@ -429,258 +429,6 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         if systemAudioMutePhase == .idle {
             stopSystemAudioMuteWatchdog()
         }
-    }
-
-    // MARK: - Permission readiness
-
-    private func enterPermissionBlockedState(missing: [Permission]? = nil, reason: String) {
-        let missing = missing ?? missingPermissions()
-        guard !missing.isEmpty else {
-            completeReadinessIfPossible(reason: reason)
-            return
-        }
-
-        if isRecording || audio.isRunning {
-            recoverActiveRecordingToHistory(reason: "permission lost: \(reason)") { [weak self] _ in
-                self?.enterPermissionBlockedState(missing: missing, reason: reason)
-            }
-            return
-        }
-
-        cancelMaxDurationAutoRelease()
-        if audio.isEngineStarted {
-            stopAudioEngineImmediately()
-        }
-        stopRecordingLevelMeter()
-        unmuteIfWeMuted()
-
-        isReady = false
-        isRecording = false
-        isBusy = false
-        hotkey.onPress = nil
-        hotkey.onRelease = nil
-        hotkey.onReleaseAlternate = nil
-        hotkey.onCancel = nil
-        hotkey.onRejectedBusyPress = nil
-        hotkey.isRecordingActive = nil
-        hotkey.canStartRecording = nil
-        hotkey.resetToggleState()
-        hotkey.stop()
-
-        logPermissionReadinessWait(missing)
-        startPermissionReadinessMonitor(reason: reason)
-        setMenuBarState(.loading)
-        rebuildMenu()
-    }
-
-    func missingPermissions() -> [Permission] {
-        Permission.allCases.filter { !Permissions.isGranted($0) }
-    }
-
-    @discardableResult
-    private func logPermissionReadinessWait(_ missing: [Permission]) -> Bool {
-        let key = missing.map(\.rawValue).joined(separator: "|")
-        guard key != lastPermissionReadinessMissingKey else { return false }
-        lastPermissionReadinessMissingKey = key
-        log("readiness retry waiting for permissions: \(missing.map(\.rawValue).joined(separator: ", "))")
-        return true
-    }
-
-    /// Слежение за настройками хоткеев. Панель пишет их в UserDefaults,
-    /// агент подхватывает без перезапуска — «Сохранить и перезапустить»
-    /// пользователю больше не нужен.
-    private func startSettingsWatch() {
-        guard settingsWatchTimer == nil else { return }
-        settingsWatchTimer = Timer.scheduledTimer(timeInterval: 1.0,
-                                                  target: self,
-                                                  selector: #selector(settingsWatchTimerFired(_:)),
-                                                  userInfo: nil,
-                                                  repeats: true)
-        settingsWatchTimer?.tolerance = 0.3
-    }
-
-    @objc private func settingsWatchTimerFired(_ timer: Timer) {
-        // Отсчёт тишины для смены модели: пока идёт запись или распознавание,
-        // тишины нет. Отметки в начале и в конце диктовки одной не хватает —
-        // запись длиннее двух минут с перезапуском аудиовхода в конце
-        // оставила бы отметку на самом её начале.
-        if isRecording || isBusy {
-            lastDictationActivityUptime = ProcessInfo.processInfo.systemUptime
-        }
-        guard !isRecording, !isBusy, !isTerminating else { return }
-        _ = settings.refreshFromDisk()
-        applyHotkeySettings(force: false)
-        applyFloatingCapsuleSettings()
-        applyLiveSettings()
-        switchToUpdatedSpeechModelIfIdle()
-    }
-
-    /// Настройки, которые окно меняет, а служба обязана подхватить сама.
-    ///
-    /// Хоткеи и капсула умели это и раньше, а вот микрофон и словарь — нет:
-    /// человек выбирал в окне другой микрофон, окно молчало, и диктовка
-    /// продолжала писать со старого до перезапуска службы. Со словарём было
-    /// зеркально: запись, добавленная из окна, не попадала в файл
-    /// синхронизации, потому что писал его только тот, кто правил словарь в
-    /// самой службе.
-    ///
-    /// Сравнение с прошлым значением здесь не оптимизация, а условие
-    /// работоспособности: таймер тикает раз в секунду, а перезапуск аудиовхода
-    /// стоит дорого.
-    private func applyLiveSettings() {
-        let device = settings.inputDevice.trimmingCharacters(in: .whitespacesAndNewlines)
-        if shouldRestartAudioInput(previous: lastSeenInputDevice, current: device) {
-            log("input device changed in settings: restarting audio")
-            restartAudioForInputDeviceChange()
-        }
-        lastSeenInputDevice = device
-
-        // Сравнение самого списка: `TranscriptCorrection` равнимая, а разница в
-        // числе записей отсекается первой — раз в секунду это ничего не стоит.
-        let corrections = settings.transcriptCorrections
-
-        // Файл синхронизации подключает и отключает окно, а цикл
-        // синхронизации живёт здесь. Смена пути пересоздаёт цикл с чистым
-        // состоянием: отпечаток и базу старого файла нельзя скармливать
-        // слиянию с новым. Правка словаря, приехавшая вместе со сменой
-        // файла, в старый файл не пишется — источником истины окно уже
-        // сделало новый файл, форсированный скан его и прочитает.
-        let syncPath = settings.transcriptCorrectionsSyncFile
-        if let previousPath = lastSeenCorrectionSyncFilePath, previousPath != syncPath {
-            log("correction sync file changed outside the agent: reconnecting")
-            lastSeenCorrections = corrections
-            correctionSyncFileFingerprint = nil
-            correctionSyncBaselineCorrections = []
-            startCorrectionSyncIfConfigured()
-        }
-        lastSeenCorrectionSyncFilePath = syncPath
-
-        if let previous = lastSeenCorrections, previous != corrections {
-            log("corrections changed outside the agent: writing the sync file")
-            _ = writeCorrectionsToSyncFile(presentErrors: false)
-        }
-        lastSeenCorrections = corrections
-
-        // История: окно стирает её целиком или удаляет запись, а агент держал
-        // копию с момента старта — и на каждой диктовке записывал её поверх
-        // стёртого. «Действие необратимо» отменялось первой же диктовкой.
-        // Сравниваются сырые байты архива, декодирование — только при
-        // реальном внешнем изменении.
-        let historyData = settings.recentTranscriptEntriesStoredData
-        if historyData != lastSeenHistoryArchiveData {
-            lastSeenHistoryArchiveData = historyData
-            history = settings.recentTranscriptEntries
-            log("history changed outside the agent: reloaded (\(history.count) entries)")
-            rebuildMenu()
-        }
-
-        // Цикл проверки обновлений стартует один раз при готовности службы, и
-        // если тумблер в тот момент был выключен, включение обратно не
-        // поднимало его до перезапуска: тумблер «включено», «Приватность»
-        // обещает «1 раз в 6 ч», а служба в сеть не ходит. Вызов идемпотентен
-        // и дёшев — внутри два guard'а: по настройке и по уже живому циклу.
-        startUpdateCheckLoop()
-
-        // Значок в Dock: тумблер меняет окно, запуск и закрытие окна меняют
-        // pid-файл — и то и другое служба замечает здесь. Внутри guard по
-        // уже стоящей политике, так что тик обходится в чтение pid-файла.
-        refreshActivationPolicy()
-    }
-
-    // MARK: - Плавающая капсула (макет 6c)
-
-    /// Капсулу включают и выключают из настроек, как и хоткеи, — без
-    /// перезапуска службы.
-    func applyFloatingCapsuleSettings() {
-        guard settings.floatingCapsuleEnabled else {
-            if floatingCapsule.isVisible { floatingCapsule.close() }
-            return
-        }
-        floatingCapsule.delegate = self
-        floatingCapsule.applySize(settings.recordingHUDSize)
-        let title = capsuleHotkeyTitle()
-        if floatingCapsule.isVisible {
-            floatingCapsule.updateHotkey(title, language: settings.interfaceLanguage)
-        } else {
-            floatingCapsule.show(hotkeyTitle: title, language: settings.interfaceLanguage)
-        }
-    }
-
-    /// В покое капсула показывает ровно то, что человек нажимает.
-    private func capsuleHotkeyTitle() -> String {
-        keycapLabels(for: settings.configuredHotkey, language: settings.interfaceLanguage)
-            .joined(separator: " ")
-    }
-
-    private func hotkeySignature() -> String {
-        [settings.configuredHotkey.name,
-         settings.configuredEnterHotkey.name,
-         settings.alternateCompletionEnabled ? "1" : "0",
-         settings.triggerMode.rawValue].joined(separator: "|")
-    }
-
-    private func applyHotkeySettings(force: Bool) {
-        let signature = hotkeySignature()
-        guard force || signature != lastAppliedHotkeySignature else { return }
-        lastAppliedHotkeySignature = signature
-        hotkey.setHotkey(settings.configuredHotkey)
-        hotkey.setEnterHotkey(settings.configuredEnterHotkey)
-        hotkey.setAlternateCompletionEnabled(settings.alternateCompletionEnabled)
-        hotkey.setTriggerMode(settings.triggerMode)
-        if !force {
-            log("hotkeys reloaded without restart → \(settings.configuredHotkey.name)")
-            rebuildMenu()
-            publishAgentState()
-        }
-    }
-
-    func startPermissionReadinessMonitor(reason: String) {
-        guard permissionReadinessTimer == nil else { return }
-        log("permission readiness monitor started (\(reason))")
-        permissionReadinessTimer = Timer.scheduledTimer(timeInterval: 2,
-                                                        target: self,
-                                                        selector: #selector(permissionReadinessTimerFired(_:)),
-                                                        userInfo: nil,
-                                                        repeats: true)
-        permissionReadinessTimer?.tolerance = 0.5
-    }
-
-    private func stopPermissionReadinessMonitor() {
-        guard permissionReadinessTimer != nil else { return }
-        permissionReadinessTimer?.invalidate()
-        permissionReadinessTimer = nil
-        lastPermissionReadinessMissingKey = nil
-        log("permission readiness monitor stopped")
-    }
-
-    @objc private func permissionReadinessTimerFired(_ timer: Timer) {
-        guard isCoreRuntimeReady else {
-            let missing = missingPermissions()
-            guard !missing.isEmpty else {
-                permClickCount.removeAll()
-                stopPermissionReadinessMonitor()
-                rebuildMenu()
-                return
-            }
-            if logPermissionReadinessWait(missing) {
-                rebuildMenu()
-            }
-            return
-        }
-
-        if isReady {
-            let missing = missingPermissions()
-            guard !missing.isEmpty else {
-                permClickCount.removeAll()
-                stopPermissionReadinessMonitor()
-                rebuildMenu()
-                return
-            }
-            enterPermissionBlockedState(missing: missing, reason: "permission monitor")
-            return
-        }
-
-        completeReadinessIfPossible(reason: "permission monitor")
     }
 
     // MARK: - File imports
@@ -2019,7 +1767,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         }
     }
 
-    private func recoverActiveRecordingToHistory(reason: String,
+    func recoverActiveRecordingToHistory(reason: String,
                                                  runDeferredRefresh: Bool = true,
                                                  completion: ((DictationRecoveryOutcome) -> Void)? = nil) {
         guard isRecording || audio.isRunning else {
@@ -3423,7 +3171,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     /// приложения. Клик по значку открывает окно через
     /// `applicationShouldHandleReopen`, окно пишет свой pid, и следующий тик
     /// наблюдателя прячет значок службы.
-    private func refreshActivationPolicy() {
+    func refreshActivationPolicy() {
         let desired = dockActivationPolicy(
             showInDock: settings.showInDock,
             panelRunning: DictorControlPanelRegistry.isPanelRunning())
@@ -3489,7 +3237,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
         lastSeenCorrectionSyncFilePath = settings.transcriptCorrectionsSyncFile
     }
 
-    private func startCorrectionSyncIfConfigured() {
+    func startCorrectionSyncIfConfigured() {
         correctionSyncTimer?.invalidate()
         correctionSyncTimer = nil
         guard correctionSyncFileURL() != nil else {
@@ -3644,7 +3392,7 @@ final class DictorApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Update
     }
 
     @discardableResult
-    private func writeCorrectionsToSyncFile(presentErrors: Bool) -> Bool {
+    func writeCorrectionsToSyncFile(presentErrors: Bool) -> Bool {
         guard let url = correctionSyncFileURL() else { return true }
         do {
             try validateCorrectionSyncPath(url)
